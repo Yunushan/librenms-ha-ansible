@@ -1,10 +1,10 @@
 ---
-- name: restart haproxy
+- name: Restart HAProxy
   service:
     name: "{{ librenms_haproxy_service_name }}"
     state: restarted
 
-- name: restart keepalived
+- name: Restart Keepalived
   service:
     name: "{{ librenms_keepalived_service_name }}"
     state: restarted

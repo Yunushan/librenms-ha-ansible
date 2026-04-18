@@ -28,7 +28,7 @@
     owner: root
     group: root
     mode: "0644"
-  notify: restart redis
+  notify: Restart Redis
   when: librenms_redis_mode in ['local', 'sentinel']
 
 - name: Enable and start Redis server
@@ -45,7 +45,7 @@
     owner: root
     group: root
     mode: "0640"
-  notify: restart redis sentinel
+  notify: Restart Redis Sentinel
   when: librenms_redis_mode == 'sentinel'
 
 - name: Deploy systemd unit for Redis Sentinel

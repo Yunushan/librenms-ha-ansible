@@ -1,10 +1,10 @@
 ---
-- name: restart php-fpm
+- name: Restart PHP-FPM
   service:
     name: "{{ librenms_php_fpm_service_effective }}"
     state: restarted
 
-- name: restart nginx
+- name: Restart nginx
   service:
     name: "{{ librenms_nginx_service_name }}"
     state: restarted

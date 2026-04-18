@@ -14,7 +14,7 @@
     owner: root
     group: root
     mode: "0644"
-  notify: restart snmpd
+  notify: Restart snmpd
 
 - name: Check candidate SNMP persistent config files
   stat:
@@ -62,7 +62,7 @@
     - item.priv_password is defined
     - (librenms_snmp_v3_users | length) > 0
   loop: "{{ librenms_snmp_v3_users }}"
-  notify: restart snmpd
+  notify: Restart snmpd
 
 - name: Download LibreNMS distro helper script
   get_url:

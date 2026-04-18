@@ -1,5 +1,5 @@
 ---
-- name: restart mariadb
+- name: Restart MariaDB
   service:
     name: "{{ librenms_mariadb_service_name }}"
     state: restarted

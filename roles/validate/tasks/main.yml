@@ -6,6 +6,7 @@
       - validate.php
   args:
     chdir: "{{ librenms_install_dir }}"
+  become: true
   become_user: "{{ librenms_user }}"
   register: librenms_validate_result
   changed_when: false

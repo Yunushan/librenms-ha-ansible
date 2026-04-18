@@ -167,6 +167,7 @@
       - --no-dev
   args:
     chdir: "{{ librenms_install_dir }}"
+  become: true
   become_user: "{{ librenms_user }}"
   register: librenms_composer
   changed_when: "'Nothing to install' not in (librenms_composer.stdout | default(''))"
@@ -189,7 +190,7 @@
     group: root
     mode: "0644"
   when: librenms_manage_php_fpm | bool
-  notify: restart php-fpm
+  notify: Restart PHP-FPM
 
 - name: Remove default PHP-FPM pool on Debian-family systems when present
   file:
@@ -207,7 +208,7 @@
     group: root
     mode: "0644"
   when: librenms_manage_nginx | bool
-  notify: restart nginx
+  notify: Restart nginx
 
 - name: Remove default nginx site on Debian-family systems
   file:
@@ -319,6 +320,7 @@
       - "{{ librenms_install_dir }}/lnms"
       - config:get
       - snmp.community
+  become: true
   become_user: "{{ librenms_user }}"
   register: librenms_snmp_community_current
   changed_when: false
@@ -333,6 +335,7 @@
       - "{{ librenms_install_dir }}/lnms"
       - config:get
       - snmp.v3
+  become: true
   become_user: "{{ librenms_user }}"
   register: librenms_snmp_v3_current
   changed_when: false
@@ -348,6 +351,7 @@
       - config:set
       - snmp.version
       - "{{ librenms_snmp_version_order | to_json }}"
+  become: true
   become_user: "{{ librenms_user }}"
   changed_when: true
   when:
@@ -361,6 +365,7 @@
       - config:set
       - snmp.community.+
       - "{{ item }}"
+  become: true
   become_user: "{{ librenms_user }}"
   when:
     - librenms_apply_post_bootstrap_config | bool
@@ -375,6 +380,7 @@
       - config:set
       - snmp.v3.+
       - "{{ item | to_json }}"
+  become: true
   become_user: "{{ librenms_user }}"
   no_log: true
   when:
@@ -390,6 +396,7 @@
       - config:set
       - distributed_poller
       - "true"
+  become: true
   become_user: "{{ librenms_user }}"
   when:
     - librenms_apply_post_bootstrap_config | bool
@@ -414,6 +421,7 @@
       value: "dispatcher"
     - key: "schedule_type.billing"
       value: "dispatcher"
+  become: true
   become_user: "{{ librenms_user }}"
   when:
     - librenms_apply_post_bootstrap_config | bool

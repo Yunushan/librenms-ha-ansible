@@ -11,7 +11,7 @@
     owner: root
     group: root
     mode: "0644"
-  notify: restart haproxy
+  notify: Restart HAProxy
 
 - name: Ensure HAProxy service is enabled and started
   service:
@@ -27,7 +27,7 @@
     group: root
     mode: "0640"
   when: librenms_vip_enabled | bool
-  notify: restart keepalived
+  notify: Restart Keepalived
 
 - name: Ensure Keepalived service is enabled and started when VIP is enabled
   service:
