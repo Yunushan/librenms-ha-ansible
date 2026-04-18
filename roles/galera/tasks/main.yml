@@ -20,7 +20,31 @@
   register: librenms_galera_marker
   when: librenms_db_mode == 'galera'
 
-- name: Stop MariaDB before first bootstrap on the bootstrap host
+- name: Probe Galera nodes for an existing live MariaDB listener
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: "{{ librenms_db_port }}"
+    timeout: 2
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_galera_reachability
+  failed_when: false
+  changed_when: false
+  when: librenms_db_mode == 'galera'
+
+- name: Determine whether Galera bootstrap is required
+  set_fact:
+    librenms_galera_cluster_has_live_member: >-
+      {{
+        (
+          librenms_galera_reachability.results
+          | selectattr('state', 'defined')
+          | list
+          | length
+        ) > 0
+      }}
+  when: librenms_db_mode == 'galera'
+
+- name: Stop MariaDB before Galera bootstrap on the bootstrap host
   service:
     name: "{{ librenms_mariadb_service_name }}"
     state: stopped
@@ -28,7 +52,7 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == librenms_db_bootstrap_host
-    - not librenms_galera_marker.stat.exists
+    - not librenms_galera_cluster_has_live_member | bool
 
 - name: Bootstrap Galera cluster on the bootstrap host
   command:
@@ -37,7 +61,7 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == librenms_db_bootstrap_host
-    - not librenms_galera_marker.stat.exists
+    - not librenms_galera_cluster_has_live_member | bool
 
 - name: Write Galera bootstrap marker
   file:
@@ -49,7 +73,7 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == librenms_db_bootstrap_host
-    - not librenms_galera_marker.stat.exists
+    - not librenms_galera_cluster_has_live_member | bool
 
 - name: Wait for the Galera bootstrap host to accept connections
   wait_for:
@@ -65,7 +89,9 @@
     name: "{{ librenms_mariadb_service_name }}"
     state: started
     enabled: true
-  when: librenms_db_mode == 'galera'
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname != librenms_db_bootstrap_host or librenms_galera_cluster_has_live_member | bool
 
 - name: Wait for local MariaDB socket on Galera nodes
   wait_for:
