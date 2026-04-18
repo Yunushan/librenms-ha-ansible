@@ -60,13 +60,22 @@
       - gluster
       - peer
       - status
-      - "{{ hostvars[item].ansible_host | default(item) }}"
   register: gluster_peer_status
   changed_when: false
   failed_when: false
   until:
     - gluster_peer_status.rc == 0
-    - "'Peer in Cluster' in (gluster_peer_status.stdout | default(''))"
+    - >-
+      (
+        gluster_peer_status.stdout | default('')
+        | regex_search(
+            'Hostname:\\s+' ~
+            (
+              hostvars[item].ansible_host | default(item) | regex_escape()
+            ) ~
+            '[\\s\\S]*?State:\\s+Peer in Cluster'
+          )
+      ) is not none
   retries: 20
   delay: 3
   loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
