@@ -54,6 +54,26 @@
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
 
+- name: Wait for Gluster peers to reach cluster state from bootstrap host
+  command:
+    argv:
+      - gluster
+      - peer
+      - status
+      - "{{ hostvars[item].ansible_host | default(item) }}"
+  register: gluster_peer_status
+  changed_when: false
+  failed_when: false
+  until:
+    - gluster_peer_status.rc == 0
+    - "'Peer in Cluster' in (gluster_peer_status.stdout | default(''))"
+  retries: 20
+  delay: 3
+  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
 - name: Check Gluster volume state
   command:
     argv:
