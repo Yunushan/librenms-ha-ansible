@@ -9,6 +9,19 @@
   service_facts:
   when: librenms_rrd_mode == 'glusterfs'
 
+- name: Detect UFW availability on Debian Gluster nodes
+  command:
+    argv:
+      - ufw
+      - status
+  register: gluster_ufw_status
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_manage_firewall | bool
+    - ansible_os_family == 'Debian'
+
 - name: Ensure Gluster peer name resolution entries exist
   blockinfile:
     path: /etc/hosts
@@ -135,7 +148,7 @@
           listening sockets:
           {{ glusterd_sockets.stdout | default('') }}
 
-- name: Allow Gluster TCP ports with UFW when active
+- name: Allow Gluster TCP ports with UFW when available
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
@@ -149,8 +162,8 @@
     - librenms_rrd_mode == 'glusterfs'
     - librenms_gluster_manage_firewall | bool
     - ansible_os_family == 'Debian'
-    - "'ufw.service' in ansible_facts.services"
-    - ansible_facts.services['ufw.service'].state == 'running'
+    - gluster_ufw_status is defined
+    - gluster_ufw_status.rc == 0
 
 - name: Allow Gluster TCP ports with firewalld when active
   ansible.posix.firewalld:
@@ -170,16 +183,91 @@
     - "'firewalld.service' in ansible_facts.services"
     - ansible_facts.services['firewalld.service'].state == 'running'
 
-- name: Wait for Gluster management port on peer nodes from bootstrap host
-  wait_for:
-    host: "{{ hostvars[item].ansible_host | default(item) }}"
-    port: 24007
-    state: started
-    timeout: 60
-  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+- name: Verify Gluster management port is reachable from bootstrap host
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
+  block:
+    - name: Wait for Gluster management port on peer nodes from bootstrap host
+      wait_for:
+        host: "{{ hostvars[item].ansible_host | default(item) }}"
+        port: 24007
+        state: started
+        timeout: 60
+      loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+  rescue:
+    - name: Capture Gluster peer service status for diagnostics
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_glusterd_service_name }}"
+          - --no-pager
+      register: gluster_peer_service_status
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ ansible_failed_result.item }}"
+
+    - name: Capture Gluster peer journal for diagnostics
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_glusterd_service_name }}"
+          - -n
+          - "50"
+          - --no-pager
+      register: gluster_peer_service_journal
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ ansible_failed_result.item }}"
+
+    - name: Capture Gluster peer listening sockets for diagnostics
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: gluster_peer_sockets
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ ansible_failed_result.item }}"
+
+    - name: Capture UFW status on failing Gluster peer
+      command:
+        argv:
+          - ufw
+          - status
+          - verbose
+      register: gluster_peer_ufw_status
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ ansible_failed_result.item }}"
+      when: ansible_os_family == 'Debian'
+
+    - name: Fail with Gluster peer reachability diagnostics
+      fail:
+        msg: |-
+          Bootstrap host {{ inventory_hostname }} could not reach tcp/24007 on
+          {{
+            hostvars[ansible_failed_result.item].ansible_host
+            | default(ansible_failed_result.item)
+          }}
+          ({{ ansible_failed_result.item }}).
+
+          wait_for result:
+          {{ ansible_failed_result | to_nice_yaml(indent=2) }}
+
+          peer systemctl status:
+          {{ gluster_peer_service_status.stdout | default('') }}
+
+          peer journalctl:
+          {{ gluster_peer_service_journal.stdout | default('') }}
+
+          peer listening sockets:
+          {{ gluster_peer_sockets.stdout | default('') }}
+
+          peer ufw status:
+          {{ gluster_peer_ufw_status.stdout | default('ufw not available') }}
 
 - name: Prepare Gluster brick filesystem when explicitly allowed
   filesystem:
