@@ -1,37 +1,44 @@
 ---
-- name: Restart Redis
-  block:
-    - name: Restart Redis service
-      service:
-        name: "{{ librenms_redis_service_name }}"
-        state: restarted
-  rescue:
-    - name: Capture Redis service status
-      command: "systemctl status {{ librenms_redis_service_name }} --no-pager -l"
-      register: redis_service_status
-      changed_when: false
-      failed_when: false
+- name: Restart Redis service
+  service:
+    name: "{{ librenms_redis_service_name }}"
+    state: restarted
+  register: redis_restart_result
+  failed_when: false
+  listen: Restart Redis
 
-    - name: Capture Redis service journal
-      command: "journalctl -u {{ librenms_redis_service_name }} -n 50 --no-pager"
-      register: redis_service_journal
-      changed_when: false
-      failed_when: false
+- name: Capture Redis service status
+  command: "systemctl status {{ librenms_redis_service_name }} --no-pager -l"
+  register: redis_service_status
+  changed_when: false
+  failed_when: false
+  when: redis_restart_result is failed
+  listen: Restart Redis
 
-    - name: Fail with Redis service diagnostics
-      fail:
-        msg: |-
-          Failed to restart {{ librenms_redis_service_name }}.
+- name: Capture Redis service journal
+  command: "journalctl -u {{ librenms_redis_service_name }} -n 50 --no-pager"
+  register: redis_service_journal
+  changed_when: false
+  failed_when: false
+  when: redis_restart_result is failed
+  listen: Restart Redis
 
-          systemctl status:
-          {{ redis_service_status.stdout | default('') }}
-          {{ redis_service_status.stderr | default('') }}
+- name: Fail with Redis service diagnostics
+  fail:
+    msg: |-
+      Failed to restart {{ librenms_redis_service_name }}.
 
-          journalctl:
-          {{ redis_service_journal.stdout | default('') }}
-          {{ redis_service_journal.stderr | default('') }}
+      systemctl status:
+      {{ redis_service_status.stdout | default('') }}
+      {{ redis_service_status.stderr | default('') }}
 
-- name: Restart Redis Sentinel
+      journalctl:
+      {{ redis_service_journal.stdout | default('') }}
+      {{ redis_service_journal.stderr | default('') }}
+  when: redis_restart_result is failed
+  listen: Restart Redis
+
+- name: Restart Redis Sentinel service
   vars:
     redis_sentinel_service_name: >-
       {{
@@ -39,34 +46,68 @@
         if ansible_service_mgr == 'systemd' and ansible_os_family != 'Debian'
         else librenms_redis_sentinel_native_service_name
       }}
+  service:
+    name: "{{ redis_sentinel_service_name }}"
+    state: restarted
+  register: redis_sentinel_restart_result
+  failed_when: false
   when: librenms_redis_mode == 'sentinel'
-  block:
-    - name: Restart Redis Sentinel service
-      service:
-        name: "{{ redis_sentinel_service_name }}"
-        state: restarted
-  rescue:
-    - name: Capture Redis Sentinel service status
-      command: "systemctl status {{ redis_sentinel_service_name }} --no-pager -l"
-      register: redis_sentinel_service_status
-      changed_when: false
-      failed_when: false
+  listen: Restart Redis Sentinel
 
-    - name: Capture Redis Sentinel service journal
-      command: "journalctl -u {{ redis_sentinel_service_name }} -n 50 --no-pager"
-      register: redis_sentinel_service_journal
-      changed_when: false
-      failed_when: false
+- name: Capture Redis Sentinel service status
+  vars:
+    redis_sentinel_service_name: >-
+      {{
+        'librenms-redis-sentinel'
+        if ansible_service_mgr == 'systemd' and ansible_os_family != 'Debian'
+        else librenms_redis_sentinel_native_service_name
+      }}
+  command: "systemctl status {{ redis_sentinel_service_name }} --no-pager -l"
+  register: redis_sentinel_service_status
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - redis_sentinel_restart_result is failed
+  listen: Restart Redis Sentinel
 
-    - name: Fail with Redis Sentinel service diagnostics
-      fail:
-        msg: |-
-          Failed to restart {{ redis_sentinel_service_name }}.
+- name: Capture Redis Sentinel service journal
+  vars:
+    redis_sentinel_service_name: >-
+      {{
+        'librenms-redis-sentinel'
+        if ansible_service_mgr == 'systemd' and ansible_os_family != 'Debian'
+        else librenms_redis_sentinel_native_service_name
+      }}
+  command: "journalctl -u {{ redis_sentinel_service_name }} -n 50 --no-pager"
+  register: redis_sentinel_service_journal
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - redis_sentinel_restart_result is failed
+  listen: Restart Redis Sentinel
 
-          systemctl status:
-          {{ redis_sentinel_service_status.stdout | default('') }}
-          {{ redis_sentinel_service_status.stderr | default('') }}
+- name: Fail with Redis Sentinel service diagnostics
+  vars:
+    redis_sentinel_service_name: >-
+      {{
+        'librenms-redis-sentinel'
+        if ansible_service_mgr == 'systemd' and ansible_os_family != 'Debian'
+        else librenms_redis_sentinel_native_service_name
+      }}
+  fail:
+    msg: |-
+      Failed to restart {{ redis_sentinel_service_name }}.
 
-          journalctl:
-          {{ redis_sentinel_service_journal.stdout | default('') }}
-          {{ redis_sentinel_service_journal.stderr | default('') }}
+      systemctl status:
+      {{ redis_sentinel_service_status.stdout | default('') }}
+      {{ redis_sentinel_service_status.stderr | default('') }}
+
+      journalctl:
+      {{ redis_sentinel_service_journal.stdout | default('') }}
+      {{ redis_sentinel_service_journal.stderr | default('') }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - redis_sentinel_restart_result is failed
+  listen: Restart Redis Sentinel
