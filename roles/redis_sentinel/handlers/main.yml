@@ -6,6 +6,11 @@
 
 - name: Restart Redis Sentinel
   service:
-    name: "{{ 'librenms-redis-sentinel' if ansible_service_mgr == 'systemd' else librenms_redis_sentinel_native_service_name }}"
+    name: >-
+      {{
+        'librenms-redis-sentinel'
+        if ansible_service_mgr == 'systemd' and ansible_os_family != 'Debian'
+        else librenms_redis_sentinel_native_service_name
+      }}
     state: restarted
   when: librenms_redis_mode == 'sentinel'
