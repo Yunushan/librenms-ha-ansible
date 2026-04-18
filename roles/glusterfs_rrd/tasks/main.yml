@@ -13,6 +13,7 @@
   when: librenms_rrd_mode == 'glusterfs'
 
 - name: Verify Gluster management port is listening locally
+  when: librenms_rrd_mode == 'glusterfs'
   block:
     - name: Wait for Gluster management port locally
       wait_for:
@@ -67,7 +68,6 @@
 
           listening sockets:
           {{ glusterd_sockets.stdout | default('') }}
-  when: librenms_rrd_mode == 'glusterfs'
 
 - name: Prepare Gluster brick filesystem when explicitly allowed
   filesystem:
