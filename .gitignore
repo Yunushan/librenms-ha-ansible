@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 
 # Ansible
+.ansible/
 *.retry
 .vault_pass*
 vault.yml

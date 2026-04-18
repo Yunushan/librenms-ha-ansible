@@ -1,6 +1,7 @@
 ---
 profile: basic
 exclude_paths:
+  - .ansible/
   - .github/
   - docs/
 skip_list:
