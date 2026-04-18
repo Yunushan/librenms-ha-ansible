@@ -39,6 +39,17 @@
     mode: "0755"
   when: librenms_rrd_mode == 'glusterfs'
 
+- name: Wait for Gluster management port on peer nodes from bootstrap host
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: 24007
+    state: started
+    timeout: 60
+  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
 - name: Probe Gluster peers from bootstrap host
   command:
     argv:
@@ -54,6 +65,25 @@
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
 
+- name: Fail on unexpected Gluster peer probe errors from bootstrap host
+  fail:
+    msg: |-
+      Gluster peer probe failed for {{ item.item }}.
+
+      rc: {{ item.rc }}
+      stdout: {{ item.stdout | default('') }}
+      stderr: {{ item.stderr | default('') }}
+  loop: "{{ gluster_peer_probe.results | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - >-
+      item.rc != 0 or (
+        'peer probe: success' not in (item.stdout | default('') | lower) and
+        'already in peer list' not in (item.stdout | default('') | lower) and
+        'already in peer list' not in (item.stderr | default('') | lower)
+      )
+
 - name: Wait for Gluster peers to reach cluster state from bootstrap host
   command:
     argv:
@@ -68,10 +98,13 @@
       (
         gluster_peer_status.stdout | default('')
         | regex_search(
-            'Hostname:\\s+' ~
+            'Hostname:\\s+(' ~
             (
               hostvars[item].ansible_host | default(item) | regex_escape()
             ) ~
+            '|' ~
+            (item | regex_escape()) ~
+            ')' ~
             '[\\s\\S]*?State:\\s+Peer in Cluster \\(Connected\\)'
           )
       ) is not none
