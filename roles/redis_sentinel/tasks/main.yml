@@ -21,7 +21,43 @@
     group: root
     mode: "0755"
 
-- name: Deploy Redis server config
+- name: Ensure Redis data directory exists on Debian-family systems
+  file:
+    path: /var/lib/redis
+    state: directory
+    owner: redis
+    group: redis
+    mode: "0750"
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_os_family == 'Debian'
+
+- name: Manage Redis server config on Debian-family systems
+  blockinfile:
+    path: "{{ librenms_redis_conf_path }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK librenms-ha-ansible"
+    block: |
+      daemonize no
+      supervised systemd
+      logfile ""
+      pidfile /run/redis/redis-server.pid
+      bind 127.0.0.1{% if librenms_redis_mode == 'sentinel' %} {{ ansible_host | default(inventory_hostname) }}{% endif %}
+      protected-mode yes
+      port 6379
+      dir /var/lib/redis
+      dbfilename dump.rdb
+      appendonly yes
+      requirepass {{ librenms_redis_password | to_json }}
+      masterauth {{ librenms_redis_password | to_json }}
+      {% if librenms_redis_mode == 'sentinel' and inventory_hostname != librenms_redis_master_host %}
+      replicaof {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }} 6379
+      {% endif %}
+  notify: Restart Redis
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_os_family == 'Debian'
+
+- name: Deploy Redis server config on non-Debian systems
   template:
     src: redis.conf.j2
     dest: "{{ librenms_redis_conf_path }}"
@@ -29,7 +65,7 @@
     group: root
     mode: "0644"
   notify: Restart Redis
-  when: librenms_redis_mode in ['local', 'sentinel']
+  when: ansible_os_family != 'Debian' and librenms_redis_mode in ['local', 'sentinel']
 
 - name: Enable and start Redis server
   service:
@@ -38,7 +74,30 @@
     enabled: true
   when: librenms_redis_mode in ['local', 'sentinel']
 
-- name: Deploy Redis Sentinel config
+- name: Manage Redis Sentinel config on Debian-family systems
+  blockinfile:
+    path: "{{ librenms_redis_sentinel_conf_path }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK librenms-ha-ansible"
+    block: |
+      daemonize no
+      supervised systemd
+      logfile ""
+      port 26379
+      bind 127.0.0.1 {{ ansible_host | default(inventory_hostname) }}
+      protected-mode yes
+      dir /var/lib/redis
+      sentinel monitor {{ librenms_redis_sentinel_service }} {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }} 6379 {{ librenms_redis_quorum }}
+      sentinel auth-pass {{ librenms_redis_sentinel_service }} {{ librenms_redis_password | to_json }}
+      sentinel down-after-milliseconds {{ librenms_redis_sentinel_service }} 10000
+      sentinel failover-timeout {{ librenms_redis_sentinel_service }} 60000
+      sentinel parallel-syncs {{ librenms_redis_sentinel_service }} 1
+      requirepass {{ librenms_redis_sentinel_password | to_json }}
+  notify: Restart Redis Sentinel
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_os_family == 'Debian'
+
+- name: Deploy Redis Sentinel config on non-Debian systems
   template:
     src: sentinel.conf.j2
     dest: "{{ librenms_redis_sentinel_conf_path }}"
@@ -46,7 +105,9 @@
     group: root
     mode: "0640"
   notify: Restart Redis Sentinel
-  when: librenms_redis_mode == 'sentinel'
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_os_family != 'Debian'
 
 - name: Deploy systemd unit for Redis Sentinel
   template:
