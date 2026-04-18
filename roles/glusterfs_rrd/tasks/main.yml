@@ -72,7 +72,12 @@
   block:
     - name: Wait for Gluster management port locally
       wait_for:
-        host: 127.0.0.1
+        host: >-
+          {{
+            librenms_gluster_bind_address
+            if librenms_gluster_bind_address | length > 0
+            else (ansible_host | default(ansible_default_ipv4.address | default('127.0.0.1')))
+          }}
         port: 24007
         state: started
         timeout: 60
@@ -113,7 +118,13 @@
     - name: Fail with Gluster startup diagnostics
       fail:
         msg: |-
-          Gluster service {{ librenms_glusterd_service_name }} did not open tcp/24007 on {{ inventory_hostname }}.
+          Gluster service {{ librenms_glusterd_service_name }} did not open tcp/24007 on
+          {{
+            librenms_gluster_bind_address
+            if librenms_gluster_bind_address | length > 0
+            else (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)))
+          }}
+          for {{ inventory_hostname }}.
 
           systemctl status:
           {{ glusterd_status.stdout | default('') }}
@@ -164,7 +175,7 @@
     host: "{{ hostvars[item].ansible_host | default(item) }}"
     port: 24007
     state: started
-    timeout: 30
+    timeout: 60
   loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
   when:
     - librenms_rrd_mode == 'glusterfs'
@@ -207,6 +218,13 @@
   register: gluster_peer_probe
   failed_when: false
   changed_when: "'peer probe: success' in (gluster_peer_probe.stdout | lower)"
+  until: >-
+    gluster_peer_probe.rc == 0 or
+    'peer probe: success' in (gluster_peer_probe.stdout | default('') | lower) or
+    'already in peer list' in (gluster_peer_probe.stdout | default('') | lower) or
+    'already in peer list' in (gluster_peer_probe.stderr | default('') | lower)
+  retries: 10
+  delay: 6
   loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
   when:
     - librenms_rrd_mode == 'glusterfs'
