@@ -404,11 +404,16 @@
       - "{{ item.key }}"
       - "{{ item.value }}"
   loop:
-    - { key: "schedule_type.poller", value: "dispatcher" }
-    - { key: "schedule_type.discovery", value: "dispatcher" }
-    - { key: "schedule_type.services", value: "dispatcher" }
-    - { key: "schedule_type.alerting", value: "dispatcher" }
-    - { key: "schedule_type.billing", value: "dispatcher" }
+    - key: "schedule_type.poller"
+      value: "dispatcher"
+    - key: "schedule_type.discovery"
+      value: "dispatcher"
+    - key: "schedule_type.services"
+      value: "dispatcher"
+    - key: "schedule_type.alerting"
+      value: "dispatcher"
+    - key: "schedule_type.billing"
+      value: "dispatcher"
   become_user: "{{ librenms_user }}"
   when:
     - librenms_apply_post_bootstrap_config | bool
