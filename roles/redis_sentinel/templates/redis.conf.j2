@@ -1,5 +1,5 @@
 {% set redis_node_address = ansible_default_ipv4.address | default(ansible_host | default(inventory_hostname)) %}
-bind 127.0.0.1{% if librenms_redis_mode == 'sentinel' %} {{ redis_node_address }}{% endif %}
+bind {{ '127.0.0.1 ' ~ redis_node_address if librenms_redis_mode == 'sentinel' else '127.0.0.1' }}
 protected-mode yes
 port 6379
 {% if ansible_service_mgr == 'systemd' %}
