@@ -1,0 +1,6 @@
+profile: basic
+exclude_paths:
+  - .github/
+  - docs/
+skip_list:
+  - yaml[line-length]
