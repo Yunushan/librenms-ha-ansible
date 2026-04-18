@@ -1,0 +1,52 @@
+services:
+  librenms:
+    image: ${LIBRENMS_IMAGE:-librenms/librenms:latest}
+    container_name: librenms-web
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_TIMEOUT: ${DB_TIMEOUT:-60}
+      REDIS_SENTINEL: ${REDIS_SENTINEL}
+      REDIS_SENTINEL_SERVICE: ${REDIS_SENTINEL_SERVICE}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_CACHE_DB: ${REDIS_CACHE_DB:-1}
+      LIBRENMS_BASE_URL: ${LIBRENMS_BASE_URL:-/}
+      REAPPLY_YAML_CONFIG: ${REAPPLY_YAML_CONFIG:-0}
+    volumes:
+      - ${LIBRENMS_SHARED_DATA_DIR}:/data
+
+  dispatcher:
+    image: ${LIBRENMS_IMAGE:-librenms/librenms:latest}
+    container_name: librenms-dispatcher
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_SENTINEL: ${REDIS_SENTINEL}
+      REDIS_SENTINEL_SERVICE: ${REDIS_SENTINEL_SERVICE}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_CACHE_DB: ${REDIS_CACHE_DB:-1}
+      SIDECAR_DISPATCHER: "1"
+      DISPATCHER_NODE_ID: ${DISPATCHER_NODE_ID}
+      DISPATCHER_ARGS: ${DISPATCHER_ARGS:-}
+    volumes:
+      - ${LIBRENMS_SHARED_DATA_DIR}:/data

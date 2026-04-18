@@ -1,0 +1,21 @@
+services:
+  mariadb-galera:
+    image: ${MARIADB_GALERA_IMAGE:-wodby/mariadb:galera}
+    container_name: mariadb-galera
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      WSREP_ON: "ON"
+      WSREP_CLUSTER_NAME: ${WSREP_CLUSTER_NAME}
+      WSREP_CLUSTER_ADDRESS: ${WSREP_CLUSTER_ADDRESS}
+      WSREP_NODE_NAME: ${WSREP_NODE_NAME}
+      WSREP_NODE_ADDRESS: ${WSREP_NODE_ADDRESS}
+    volumes:
+      - ./data:/var/lib/mysql

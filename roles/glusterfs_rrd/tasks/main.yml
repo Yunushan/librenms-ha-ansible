@@ -62,7 +62,6 @@
       - status
   register: gluster_peer_status
   changed_when: false
-  failed_when: false
   until:
     - gluster_peer_status.rc == 0
     - >-

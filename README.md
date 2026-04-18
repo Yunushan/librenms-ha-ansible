@@ -45,6 +45,7 @@ This repository gives you one Ansible project that can deploy:
    - Redis Sentinel
    - HAProxy + Keepalived
    - GlusterFS-backed RRD storage
+4. **Experimental Dockerized HA bundle** for operators who want containerized LibreNMS, Galera, Redis Sentinel, and HAProxy examples
 
 ---
 
@@ -57,6 +58,7 @@ This repository gives you one Ansible project that can deploy:
 - optional VIP and load-balancer layer
 - optional local SNMP agent management
 - support for SNMP **v1**, **v2c**, and **v3**
+- optional experimental Dockerized HA example bundle for operators who prefer containerized service layers
 - workflows for **adding** and **removing** LibreNMS nodes
 - GitHub-ready repo structure with:
   - MIT license
@@ -126,6 +128,7 @@ Upstream LibreNMS documentation currently provides package/install examples for 
 See also:
 - [docs/support-matrix.md](docs/support-matrix.md)
 - [docs/architecture.md](docs/architecture.md)
+- [examples/docker-ha/README.md](examples/docker-ha/README.md)
 
 ---
 
@@ -134,7 +137,13 @@ See also:
 ```text
 .
 ├── .github/workflows/lint.yml
+├── Dockerfile
+├── compose.yaml
 ├── docs/
+│   ├── architecture.md
+│   └── docker.md
+├── examples/
+│   └── docker-ha/
 ├── inventories/
 │   ├── ha/
 │   └── standalone/
@@ -173,6 +182,35 @@ git clone https://github.com/Yunushan/librenms-ha-ansible.git
 cd librenms-ha-ansible
 ansible-galaxy collection install -r requirements.yml
 ```
+
+### Optional: use a Docker-based controller
+
+If you do not want to install Ansible tooling directly on the controller host, this repo also includes a containerized controller workflow.
+
+Build the image:
+
+```bash
+docker compose build ansible
+```
+
+Run lint inside Docker:
+
+```bash
+docker compose run --rm ansible make lint
+```
+
+Run the HA playbook inside Docker with your SSH keys mounted:
+
+```bash
+docker compose run --rm \
+  -v "$HOME/.ssh:/root/.ssh:ro" \
+  ansible \
+  ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
+```
+
+See also:
+- [docs/docker.md](docs/docker.md)
+- [examples/docker-ha/README.md](examples/docker-ha/README.md)
 
 ### 2) Generate secrets
 
@@ -514,6 +552,13 @@ pip install ansible-core ansible-lint yamllint
 ansible-galaxy collection install -r requirements.yml
 yamllint .
 ansible-lint
+```
+
+Lint with Docker instead:
+
+```bash
+docker compose build ansible
+docker compose run --rm ansible make lint
 ```
 
 ---

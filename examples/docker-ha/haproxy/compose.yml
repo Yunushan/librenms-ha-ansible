@@ -1,0 +1,8 @@
+services:
+  haproxy:
+    image: ${HAPROXY_IMAGE:-haproxy:lts}
+    container_name: librenms-haproxy
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro

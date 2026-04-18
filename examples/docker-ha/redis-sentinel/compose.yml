@@ -1,0 +1,42 @@
+services:
+  redis:
+    image: ${REDIS_IMAGE:-redis:7}
+    container_name: redis-server
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server \
+        --bind 0.0.0.0 \
+        --port ${REDIS_PORT:-6379} \
+        --appendonly yes \
+        --requirepass "${REDIS_PASSWORD}" \
+        --masterauth "${REDIS_PASSWORD}" \
+        ${REDIS_REPLICATION_ARGS}
+    volumes:
+      - ./data/redis:/data
+
+  sentinel:
+    image: ${REDIS_IMAGE:-redis:7}
+    container_name: redis-sentinel
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /etc/redis &&
+        cat >/etc/redis/sentinel.conf <<EOF
+        bind 0.0.0.0
+        port ${REDIS_SENTINEL_PORT:-26379}
+        sentinel monitor ${REDIS_MASTER_SET:-mymaster} ${REDIS_MASTER_HOST} ${REDIS_PORT:-6379} ${REDIS_SENTINEL_QUORUM:-2}
+        sentinel auth-pass ${REDIS_MASTER_SET:-mymaster} ${REDIS_PASSWORD}
+        requirepass ${REDIS_SENTINEL_PASSWORD}
+        sentinel resolve-hostnames yes
+        sentinel announce-hostnames yes
+        EOF
+        exec redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./data/sentinel:/data

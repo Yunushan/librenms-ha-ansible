@@ -1,0 +1,17 @@
+services:
+  ansible:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: librenms-ha-ansible-controller:local
+    working_dir: /workspace
+    environment:
+      ANSIBLE_CONFIG: /workspace/ansible.cfg
+    volumes:
+      - .:/workspace
+      - ansible-tmp:/root/.ansible/tmp
+    stdin_open: true
+    tty: true
+
+volumes:
+  ansible-tmp:

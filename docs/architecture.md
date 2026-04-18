@@ -2,11 +2,12 @@
 
 ## Design goals
 
-This repository supports three practical patterns:
+This repository supports four practical patterns:
 
 1. **Standalone**
 2. **Clustered app nodes with external shared services**
 3. **Full HA**
+4. **Experimental Dockerized HA**
 
 ## Full HA reference topology
 
@@ -56,6 +57,7 @@ This repository supports three practical patterns:
 - gluster split-brain recovery
 - destructive brick removal
 - topology changes on best-effort distros without lab verification
+- full Dockerized HA lifecycle beyond the provided example bundle
 
 ## Full HA expectations
 
@@ -80,3 +82,15 @@ Supported as a planned change, but test carefully.
 
 ### Gluster node
 Not treated as a casual operation. Rebalance and brick removal remain operator-reviewed.
+
+## Experimental Dockerized HA
+
+The repository also includes an optional experimental Dockerized HA example bundle at [examples/docker-ha/README.md](../examples/docker-ha/README.md).
+
+That model is intended for operators who want:
+
+- containerized LibreNMS web and dispatcher services
+- containerized Galera and Redis Sentinel examples
+- HAProxy in a containerized frontend role
+
+It does **not** replace the main Ansible package-based deployment model, and it still assumes operator-reviewed decisions around persistent shared storage, VIP ownership, and failure recovery.

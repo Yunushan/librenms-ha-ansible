@@ -1,0 +1,9 @@
+.git
+.ansible
+__pycache__
+*.pyc
+.env
+tmp
+inventories/**/group_vars/vault.yml
+vault-*.yml
+*.vault

@@ -19,3 +19,6 @@ vault-*.yml
 
 # Local test artifacts
 tmp/
+
+# Docker / Compose
+.env
