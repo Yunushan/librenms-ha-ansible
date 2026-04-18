@@ -1,0 +1,76 @@
+---
+- name: Run LibreNMS validator on app nodes
+  command:
+    argv:
+      - php
+      - validate.php
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become_user: "{{ librenms_user }}"
+  register: librenms_validate_result
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Show LibreNMS validator summary
+  debug:
+    msg: "{{ librenms_validate_result.stdout_lines | default(['validate.php did not run']) }}"
+  when:
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_validate_result is defined
+
+- name: Check Galera cluster size
+  shell: mysql -Nse "SHOW GLOBAL STATUS LIKE 'wsrep_cluster_size';"
+  register: galera_cluster_size
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname in groups.get('librenms_db', [])
+
+- name: Show Galera cluster size
+  debug:
+    msg: "{{ galera_cluster_size.stdout | default('Galera status unavailable') }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname in groups.get('librenms_db', [])
+    - galera_cluster_size is defined
+
+- name: Check Redis sentinel masters
+  shell: "REDISCLI_AUTH='{{ librenms_redis_sentinel_password }}' redis-cli -p 26379 SENTINEL masters | head -n 5"
+  register: redis_sentinel_status
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname in groups.get('librenms_redis', [])
+
+- name: Confirm Redis sentinel query executed
+  debug:
+    msg: "Redis Sentinel query executed on {{ inventory_hostname }}."
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname in groups.get('librenms_redis', [])
+
+- name: Check Gluster volume status on bootstrap host
+  command:
+    argv:
+      - gluster
+      - volume
+      - status
+      - "{{ librenms_gluster_volume_name }}"
+  register: gluster_volume_status
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Show Gluster volume status summary
+  debug:
+    msg: "{{ gluster_volume_status.stdout_lines | default(['Gluster volume status unavailable']) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - gluster_volume_status is defined

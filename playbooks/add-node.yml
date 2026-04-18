@@ -1,0 +1,6 @@
+---
+# Usage:
+# 1. add the host to active inventory groups
+# 2. optionally keep it in new_nodes while testing
+# 3. run this playbook
+- import_playbook: site.yml

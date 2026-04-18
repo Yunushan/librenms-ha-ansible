@@ -1,0 +1,23 @@
+vrrp_script chk_haproxy {
+  script "pidof haproxy"
+  interval 2
+  weight 20
+}
+
+vrrp_instance VI_1 {
+  state {{ 'MASTER' if inventory_hostname == (librenms_active_lb_nodes | first) else 'BACKUP' }}
+  interface {{ librenms_vip_interface }}
+  virtual_router_id {{ librenms_keepalived_vrid }}
+  priority {{ hostvars[inventory_hostname].librenms_keepalived_priority | default(librenms_keepalived_priority) }}
+  advert_int 1
+  authentication {
+    auth_type PASS
+    auth_pass {{ librenms_keepalived_auth_pass }}
+  }
+  virtual_ipaddress {
+    {{ librenms_vip_ip }}/{{ librenms_vip_cidr }}
+  }
+  track_script {
+    chk_haproxy
+  }
+}

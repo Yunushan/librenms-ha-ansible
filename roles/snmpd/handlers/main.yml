@@ -1,0 +1,5 @@
+---
+- name: restart snmpd
+  service:
+    name: "{{ librenms_snmpd_service_name }}"
+    state: restarted

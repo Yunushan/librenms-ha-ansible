@@ -1,0 +1,11 @@
+---
+- name: restart redis
+  service:
+    name: "{{ librenms_redis_service_name }}"
+    state: restarted
+
+- name: restart redis sentinel
+  service:
+    name: "{{ 'librenms-redis-sentinel' if ansible_service_mgr == 'systemd' else librenms_redis_sentinel_native_service_name }}"
+    state: restarted
+  when: librenms_redis_mode == 'sentinel'

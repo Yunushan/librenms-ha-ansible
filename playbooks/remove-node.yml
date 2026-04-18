@@ -1,0 +1,13 @@
+---
+# Usage:
+# 1. move the host out of active groups
+# 2. place it in decommission_nodes
+# 3. run this playbook
+- import_playbook: site.yml
+
+- name: Decommission LibreNMS nodes
+  hosts: decommission_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: remove_node

@@ -1,0 +1,69 @@
+---
+librenms_base_packages:
+  - app-admin/acl
+  - app-misc/ca-certificates
+  - net-analyzer/fping
+  - dev-vcs/git
+  - media-gfx/graphviz
+  - media-gfx/imagemagick
+  - net-analyzer/mtr
+  - net-analyzer/net-snmp
+  - www-servers/nginx
+  - net-analyzer/nmap
+  - dev-lang/php
+  - dev-python/pip
+  - dev-python/psutil
+  - dev-python/PyMySQL
+  - dev-python/redis
+  - net-analyzer/rrdtool
+  - net-misc/rsync
+  - net-analyzer/traceroute
+  - app-arch/unzip
+  - net-analyzer/whois
+
+librenms_db_packages:
+  - dev-db/mariadb
+  - dev-python/PyMySQL
+
+librenms_galera_packages:
+  - rsync
+
+librenms_redis_packages:
+  - dev-db/redis
+  - dev-python/redis
+
+librenms_gluster_packages:
+  - sys-cluster/glusterfs
+  - sys-fs/xfsprogs
+
+librenms_lb_packages:
+  - net-proxy/haproxy
+  - sys-cluster/keepalived
+
+librenms_mariadb_service_name: mariadb
+librenms_mariadb_socket: /run/mysqld/mysqld.sock
+librenms_mariadb_tuning_conf: /etc/mysql/mariadb.conf.d/60-librenms.cnf
+librenms_galera_conf_path: /etc/mysql/conf.d/galera.cnf
+
+librenms_nginx_service_name: nginx
+librenms_nginx_conf_path: /etc/nginx/conf.d/librenms.conf
+
+librenms_php_cli_ini_path: /etc/php/cli-php.ini
+librenms_php_fpm_ini_path: /etc/php/fpm-php.ini
+librenms_php_fpm_pool_dir: /etc/php/fpm.d
+librenms_php_fpm_service_name: php-fpm
+
+librenms_redis_service_name: redis
+librenms_redis_conf_path: /etc/redis.conf
+librenms_redis_sentinel_conf_path: /etc/librenms/redis-sentinel.conf
+librenms_redis_sentinel_native_service_name: redis-sentinel
+
+librenms_snmpd_service_name: snmpd
+librenms_snmpd_conf_path: /etc/snmp/snmpd.conf
+librenms_snmp_persistent_config_candidates:
+  - /var/lib/net-snmp/snmpd.conf
+  - /var/lib/snmp/snmpd.conf
+
+librenms_haproxy_service_name: haproxy
+librenms_keepalived_service_name: keepalived
+librenms_glusterd_service_name: glusterd

@@ -1,0 +1,59 @@
+librenms_mode: ha
+librenms_install_profile: full
+
+librenms_fqdn: librenms.example.com
+librenms_timezone: Etc/UTC
+
+librenms_app_key: CHANGE_ME_USE_GENERATE_SECRETS
+
+librenms_db_mode: galera
+librenms_db_name: librenms
+librenms_db_user: librenms
+librenms_db_password: CHANGE_ME_DB_PASSWORD
+librenms_db_bootstrap_host: lnms1
+
+librenms_galera_cluster_name: librenms_cluster
+
+librenms_redis_mode: sentinel
+librenms_redis_master_host: lnms1
+librenms_redis_password: CHANGE_ME_REDIS_PASSWORD
+librenms_redis_sentinel_password: CHANGE_ME_SENTINEL_PASSWORD
+librenms_redis_sentinel_service: mymaster
+
+librenms_rrd_mode: glusterfs
+librenms_gluster_bootstrap_host: lnms1
+librenms_gluster_volume_name: librenms-rrd
+librenms_gluster_brick_path: /gluster/brick1/librenms-rrd
+librenms_gluster_mountpoint: /opt/librenms/rrd
+librenms_gluster_manage_brick_device: false
+librenms_gluster_brick_device: /dev/sdb1
+
+librenms_vip_enabled: true
+librenms_vip_ip: 10.10.10.10
+librenms_vip_cidr: 24
+librenms_vip_interface: ens18
+librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
+librenms_keepalived_vrid: 51
+
+librenms_bootstrap_completed: false
+librenms_manage_local_snmpd: true
+
+librenms_snmp_versions_enabled:
+  - v1
+  - v2c
+  - v3
+
+librenms_snmp_version_order:
+  - v3
+  - v2c
+  - v1
+
+librenms_snmp_v2c_community: CHANGE_ME_COMMUNITY
+
+librenms_snmp_v3_users:
+  - username: lnmsv3
+    auth_protocol: SHA
+    auth_password: CHANGE_ME_AUTH_PASSWORD
+    priv_protocol: AES
+    priv_password: CHANGE_ME_PRIV_PASSWORD
+    access: ro

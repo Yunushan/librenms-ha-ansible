@@ -1,0 +1,5 @@
+librenms_app_key: "base64:CHANGE_ME"
+librenms_db_password: "CHANGE_ME_DB_PASSWORD"
+librenms_redis_password: "CHANGE_ME_REDIS_PASSWORD"
+librenms_redis_sentinel_password: "CHANGE_ME_SENTINEL_PASSWORD"
+librenms_keepalived_auth_pass: "CHANGE_ME_VRRP_PASSWORD"

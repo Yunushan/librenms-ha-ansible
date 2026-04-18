@@ -1,0 +1,78 @@
+---
+- name: Ensure SNMP config directory exists
+  file:
+    path: "{{ librenms_snmpd_conf_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy snmpd configuration
+  template:
+    src: snmpd.conf.j2
+    dest: "{{ librenms_snmpd_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart snmpd
+
+- name: Check candidate SNMP persistent config files
+  stat:
+    path: "{{ item }}"
+  loop: "{{ librenms_snmp_persistent_config_candidates }}"
+  register: librenms_snmp_persistent_candidates
+
+- name: Pick SNMP persistent config path
+  set_fact:
+    librenms_snmp_persistent_config_path: >-
+      {{
+        (
+          librenms_snmp_persistent_candidates.results
+          | selectattr('stat.exists', 'equalto', true)
+          | map(attribute='stat.path')
+          | list
+          | first
+        )
+        | default(librenms_snmp_persistent_config_candidates | first, true)
+      }}
+
+- name: Ensure SNMP persistent config directory exists
+  file:
+    path: "{{ librenms_snmp_persistent_config_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create SNMPv3 users
+  shell: >
+    grep -q "createUser {{ item.username }}" {{ librenms_snmp_persistent_config_path }} ||
+    {{ librenms_net_snmp_config_binary }} --create-snmpv3-user -ro
+    -a {{ item.auth_protocol | default('SHA') }}
+    -A '{{ item.auth_password }}'
+    -x {{ item.priv_protocol | default('AES') }}
+    -X '{{ item.priv_password }}'
+    {{ item.username }}
+  args:
+    executable: /bin/bash
+  no_log: true
+  when:
+    - item.username is defined
+    - item.auth_password is defined
+    - item.priv_password is defined
+    - (librenms_snmp_v3_users | length) > 0
+  loop: "{{ librenms_snmp_v3_users }}"
+  notify: restart snmpd
+
+- name: Download LibreNMS distro helper script
+  get_url:
+    url: https://raw.githubusercontent.com/librenms/librenms-agent/master/snmp/distro
+    dest: /usr/bin/distro
+    mode: "0755"
+  failed_when: false
+
+- name: Enable and start snmpd
+  service:
+    name: "{{ librenms_snmpd_service_name }}"
+    state: started
+    enabled: true

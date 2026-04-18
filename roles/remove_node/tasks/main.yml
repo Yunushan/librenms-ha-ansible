@@ -1,0 +1,93 @@
+---
+- name: Stop LibreNMS dispatcher service
+  service:
+    name: librenms.service
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: ansible_service_mgr == 'systemd'
+
+- name: Stop LibreNMS scheduler timer
+  service:
+    name: librenms-scheduler.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: ansible_service_mgr == 'systemd'
+
+- name: Stop nginx if managed
+  service:
+    name: "{{ librenms_nginx_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: librenms_manage_nginx | bool
+
+- name: Stop PHP-FPM if managed
+  service:
+    name: "{{ librenms_php_fpm_service_name if librenms_php_fpm_service_name | default('') | length > 0 else 'php-fpm' }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Stop MariaDB
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Stop Redis
+  service:
+    name: "{{ librenms_redis_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Stop Redis Sentinel
+  service:
+    name: "{{ 'librenms-redis-sentinel' if ansible_service_mgr == 'systemd' else librenms_redis_sentinel_native_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Stop HAProxy
+  service:
+    name: "{{ librenms_haproxy_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Stop Keepalived
+  service:
+    name: "{{ librenms_keepalived_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Stop Gluster daemon
+  service:
+    name: "{{ librenms_glusterd_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Stop snmpd
+  service:
+    name: "{{ librenms_snmpd_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Unmount Gluster-backed RRD storage
+  ansible.posix.mount:
+    path: "{{ librenms_gluster_mountpoint }}"
+    state: unmounted
+  failed_when: false
+  when: librenms_rrd_mode == 'glusterfs'
+
+- name: Remove LibreNMS install tree when explicitly requested
+  file:
+    path: "{{ librenms_install_dir }}"
+    state: absent
+  when: librenms_remove_install_dir | bool

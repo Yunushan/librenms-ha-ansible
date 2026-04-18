@@ -1,0 +1,416 @@
+---
+- name: Determine effective app URL
+  set_fact:
+    librenms_app_url_effective: >-
+      {{
+        librenms_app_url
+        if librenms_app_url | length > 0
+        else
+        ('http://' ~ (librenms_fqdn if librenms_fqdn | length > 0 else (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else inventory_hostname)))
+      }}
+
+- name: Determine effective DB host
+  set_fact:
+    librenms_db_host_effective: >-
+      {{
+        librenms_db_host
+        if librenms_db_host | length > 0
+        else
+        (
+          '127.0.0.1'
+          if librenms_db_mode == 'local'
+          else
+          (
+            librenms_vip_ip
+            if librenms_db_mode == 'galera' and librenms_vip_enabled and librenms_vip_ip | length > 0
+            else
+            (
+              hostvars[(librenms_active_lb_nodes | first)].ansible_host | default(librenms_active_lb_nodes | first)
+              if librenms_db_mode == 'galera' and (librenms_active_lb_nodes | length > 0)
+              else
+              (
+                hostvars[(librenms_active_db_nodes | first)].ansible_host | default(librenms_active_db_nodes | first)
+                if (librenms_active_db_nodes | length > 0)
+                else '127.0.0.1'
+              )
+            )
+          )
+        )
+      }}
+
+- name: Determine effective Redis host
+  set_fact:
+    librenms_redis_host_effective: >-
+      {{
+        '127.0.0.1'
+        if librenms_redis_mode == 'local'
+        else
+        (
+          librenms_redis_external_host
+          if librenms_redis_mode == 'external' and librenms_redis_external_host | length > 0
+          else
+          (
+            hostvars[(librenms_active_redis_nodes | first)].ansible_host | default(librenms_active_redis_nodes | first)
+            if (librenms_active_redis_nodes | length > 0)
+            else '127.0.0.1'
+          )
+        )
+      }}
+
+- name: Determine trusted proxy list
+  set_fact:
+    librenms_trusted_proxies_effective: >-
+      {{
+        librenms_active_lb_nodes
+        | map('extract', hostvars)
+        | map(attribute='ansible_host', default=None)
+        | list
+      }}
+  when: librenms_active_lb_nodes | length > 0
+
+- name: Create LibreNMS group
+  group:
+    name: "{{ librenms_group }}"
+    system: true
+
+- name: Create LibreNMS user
+  user:
+    name: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    system: true
+    home: "{{ librenms_install_dir }}"
+    create_home: false
+    shell: "{{ librenms_shell }}"
+
+- name: Ensure install directory parent exists
+  file:
+    path: "{{ librenms_install_dir | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Checkout LibreNMS repository
+  git:
+    repo: "{{ librenms_repo_url }}"
+    dest: "{{ librenms_install_dir }}"
+    version: "{{ librenms_version }}"
+    update: true
+  register: librenms_git_checkout
+
+- name: Detect PHP version on Debian-family systems
+  command:
+    argv:
+      - php
+      - -r
+      - "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;"
+  register: librenms_php_version_cmd
+  changed_when: false
+  when: ansible_os_family == 'Debian'
+
+- name: Set effective PHP paths on Debian-family systems
+  set_fact:
+    librenms_php_cli_ini_effective: "/etc/php/{{ librenms_php_version_cmd.stdout }}/cli/php.ini"
+    librenms_php_fpm_ini_effective: "/etc/php/{{ librenms_php_version_cmd.stdout }}/fpm/php.ini"
+    librenms_php_fpm_pool_dir_effective: "/etc/php/{{ librenms_php_version_cmd.stdout }}/fpm/pool.d"
+    librenms_php_fpm_service_effective: "php{{ librenms_php_version_cmd.stdout }}-fpm"
+  when: ansible_os_family == 'Debian'
+
+- name: Set effective PHP paths on non-Debian systems
+  set_fact:
+    librenms_php_cli_ini_effective: "{{ librenms_php_cli_ini_path }}"
+    librenms_php_fpm_ini_effective: "{{ librenms_php_fpm_ini_path }}"
+    librenms_php_fpm_pool_dir_effective: "{{ librenms_php_fpm_pool_dir }}"
+    librenms_php_fpm_service_effective: "{{ librenms_php_fpm_service_name }}"
+  when: ansible_os_family != 'Debian'
+
+- name: Ensure LibreNMS writable directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0775"
+  loop:
+    - "{{ librenms_install_dir }}/rrd"
+    - "{{ librenms_install_dir }}/logs"
+    - "{{ librenms_install_dir }}/bootstrap/cache"
+    - "{{ librenms_install_dir }}/storage"
+
+- name: Ensure LibreNMS install tree ownership is correct
+  file:
+    path: "{{ librenms_install_dir }}"
+    state: directory
+    recurse: true
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+
+- name: Grant ACLs to LibreNMS writable directories
+  ansible.posix.acl:
+    path: "{{ item }}"
+    entity: "{{ librenms_group }}"
+    etype: group
+    permissions: rwx
+    default: true
+    state: present
+  loop:
+    - "{{ librenms_install_dir }}/rrd"
+    - "{{ librenms_install_dir }}/logs"
+    - "{{ librenms_install_dir }}/bootstrap/cache"
+    - "{{ librenms_install_dir }}/storage"
+
+- name: Install LibreNMS PHP dependencies
+  command:
+    argv:
+      - ./scripts/composer_wrapper.php
+      - install
+      - --no-dev
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become_user: "{{ librenms_user }}"
+  register: librenms_composer
+  changed_when: "'Nothing to install' not in (librenms_composer.stdout | default(''))"
+
+- name: Set PHP timezone
+  lineinfile:
+    path: "{{ item }}"
+    regexp: '^;?date.timezone ='
+    line: "date.timezone = {{ librenms_timezone }}"
+    create: false
+  loop: "{{ [librenms_php_cli_ini_effective, librenms_php_fpm_ini_effective] | unique }}"
+  when:
+    - item | length > 0
+
+- name: Deploy LibreNMS PHP-FPM pool
+  template:
+    src: php-fpm-librenms.conf.j2
+    dest: "{{ librenms_php_fpm_pool_dir_effective }}/librenms.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  when: librenms_manage_php_fpm | bool
+  notify: restart php-fpm
+
+- name: Remove default PHP-FPM pool on Debian-family systems when present
+  file:
+    path: "{{ librenms_php_fpm_pool_dir_effective }}/www.conf"
+    state: absent
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_os_family == 'Debian'
+
+- name: Deploy LibreNMS nginx site
+  template:
+    src: nginx-librenms.conf.j2
+    dest: "{{ librenms_nginx_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: librenms_manage_nginx | bool
+  notify: restart nginx
+
+- name: Remove default nginx site on Debian-family systems
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/nginx/sites-enabled/default
+    - /etc/nginx/sites-available/default
+  when:
+    - librenms_manage_nginx | bool
+    - ansible_os_family == 'Debian'
+
+- name: Deploy LibreNMS environment file
+  template:
+    src: librenms.env.j2
+    dest: "{{ librenms_install_dir }}/.env"
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0640"
+
+- name: Create lnms symlink
+  file:
+    src: "{{ librenms_install_dir }}/lnms"
+    dest: /usr/bin/lnms
+    state: link
+  when: librenms_manage_lnms_symlink | bool
+
+- name: Enable nginx
+  service:
+    name: "{{ librenms_nginx_service_name }}"
+    state: started
+    enabled: true
+  when: librenms_manage_nginx | bool
+
+- name: Enable PHP-FPM
+  service:
+    name: "{{ librenms_php_fpm_service_effective }}"
+    state: started
+    enabled: true
+  when: librenms_manage_php_fpm | bool
+
+- name: Deploy scheduler service file
+  copy:
+    remote_src: true
+    src: "{{ librenms_install_dir }}/dist/librenms-scheduler.service"
+    dest: /etc/systemd/system/librenms-scheduler.service
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy scheduler timer file
+  copy:
+    remote_src: true
+    src: "{{ librenms_install_dir }}/dist/librenms-scheduler.timer"
+    dest: /etc/systemd/system/librenms-scheduler.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy LibreNMS dispatcher service file
+  copy:
+    remote_src: true
+    src: "{{ librenms_install_dir }}/misc/librenms.service"
+    dest: /etc/systemd/system/librenms.service
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Reload systemd for LibreNMS services
+  systemd:
+    daemon_reload: true
+  when: ansible_service_mgr == 'systemd'
+
+- name: Enable and start scheduler timer
+  service:
+    name: librenms-scheduler.timer
+    state: started
+    enabled: true
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Enable and start dispatcher service
+  service:
+    name: librenms.service
+    state: started
+    enabled: true
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Remove legacy cron file
+  file:
+    path: /etc/cron.d/librenms
+    state: absent
+
+- name: Read current SNMP community config
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:get
+      - snmp.community
+  become_user: "{{ librenms_user }}"
+  register: librenms_snmp_community_current
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Read current SNMPv3 config
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:get
+      - snmp.v3
+  become_user: "{{ librenms_user }}"
+  register: librenms_snmp_v3_current
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Set global SNMP version order
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - snmp.version
+      - "{{ librenms_snmp_version_order | to_json }}"
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Add SNMP communities after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - snmp.community.+
+      - "{{ item }}"
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - item not in (librenms_snmp_community_current.stdout | default(''))
+  loop: "{{ ([librenms_snmp_v2c_community] + librenms_snmp_communities) | reject('equalto', '') | list }}"
+
+- name: Add SNMPv3 credentials after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - snmp.v3.+
+      - "{{ item | to_json }}"
+  become_user: "{{ librenms_user }}"
+  no_log: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - item.username not in (librenms_snmp_v3_current.stdout | default(''))
+  loop: "{{ librenms_snmp_v3_users }}"
+
+- name: Enable distributed poller after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - distributed_poller
+      - "true"
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_mode != 'standalone'
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Set dispatcher schedule types after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - "{{ item.key }}"
+      - "{{ item.value }}"
+  loop:
+    - { key: "schedule_type.poller", value: "dispatcher" }
+    - { key: "schedule_type.discovery", value: "dispatcher" }
+    - { key: "schedule_type.services", value: "dispatcher" }
+    - { key: "schedule_type.alerting", value: "dispatcher" }
+    - { key: "schedule_type.billing", value: "dispatcher" }
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_mode != 'standalone'
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)

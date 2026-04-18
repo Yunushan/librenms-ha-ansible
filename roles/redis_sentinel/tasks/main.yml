@@ -1,0 +1,85 @@
+---
+- name: Install Redis packages
+  package:
+    name: "{{ librenms_redis_packages }}"
+    state: present
+  when: librenms_redis_mode in ['local', 'sentinel', 'external']
+
+- name: Ensure Redis config parent directory exists when needed
+  file:
+    path: "{{ librenms_redis_conf_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure custom config directory exists
+  file:
+    path: /etc/librenms
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Redis server config
+  template:
+    src: redis.conf.j2
+    dest: "{{ librenms_redis_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart redis
+  when: librenms_redis_mode in ['local', 'sentinel']
+
+- name: Enable and start Redis server
+  service:
+    name: "{{ librenms_redis_service_name }}"
+    state: started
+    enabled: true
+  when: librenms_redis_mode in ['local', 'sentinel']
+
+- name: Deploy Redis Sentinel config
+  template:
+    src: sentinel.conf.j2
+    dest: "{{ librenms_redis_sentinel_conf_path }}"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: restart redis sentinel
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Deploy systemd unit for Redis Sentinel
+  template:
+    src: librenms-redis-sentinel.service.j2
+    dest: /etc/systemd/system/librenms-redis-sentinel.service
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Reload systemd after sentinel unit changes
+  systemd:
+    daemon_reload: true
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Enable and start Redis Sentinel via systemd
+  service:
+    name: librenms-redis-sentinel
+    state: started
+    enabled: true
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Enable and start Redis Sentinel via native service
+  service:
+    name: "{{ librenms_redis_sentinel_native_service_name }}"
+    state: started
+    enabled: true
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr != 'systemd'

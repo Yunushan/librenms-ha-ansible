@@ -1,0 +1,100 @@
+---
+- name: Install Galera packages
+  package:
+    name: "{{ librenms_galera_packages }}"
+    state: present
+  when: librenms_db_mode == 'galera'
+
+- name: Deploy Galera config
+  template:
+    src: galera.cnf.j2
+    dest: "{{ librenms_galera_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: librenms_db_mode == 'galera'
+
+- name: Check Galera bootstrap marker
+  stat:
+    path: "{{ librenms_galera_bootstrap_marker }}"
+  register: librenms_galera_marker
+  when: librenms_db_mode == 'galera'
+
+- name: Stop MariaDB before first bootstrap on the bootstrap host
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: stopped
+  ignore_errors: true
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == librenms_db_bootstrap_host
+    - not librenms_galera_marker.stat.exists
+
+- name: Bootstrap Galera cluster on the bootstrap host
+  command:
+    argv:
+      - galera_new_cluster
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == librenms_db_bootstrap_host
+    - not librenms_galera_marker.stat.exists
+
+- name: Write Galera bootstrap marker
+  file:
+    path: "{{ librenms_galera_bootstrap_marker }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == librenms_db_bootstrap_host
+    - not librenms_galera_marker.stat.exists
+
+- name: Wait for the Galera bootstrap host to accept connections
+  wait_for:
+    host: "{{ hostvars[librenms_db_bootstrap_host].ansible_host | default(librenms_db_bootstrap_host) }}"
+    port: "{{ librenms_db_port }}"
+    timeout: 120
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname != librenms_db_bootstrap_host
+
+- name: Ensure MariaDB service is enabled and started on Galera nodes
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: started
+    enabled: true
+  when: librenms_db_mode == 'galera'
+
+- name: Wait for local MariaDB socket on Galera nodes
+  wait_for:
+    path: "{{ librenms_mariadb_socket }}"
+    timeout: 60
+  when: librenms_db_mode == 'galera'
+
+- name: Create LibreNMS database in Galera mode
+  community.mysql.mysql_db:
+    name: "{{ librenms_db_name }}"
+    state: present
+    encoding: utf8mb4
+    collation: utf8mb4_unicode_ci
+    login_unix_socket: "{{ librenms_mariadb_socket }}"
+    check_implicit_admin: true
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == librenms_db_bootstrap_host
+
+- name: Create LibreNMS database user in Galera mode
+  community.mysql.mysql_user:
+    name: "{{ librenms_db_user }}"
+    password: "{{ librenms_db_password }}"
+    host: "%"
+    priv: "{{ librenms_db_name }}.*:ALL"
+    state: present
+    login_unix_socket: "{{ librenms_mariadb_socket }}"
+    check_implicit_admin: true
+  no_log: true
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == librenms_db_bootstrap_host

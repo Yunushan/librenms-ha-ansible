@@ -1,0 +1,55 @@
+---
+- name: Install MariaDB packages
+  package:
+    name: "{{ librenms_db_packages }}"
+    state: present
+  when: librenms_db_mode in ['local', 'galera']
+
+- name: Deploy MariaDB tuning config
+  template:
+    src: librenms-mariadb.cnf.j2
+    dest: "{{ librenms_mariadb_tuning_conf }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart mariadb
+  when: librenms_db_mode in ['local', 'galera']
+
+- name: Ensure MariaDB service is enabled and started in local mode
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: started
+    enabled: true
+  when: librenms_db_mode == 'local'
+
+- name: Wait for MariaDB socket in local mode
+  wait_for:
+    path: "{{ librenms_mariadb_socket }}"
+    timeout: 60
+  when: librenms_db_mode == 'local'
+
+- name: Create LibreNMS database in local mode
+  community.mysql.mysql_db:
+    name: "{{ librenms_db_name }}"
+    state: present
+    encoding: utf8mb4
+    collation: utf8mb4_unicode_ci
+    login_unix_socket: "{{ librenms_mariadb_socket }}"
+    check_implicit_admin: true
+  when:
+    - librenms_db_mode == 'local'
+    - inventory_hostname == (groups.get('librenms_db', [inventory_hostname]) | first)
+
+- name: Create LibreNMS database user in local mode
+  community.mysql.mysql_user:
+    name: "{{ librenms_db_user }}"
+    password: "{{ librenms_db_password }}"
+    host: "{{ librenms_db_user_host if librenms_mode != 'standalone' else 'localhost' }}"
+    priv: "{{ librenms_db_name }}.*:ALL"
+    state: present
+    login_unix_socket: "{{ librenms_mariadb_socket }}"
+    check_implicit_admin: true
+  no_log: true
+  when:
+    - librenms_db_mode == 'local'
+    - inventory_hostname == (groups.get('librenms_db', [inventory_hostname]) | first)

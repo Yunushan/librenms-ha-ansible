@@ -1,0 +1,45 @@
+---
+- name: Install EPEL on RedHat-family systems
+  package:
+    name: epel-release
+    state: present
+  when:
+    - librenms_redhat_enable_epel | bool
+    - ansible_distribution != 'Fedora'
+
+- name: Install Remi repository package when requested
+  package:
+    name: "https://rpms.remirepo.net/enterprise/remi-release-{{ ansible_distribution_major_version }}.rpm"
+    state: present
+    disable_gpg_check: true
+  when:
+    - librenms_redhat_enable_remi | bool
+    - ansible_distribution != 'Fedora'
+
+- name: Reset PHP module when using Remi on EL8-style systems
+  command:
+    argv:
+      - dnf
+      - -y
+      - module
+      - reset
+      - php
+  changed_when: false
+  when:
+    - librenms_redhat_enable_remi | bool
+    - ansible_distribution != 'Fedora'
+    - (ansible_distribution_major_version | int) <= 8
+
+- name: Enable PHP stream when using Remi on EL8-style systems
+  command:
+    argv:
+      - dnf
+      - -y
+      - module
+      - enable
+      - "php:{{ librenms_redhat_php_stream }}"
+  changed_when: false
+  when:
+    - librenms_redhat_enable_remi | bool
+    - ansible_distribution != 'Fedora'
+    - (ansible_distribution_major_version | int) <= 8

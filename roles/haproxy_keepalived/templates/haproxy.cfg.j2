@@ -1,0 +1,50 @@
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    daemon
+    maxconn 4096
+
+defaults
+    log global
+    timeout connect 5s
+    timeout client 60s
+    timeout server 60s
+
+frontend librenms_web
+    bind {{ (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else '0.0.0.0') }}:{{ librenms_haproxy_web_port }}
+    mode http
+    option httplog
+    option forwardfor
+    http-request set-header X-Forwarded-Proto http
+    default_backend librenms_web_nodes
+
+backend librenms_web_nodes
+    mode http
+    balance roundrobin
+    option httpchk GET /
+{% for host in librenms_active_web_nodes %}
+    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check
+{% endfor %}
+
+{% if librenms_db_mode == 'galera' %}
+frontend librenms_db
+    bind {{ (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else '0.0.0.0') }}:{{ librenms_haproxy_db_port }}
+    mode tcp
+    default_backend galera_nodes
+
+backend galera_nodes
+    mode tcp
+    balance roundrobin
+    option tcp-check
+{% for host in librenms_active_db_nodes %}
+    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_db_port }} check
+{% endfor %}
+{% endif %}
+
+{% if librenms_haproxy_stats_enabled | bool %}
+listen stats
+    bind {{ librenms_haproxy_stats_bind }}
+    mode http
+    stats enable
+    stats uri /stats
+{% endif %}

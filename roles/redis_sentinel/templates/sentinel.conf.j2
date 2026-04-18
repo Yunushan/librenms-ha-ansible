@@ -1,0 +1,12 @@
+port 26379
+bind 127.0.0.1 {{ ansible_host | default(inventory_hostname) }}
+protected-mode yes
+dir /var/lib/redis
+
+sentinel monitor {{ librenms_redis_sentinel_service }} {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }} 6379 {{ librenms_redis_quorum }}
+sentinel auth-pass {{ librenms_redis_sentinel_service }} {{ librenms_redis_password }}
+sentinel down-after-milliseconds {{ librenms_redis_sentinel_service }} 10000
+sentinel failover-timeout {{ librenms_redis_sentinel_service }} 60000
+sentinel parallel-syncs {{ librenms_redis_sentinel_service }} 1
+
+requirepass {{ librenms_redis_sentinel_password }}

@@ -1,0 +1,37 @@
+---
+- name: Install HAProxy and Keepalived packages
+  package:
+    name: "{{ librenms_lb_packages }}"
+    state: present
+
+- name: Deploy HAProxy config
+  template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart haproxy
+
+- name: Ensure HAProxy service is enabled and started
+  service:
+    name: "{{ librenms_haproxy_service_name }}"
+    state: started
+    enabled: true
+
+- name: Deploy Keepalived config when VIP is enabled
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0640"
+  when: librenms_vip_enabled | bool
+  notify: restart keepalived
+
+- name: Ensure Keepalived service is enabled and started when VIP is enabled
+  service:
+    name: "{{ librenms_keepalived_service_name }}"
+    state: started
+    enabled: true
+  when: librenms_vip_enabled | bool

@@ -1,0 +1,95 @@
+---
+- name: Load OS-specific variables
+  include_vars:
+    file: "{{ lookup('first_found', lookup_params) }}"
+  vars:
+    lookup_params:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+
+- name: Ensure OS family is supported
+  assert:
+    that:
+      - ansible_os_family in librenms_allowed_os_families
+    fail_msg: "Unsupported OS family {{ ansible_os_family }} for this repo."
+
+- name: Set support tier fact
+  set_fact:
+    librenms_support_tier: "{{ librenms_support_tier_map.get(ansible_distribution, librenms_support_tier_map.get(ansible_os_family, 'best-effort')) }}"
+
+- name: Build active inventory host lists
+  set_fact:
+    librenms_active_web_nodes: "{{ groups.get('librenms_web', groups.get('librenms_nodes', [])) | difference(groups.get('decommission_nodes', [])) }}"
+    librenms_active_db_nodes: "{{ groups.get('librenms_db', []) | difference(groups.get('decommission_nodes', [])) }}"
+    librenms_active_redis_nodes: "{{ groups.get('librenms_redis', []) | difference(groups.get('decommission_nodes', [])) }}"
+    librenms_active_lb_nodes: "{{ groups.get('lb_nodes', []) | difference(groups.get('decommission_nodes', [])) }}"
+    librenms_active_gluster_nodes: "{{ groups.get('gluster_nodes', []) | difference(groups.get('decommission_nodes', [])) }}"
+
+- name: Validate APP_KEY has been set
+  assert:
+    that:
+      - librenms_app_key != 'CHANGE_ME'
+      - (librenms_app_key | length) > 8
+    fail_msg: "Set librenms_app_key before running the playbook."
+
+- name: Validate Galera node count when enabled
+  assert:
+    that:
+      - (librenms_active_db_nodes | length) >= 3
+    fail_msg: "Galera mode expects at least 3 active DB nodes."
+  when: librenms_db_mode == 'galera'
+
+- name: Validate Redis Sentinel node count when enabled
+  assert:
+    that:
+      - (librenms_active_redis_nodes | length) >= 3
+    fail_msg: "Redis Sentinel mode expects at least 3 active Redis nodes."
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Validate DB access pattern for Galera
+  assert:
+    that:
+      - librenms_db_host | length > 0 or librenms_vip_enabled | bool or (librenms_active_lb_nodes | length) > 0
+    fail_msg: "Galera mode requires an explicit DB host, VIP, or lb_nodes frontend."
+  when: librenms_db_mode == 'galera'
+
+- name: Configure Ubuntu universe repository
+  apt_repository:
+    repo: "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
+    state: present
+  when:
+    - ansible_os_family == 'Debian'
+    - ansible_distribution == 'Ubuntu'
+    - librenms_enable_extra_repos | bool
+
+- name: Refresh apt cache
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+
+- name: Configure RedHat-family supplemental repositories
+  include_tasks: redhat_repos.yml
+  when:
+    - ansible_os_family == 'RedHat'
+    - librenms_enable_extra_repos | bool
+
+- name: Install base packages
+  package:
+    name: "{{ librenms_base_packages + librenms_common_extra_packages }}"
+    state: present
+
+- name: Set system timezone
+  community.general.timezone:
+    name: "{{ librenms_timezone }}"
+
+- name: Ensure state directory exists
+  file:
+    path: /var/lib/librenms-ansible
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

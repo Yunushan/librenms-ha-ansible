@@ -1,0 +1,9 @@
+bind 127.0.0.1{% if librenms_redis_mode == 'sentinel' %} {{ ansible_host | default(inventory_hostname) }}{% endif %}
+protected-mode yes
+port 6379
+appendonly yes
+requirepass {{ librenms_redis_password }}
+masterauth {{ librenms_redis_password }}
+{% if librenms_redis_mode == 'sentinel' and inventory_hostname != librenms_redis_master_host %}
+replicaof {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }} 6379
+{% endif %}

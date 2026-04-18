@@ -1,0 +1,15 @@
+agentAddress {{ librenms_snmp_agent_address }}
+sysLocation {{ librenms_snmp_syslocation }}
+sysContact {{ librenms_snmp_syscontact }}
+master agentx
+view all included .1 80
+
+{% if 'v1' in librenms_snmp_versions_enabled or 'v2c' in librenms_snmp_versions_enabled %}
+rocommunity {{ librenms_snmp_v2c_community }} default -V all
+{% endif %}
+
+{% for user in librenms_snmp_v3_users %}
+rouser {{ user.username }} {{ 'priv' if (user.priv_password | default('')) | length > 0 else 'auth' }} -V all
+{% endfor %}
+
+includeAllDisks 10%

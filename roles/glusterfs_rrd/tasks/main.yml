@@ -1,0 +1,117 @@
+---
+- name: Install GlusterFS packages
+  package:
+    name: "{{ librenms_gluster_packages }}"
+    state: present
+  when: librenms_rrd_mode == 'glusterfs'
+
+- name: Ensure Gluster daemon is enabled and started
+  service:
+    name: "{{ librenms_glusterd_service_name }}"
+    state: started
+    enabled: true
+  when: librenms_rrd_mode == 'glusterfs'
+
+- name: Prepare Gluster brick filesystem when explicitly allowed
+  filesystem:
+    fstype: "{{ librenms_gluster_brick_fstype }}"
+    dev: "{{ librenms_gluster_brick_device }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_manage_brick_device | bool
+    - librenms_gluster_brick_device | length > 0
+
+- name: Ensure Gluster brick parent directory exists
+  file:
+    path: "{{ librenms_gluster_brick_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: librenms_rrd_mode == 'glusterfs'
+
+- name: Ensure Gluster brick directory exists
+  file:
+    path: "{{ librenms_gluster_brick_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: librenms_rrd_mode == 'glusterfs'
+
+- name: Probe Gluster peers from bootstrap host
+  command:
+    argv:
+      - gluster
+      - peer
+      - probe
+      - "{{ hostvars[item].ansible_host | default(item) }}"
+  register: gluster_peer_probe
+  failed_when: false
+  changed_when: "'peer probe: success' in (gluster_peer_probe.stdout | lower)"
+  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Check Gluster volume state
+  command:
+    argv:
+      - gluster
+      - volume
+      - info
+      - "{{ librenms_gluster_volume_name }}"
+  register: gluster_volume_info
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Create Gluster replicated volume
+  command: >
+    gluster volume create {{ librenms_gluster_volume_name }}
+    replica {{ librenms_gluster_replica_count }}
+    {% for host in librenms_active_gluster_nodes %}
+    {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_gluster_brick_path }}
+    {% endfor %}
+    force
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - gluster_volume_info.rc != 0
+
+- name: Start Gluster volume
+  command:
+    argv:
+      - gluster
+      - volume
+      - start
+      - "{{ librenms_gluster_volume_name }}"
+  failed_when: false
+  changed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Ensure RRD mountpoint exists on LibreNMS nodes
+  file:
+    path: "{{ librenms_gluster_mountpoint }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0775"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Mount GlusterFS volume on LibreNMS nodes
+  ansible.posix.mount:
+    path: "{{ librenms_gluster_mountpoint }}"
+    src: "{{ hostvars[librenms_gluster_bootstrap_host].ansible_host | default(librenms_gluster_bootstrap_host) }}:/{{ librenms_gluster_volume_name }}"
+    fstype: glusterfs
+    opts: defaults,_netdev
+    state: mounted
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])

@@ -1,0 +1,42 @@
+librenms_mode: standalone
+librenms_install_profile: full
+
+librenms_fqdn: librenms.example.com
+librenms_timezone: Etc/UTC
+
+librenms_app_key: CHANGE_ME_USE_GENERATE_SECRETS
+
+librenms_db_mode: local
+librenms_db_name: librenms
+librenms_db_user: librenms
+librenms_db_password: CHANGE_ME_DB_PASSWORD
+
+librenms_redis_mode: local
+librenms_redis_password: CHANGE_ME_REDIS_PASSWORD
+librenms_redis_sentinel_password: CHANGE_ME_SENTINEL_PASSWORD
+
+librenms_rrd_mode: local
+
+librenms_vip_enabled: false
+
+librenms_bootstrap_completed: false
+librenms_manage_local_snmpd: true
+
+librenms_snmp_versions_enabled:
+  - v2c
+  - v3
+
+librenms_snmp_version_order:
+  - v3
+  - v2c
+  - v1
+
+librenms_snmp_v2c_community: CHANGE_ME_COMMUNITY
+
+librenms_snmp_v3_users:
+  - username: lnmsv3
+    auth_protocol: SHA
+    auth_password: CHANGE_ME_AUTH_PASSWORD
+    priv_protocol: AES
+    priv_password: CHANGE_ME_PRIV_PASSWORD
+    access: ro
