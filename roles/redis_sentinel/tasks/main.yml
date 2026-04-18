@@ -54,10 +54,37 @@
   when: librenms_redis_mode in ['local', 'sentinel']
 
 - name: Enable and start Redis server
-  service:
-    name: "{{ librenms_redis_service_name }}"
-    state: started
-    enabled: true
+  block:
+    - name: Enable and start Redis server service
+      service:
+        name: "{{ librenms_redis_service_name }}"
+        state: started
+        enabled: true
+  rescue:
+    - name: Capture Redis service status during enable/start
+      command: "systemctl status {{ librenms_redis_service_name }} --no-pager -l"
+      register: redis_start_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Redis service journal during enable/start
+      command: "journalctl -u {{ librenms_redis_service_name }} -n 50 --no-pager"
+      register: redis_start_service_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Redis enable/start diagnostics
+      fail:
+        msg: |-
+          Failed to enable/start {{ librenms_redis_service_name }}.
+
+          systemctl status:
+          {{ redis_start_service_status.stdout | default('') }}
+          {{ redis_start_service_status.stderr | default('') }}
+
+          journalctl:
+          {{ redis_start_service_journal.stdout | default('') }}
+          {{ redis_start_service_journal.stderr | default('') }}
   when: librenms_redis_mode in ['local', 'sentinel']
 
 - name: Apply Redis config changes before configuring Sentinel
@@ -95,20 +122,74 @@
     - ansible_os_family != 'Debian'
 
 - name: Enable and start Redis Sentinel via systemd
-  service:
-    name: librenms-redis-sentinel
-    state: started
-    enabled: true
+  block:
+    - name: Enable and start Redis Sentinel systemd service
+      service:
+        name: librenms-redis-sentinel
+        state: started
+        enabled: true
+  rescue:
+    - name: Capture Redis Sentinel systemd status during enable/start
+      command: "systemctl status librenms-redis-sentinel --no-pager -l"
+      register: redis_sentinel_start_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Redis Sentinel systemd journal during enable/start
+      command: "journalctl -u librenms-redis-sentinel -n 50 --no-pager"
+      register: redis_sentinel_start_service_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Redis Sentinel systemd enable/start diagnostics
+      fail:
+        msg: |-
+          Failed to enable/start librenms-redis-sentinel.
+
+          systemctl status:
+          {{ redis_sentinel_start_service_status.stdout | default('') }}
+          {{ redis_sentinel_start_service_status.stderr | default('') }}
+
+          journalctl:
+          {{ redis_sentinel_start_service_journal.stdout | default('') }}
+          {{ redis_sentinel_start_service_journal.stderr | default('') }}
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
     - ansible_os_family != 'Debian'
 
 - name: Enable and start Redis Sentinel via native service
-  service:
-    name: "{{ librenms_redis_sentinel_native_service_name }}"
-    state: started
-    enabled: true
+  block:
+    - name: Enable and start Redis Sentinel native service
+      service:
+        name: "{{ librenms_redis_sentinel_native_service_name }}"
+        state: started
+        enabled: true
+  rescue:
+    - name: Capture Redis Sentinel native status during enable/start
+      command: "systemctl status {{ librenms_redis_sentinel_native_service_name }} --no-pager -l"
+      register: redis_sentinel_native_start_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Redis Sentinel native journal during enable/start
+      command: "journalctl -u {{ librenms_redis_sentinel_native_service_name }} -n 50 --no-pager"
+      register: redis_sentinel_native_start_service_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Redis Sentinel native enable/start diagnostics
+      fail:
+        msg: |-
+          Failed to enable/start {{ librenms_redis_sentinel_native_service_name }}.
+
+          systemctl status:
+          {{ redis_sentinel_native_start_service_status.stdout | default('') }}
+          {{ redis_sentinel_native_start_service_status.stderr | default('') }}
+
+          journalctl:
+          {{ redis_sentinel_native_start_service_journal.stdout | default('') }}
+          {{ redis_sentinel_native_start_service_journal.stderr | default('') }}
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr != 'systemd' or ansible_os_family == 'Debian'
