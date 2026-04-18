@@ -53,6 +53,7 @@ librenms_gluster_brick_fstype: xfs
 librenms_gluster_replica_count: "{{ (librenms_active_gluster_nodes | default(groups.get('gluster_nodes', [])) | length) | int }}"
 librenms_glusterd_vol_path: /etc/glusterfs/glusterd.vol
 librenms_gluster_transport_address_family: inet
+librenms_manage_gluster_hosts_entries: true
 
 librenms_vip_enabled: false
 librenms_vip_ip: ""

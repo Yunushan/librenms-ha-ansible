@@ -115,13 +115,26 @@
     mode: "0755"
   when: librenms_rrd_mode == 'glusterfs'
 
+- name: Ensure Gluster peer name resolution entries exist
+  blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} LIBRENMS GLUSTER NODES"
+    block: |-
+      {% for host in librenms_active_gluster_nodes %}
+      {{ hostvars[host].ansible_host | default(host) }} {{ host }}
+      {% endfor %}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_manage_gluster_hosts_entries | bool
+    - inventory_hostname in ((groups.get('gluster_nodes', []) + groups.get('librenms_nodes', [])) | unique)
+
 - name: Probe Gluster peers from bootstrap host
   command:
     argv:
       - gluster
       - peer
       - probe
-      - "{{ hostvars[item].ansible_host | default(item) }}"
+      - "{{ item }}"
   register: gluster_peer_probe
   failed_when: false
   changed_when: "'peer probe: success' in (gluster_peer_probe.stdout | lower)"
@@ -199,7 +212,7 @@
     gluster volume create {{ librenms_gluster_volume_name }}
     replica {{ librenms_gluster_replica_count }}
     {% for host in librenms_active_gluster_nodes %}
-    {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_gluster_brick_path }}
+    {{ host }}:{{ librenms_gluster_brick_path }}
     {% endfor %}
     force
   when:
