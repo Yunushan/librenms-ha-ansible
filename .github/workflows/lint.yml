@@ -1,6 +1,7 @@
+---
 name: lint
 
-on:
+"on":
   push:
   pull_request:
 

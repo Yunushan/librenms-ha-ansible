@@ -1,3 +1,4 @@
+---
 librenms_mode: ha
 librenms_install_profile: full
 

@@ -3,7 +3,8 @@
 # 1. move the host out of active groups
 # 2. place it in decommission_nodes
 # 3. run this playbook
-- import_playbook: site.yml
+- name: Apply site playbook before decommissioning nodes
+  ansible.builtin.import_playbook: site.yml
 
 - name: Decommission LibreNMS nodes
   hosts: decommission_nodes

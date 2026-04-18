@@ -1,3 +1,4 @@
+---
 librenms_app_key: "base64:CHANGE_ME"
 librenms_db_password: "CHANGE_ME_DB_PASSWORD"
 librenms_redis_password: "CHANGE_ME_REDIS_PASSWORD"

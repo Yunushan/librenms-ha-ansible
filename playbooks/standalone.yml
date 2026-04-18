@@ -1,2 +1,3 @@
 ---
-- import_playbook: site.yml
+- name: Apply site playbook for standalone deployment
+  ansible.builtin.import_playbook: site.yml

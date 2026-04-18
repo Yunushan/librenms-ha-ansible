@@ -1,3 +1,4 @@
+---
 profile: basic
 exclude_paths:
   - .github/
