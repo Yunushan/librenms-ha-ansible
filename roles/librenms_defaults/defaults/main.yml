@@ -54,6 +54,13 @@ librenms_gluster_replica_count: "{{ (librenms_active_gluster_nodes | default(gro
 librenms_glusterd_vol_path: /etc/glusterfs/glusterd.vol
 librenms_gluster_transport_address_family: inet
 librenms_manage_gluster_hosts_entries: true
+librenms_gluster_manage_firewall: true
+librenms_gluster_firewall_ports:
+  - 24007
+  - 24008
+  - 24009
+librenms_gluster_firewall_port_ranges:
+  - 49152:49251
 
 librenms_vip_enabled: false
 librenms_vip_ip: ""

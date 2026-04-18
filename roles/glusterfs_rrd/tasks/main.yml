@@ -5,6 +5,10 @@
     state: present
   when: librenms_rrd_mode == 'glusterfs'
 
+- name: Gather service facts for Gluster firewall detection
+  service_facts:
+  when: librenms_rrd_mode == 'glusterfs'
+
 - name: Configure Gluster daemon transport address family
   lineinfile:
     path: "{{ librenms_glusterd_vol_path }}"
@@ -87,6 +91,52 @@
 
           listening sockets:
           {{ glusterd_sockets.stdout | default('') }}
+
+- name: Allow Gluster TCP ports with UFW when active
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: >-
+    {{
+      librenms_gluster_firewall_ports
+      + librenms_gluster_firewall_port_ranges
+    }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_manage_firewall | bool
+    - ansible_os_family == 'Debian'
+    - "'ufw.service' in ansible_facts.services"
+    - ansible_facts.services['ufw.service'].state == 'running'
+
+- name: Allow Gluster TCP ports with firewalld when active
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - 24007/tcp
+    - 24008/tcp
+    - 24009/tcp
+    - 49152-49251/tcp
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_manage_firewall | bool
+    - ansible_os_family == 'RedHat'
+    - "'firewalld.service' in ansible_facts.services"
+    - ansible_facts.services['firewalld.service'].state == 'running'
+
+- name: Wait for Gluster management port on peer nodes from bootstrap host
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: 24007
+    state: started
+    timeout: 30
+  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
 
 - name: Prepare Gluster brick filesystem when explicitly allowed
   filesystem:
