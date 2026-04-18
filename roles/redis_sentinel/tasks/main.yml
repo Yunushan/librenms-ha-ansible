@@ -95,7 +95,7 @@
   template:
     src: sentinel.conf.j2
     dest: "{{ librenms_redis_sentinel_conf_path }}"
-    owner: root
+    owner: "{{ 'redis' if ansible_os_family == 'Debian' else 'root' }}"
     group: "{{ 'redis' if ansible_os_family == 'Debian' else 'root' }}"
     mode: "0640"
   notify: Restart Redis Sentinel
