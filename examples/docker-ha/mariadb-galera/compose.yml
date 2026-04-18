@@ -1,3 +1,4 @@
+---
 services:
   mariadb-galera:
     image: ${MARIADB_GALERA_IMAGE:-wodby/mariadb:galera}

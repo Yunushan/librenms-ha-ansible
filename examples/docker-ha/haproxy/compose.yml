@@ -1,3 +1,4 @@
+---
 services:
   haproxy:
     image: ${HAPROXY_IMAGE:-haproxy:lts}

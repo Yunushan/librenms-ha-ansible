@@ -1,3 +1,4 @@
+---
 services:
   librenms:
     image: ${LIBRENMS_IMAGE:-librenms/librenms:latest}
