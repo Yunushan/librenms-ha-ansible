@@ -98,7 +98,7 @@
 
 - name: Ensure state directory exists
   file:
-    path: /var/lib/librenms-ansible
+    path: "{{ librenms_galera_bootstrap_marker | dirname }}"
     state: directory
     owner: root
     group: root

@@ -1,4 +1,4 @@
-# LibreNMS Ansible Deployment
+# LibreNMS HA Ansible Deployment
 
 Production-minded Ansible automation for **LibreNMS standalone, distributed polling, and full HA** deployments across multiple Linux families.
 
@@ -7,6 +7,17 @@ Production-minded Ansible automation for **LibreNMS standalone, distributed poll
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
 ![GitHub Ready](https://img.shields.io/badge/repo-github--ready-black.svg)
+
+## README Languages
+
+The English README is the canonical version. The links below point to full translated README copies for widely used world languages. If any translation lags behind, follow the English README.
+
+| Language | Language | Language | Language | Language |
+|---|---|---|---|---|
+| [English](README.md) | [中文(简体)](docs/i18n/README.zh-CN.md) | [हिन्दी](docs/i18n/README.hi.md) | [Español](docs/i18n/README.es.md) | [Français](docs/i18n/README.fr.md) |
+| [العربية](docs/i18n/README.ar.md) | [বাংলা](docs/i18n/README.bn.md) | [Português](docs/i18n/README.pt.md) | [Русский](docs/i18n/README.ru.md) | [اردو](docs/i18n/README.ur.md) |
+| [Bahasa Indonesia](docs/i18n/README.id.md) | [Deutsch](docs/i18n/README.de.md) | [日本語](docs/i18n/README.ja.md) | [Naija Pidgin](docs/i18n/README.pcm.md) | [मराठी](docs/i18n/README.mr.md) |
+| [తెలుగు](docs/i18n/README.te.md) | [Türkçe](docs/i18n/README.tr.md) | [தமிழ்](docs/i18n/README.ta.md) | [粵語](docs/i18n/README.yue.md) | [Tiếng Việt](docs/i18n/README.vi.md) |
 
 Quick Start • Topology Modes • Support Matrix • Inventory Model • Variables • Add / Remove Nodes • Security • Contributing
 
@@ -158,8 +169,8 @@ See also:
 ### 1) Clone and install collections
 
 ```bash
-git clone https://github.com/your-org/librenms-ansible.git
-cd librenms-ansible
+git clone https://github.com/Yunushan/librenms-ha-ansible.git
+cd librenms-ha-ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 

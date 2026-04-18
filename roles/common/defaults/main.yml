@@ -31,7 +31,7 @@ librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname])
 
 librenms_galera_cluster_name: librenms_cluster
 librenms_galera_sst_method: rsync
-librenms_galera_bootstrap_marker: /var/lib/librenms-ansible/galera_bootstrapped
+librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapped
 
 librenms_redis_mode: local
 librenms_redis_password: CHANGE_ME_REDIS_PASSWORD
