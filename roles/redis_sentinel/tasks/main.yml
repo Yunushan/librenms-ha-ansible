@@ -32,6 +32,17 @@
     - librenms_redis_mode in ['local', 'sentinel']
     - ansible_os_family == 'Debian'
 
+- name: Ensure Redis data directory contents are owned by redis on Debian-family systems
+  file:
+    path: /var/lib/redis
+    state: directory
+    owner: redis
+    group: redis
+    recurse: true
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_os_family == 'Debian'
+
 - name: Deploy Redis server config
   template:
     src: redis.conf.j2
@@ -58,7 +69,7 @@
     src: sentinel.conf.j2
     dest: "{{ librenms_redis_sentinel_conf_path }}"
     owner: root
-    group: root
+    group: "{{ 'redis' if ansible_os_family == 'Debian' else 'root' }}"
     mode: "0640"
   notify: Restart Redis Sentinel
   when: librenms_redis_mode == 'sentinel'
