@@ -54,6 +54,7 @@
   when: librenms_redis_mode in ['local', 'sentinel']
 
 - name: Enable and start Redis server
+  when: librenms_redis_mode in ['local', 'sentinel']
   block:
     - name: Enable and start Redis server service
       service:
@@ -85,7 +86,6 @@
           journalctl:
           {{ redis_start_service_journal.stdout | default('') }}
           {{ redis_start_service_journal.stderr | default('') }}
-  when: librenms_redis_mode in ['local', 'sentinel']
 
 - name: Apply Redis config changes before configuring Sentinel
   meta: flush_handlers
@@ -122,6 +122,10 @@
     - ansible_os_family != 'Debian'
 
 - name: Enable and start Redis Sentinel via systemd
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+    - ansible_os_family != 'Debian'
   block:
     - name: Enable and start Redis Sentinel systemd service
       service:
@@ -153,12 +157,11 @@
           journalctl:
           {{ redis_sentinel_start_service_journal.stdout | default('') }}
           {{ redis_sentinel_start_service_journal.stderr | default('') }}
-  when:
-    - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
-    - ansible_os_family != 'Debian'
 
 - name: Enable and start Redis Sentinel via native service
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr != 'systemd' or ansible_os_family == 'Debian'
   block:
     - name: Enable and start Redis Sentinel native service
       service:
@@ -190,6 +193,3 @@
           journalctl:
           {{ redis_sentinel_native_start_service_journal.stdout | default('') }}
           {{ redis_sentinel_native_start_service_journal.stderr | default('') }}
-  when:
-    - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr != 'systemd' or ansible_os_family == 'Debian'
