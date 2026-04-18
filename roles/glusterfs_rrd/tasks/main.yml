@@ -73,7 +73,7 @@
             (
               hostvars[item].ansible_host | default(item) | regex_escape()
             ) ~
-            '[\\s\\S]*?State:\\s+Peer in Cluster'
+            '[\\s\\S]*?State:\\s+Peer in Cluster \\(Connected\\)'
           )
       ) is not none
   retries: 20
