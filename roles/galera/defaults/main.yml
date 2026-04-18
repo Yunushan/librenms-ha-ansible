@@ -1,2 +1,2 @@
 ---
-# Role-specific defaults live in common/defaults/main.yml
+# Shared project defaults live in roles/librenms_defaults/defaults/main.yml
