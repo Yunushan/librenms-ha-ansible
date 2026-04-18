@@ -1,10 +1,20 @@
-bind 127.0.0.1{% if librenms_redis_mode == 'sentinel' %} {{ ansible_host | default(inventory_hostname) }}{% endif %}
+{% set redis_node_address = ansible_default_ipv4.address | default(ansible_host | default(inventory_hostname)) %}
+bind 127.0.0.1{% if librenms_redis_mode == 'sentinel' %} {{ redis_node_address }}{% endif %}
 protected-mode yes
 port 6379
+{% if ansible_service_mgr == 'systemd' %}
+daemonize no
+supervised systemd
+{% endif %}
+{% if ansible_os_family == 'Debian' %}
+pidfile /run/redis/redis-server.pid
+logfile ""
+{% endif %}
 dir /var/lib/redis
-appendonly yes
-requirepass {{ librenms_redis_password }}
-masterauth {{ librenms_redis_password }}
+dbfilename dump.rdb
+appendonly no
+requirepass {{ librenms_redis_password | to_json }}
+masterauth {{ librenms_redis_password | to_json }}
 {% if librenms_redis_mode == 'sentinel' and inventory_hostname != librenms_redis_master_host %}
 replicaof {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }} 6379
 {% endif %}
