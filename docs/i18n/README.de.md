@@ -119,7 +119,7 @@ Siehe auch:
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -160,7 +160,7 @@ ansible-galaxy collection install -r requirements.yml
 ### 2) Secrets erzeugen
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 oder fuer standalone:
@@ -172,7 +172,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 ### 3) Ein Inventory waehlen
 
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 ### 4) Inventory und Group Vars bearbeiten
 
@@ -195,7 +195,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 HA / Cluster:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 ### 6) Den ersten LibreNMS-Bootstrap abschliessen
@@ -316,7 +316,7 @@ librenms_snmp_v3_users:
 3. Fuehre erneut aus:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 Das Playbook verwendet `site.yml` wieder, richtet den neuen Host ein, gleicht Load-Balancer-Backends ab und rendert Redis-, Galera- und App-Konfigurationen bei Bedarf neu.
@@ -334,7 +334,7 @@ Das Playbook verwendet `site.yml` wieder, richtet den neuen Host ein, gleicht Lo
 3. Fuehre aus:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 Das gleicht den verbleibenden Cluster mit dem aktualisierten Inventory ab und deaktiviert oder bereinigt optional Dienste auf dem entfernten Knoten.
@@ -406,7 +406,7 @@ Dieses Projekt ist absichtlich ehrlich bei den schwierigen Teilen.
 Fuehre das Validierungs-Playbook aus:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 oder fuer standalone:

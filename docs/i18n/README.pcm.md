@@ -106,7 +106,7 @@ See:
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. Generate secrets:
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 or for standalone:
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. Pick inventory:
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. Fill host IPs, SSH user, `librenms_fqdn`, `librenms_app_key`, DB / Redis / VRRP secrets, VIP details, and Gluster brick settings.
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 or:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. Finish first LibreNMS bootstrap for `/install`, then set:
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 Put the host for `librenms_nodes`, `librenms_web` or `librenms_poller` profile, add am to `new_nodes`, set unique `librenms_node_id`, then run:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 The playbook go reuse `site.yml`, configure the new host, reconcile load balancer backends, and re-render Redis / Galera / app configs where e need am.
@@ -281,7 +281,7 @@ The playbook go reuse `site.yml`, configure the new host, reconcile load balance
 Comot the host from active groups, put am for `decommission_nodes`, then run:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 This one go sync the surviving cluster with the updated inventory and disable or clean up services for the removed node.
@@ -341,7 +341,7 @@ See:
 Run validation playbook:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 or for standalone:

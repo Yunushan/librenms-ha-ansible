@@ -106,7 +106,7 @@ LibreNMS upstream docs は現在 **Ubuntu 24.04**、**Ubuntu 22.04**、**Debian 
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. secrets を生成します。
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 standalone の場合:
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. inventory を選びます。
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. host IP、SSH user、`librenms_fqdn`、`librenms_app_key`、DB / Redis / VRRP secrets、VIP 設定、Gluster brick 設定を入力します。
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 または:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. `/install` で最初の LibreNMS bootstrap を完了し、次を設定します。
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 host を `librenms_nodes`、`librenms_web` あるいは `librenms_poller` プロファイルのグループに追加し、`new_nodes` に入れ、ユニークな `librenms_node_id` を設定してから次を実行します。
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 この playbook は `site.yml` を再利用し、新しい host を設定し、load balancer backends を調整し、必要に応じて Redis / Galera / app configs を再描画します。
@@ -284,7 +284,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
 host を active groups から外し、`decommission_nodes` に移してから次を実行します。
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 これにより、残存 cluster が更新後の inventory と整合し、削除対象 node の services が停止または cleanup されます。
@@ -344,7 +344,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
 validation playbook を実行します。
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 standalone の場合:

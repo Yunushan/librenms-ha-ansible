@@ -124,7 +124,7 @@ Vease tambien:
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -165,7 +165,7 @@ ansible-galaxy collection install -r requirements.yml
 ### 2) Genera secretos
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 o para standalone:
@@ -177,7 +177,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 ### 3) Elige un inventory
 
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 ### 4) Edita el inventory y los group vars
 
@@ -201,7 +201,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 HA / cluster:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 ### 6) Completa el primer bootstrap de LibreNMS
@@ -325,7 +325,7 @@ librenms_snmp_v3_users:
 3. Vuelve a ejecutar:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 El playbook reutiliza `site.yml`, que:
@@ -346,7 +346,7 @@ El playbook reutiliza `site.yml`, que:
 3. Ejecuta:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 Esto hace dos cosas:
@@ -423,7 +423,7 @@ Este proyecto es intencionadamente honesto sobre las partes dificiles.
 Ejecuta el playbook de validacion:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 o para standalone:

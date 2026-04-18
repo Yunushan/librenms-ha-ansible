@@ -106,7 +106,7 @@ LibreNMS upstream docs தற்போது **Ubuntu 24.04**, **Ubuntu 22.04**,
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. Secrets generate செய்யுங்கள்:
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 அல்லது standalone க்காக:
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. Inventory தேர்வு செய்யுங்கள்:
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. Host IPs, SSH user, `librenms_fqdn`, `librenms_app_key`, DB / Redis / VRRP secrets, VIP details, மற்றும் Gluster brick settings நிரப்புங்கள்.
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 அல்லது:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. `/install` இல் முதல் LibreNMS bootstrap ஐ முடித்து, பின்னர் இதை set செய்யுங்கள்:
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 Host ஐ `librenms_nodes`, `librenms_web` அல்லது `librenms_poller` profile இல் சேர்த்து, `new_nodes` இல் வைத்து, unique `librenms_node_id` ஐ set செய்து, பின்னர் இயக்குங்கள்:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 இந்த playbook `site.yml` ஐ reuse செய்து புதிய host ஐ configure செய்கிறது, load balancer backends ஐ reconcile செய்கிறது, மேலும் தேவையானபோது Redis / Galera / app configs ஐ மீண்டும் render செய்கிறது.
@@ -281,7 +281,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
 Host ஐ active groups இலிருந்து அகற்றி `decommission_nodes` இல் வைத்து, பின்னர் இயக்குங்கள்:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 இது surviving cluster ஐ updated inventory உடன் sync செய்து removed node இல் services ஐ disable அல்லது cleanup செய்கிறது.
@@ -341,7 +341,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
 Validation playbook ஐ இயக்குங்கள்:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 அல்லது standalone க்காக:

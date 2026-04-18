@@ -106,7 +106,7 @@ Xem them:
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. Tao secret:
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 hoac voi standalone:
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. Chon inventory:
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. Dien host IP, SSH user, `librenms_fqdn`, `librenms_app_key`, DB / Redis / VRRP secrets, VIP details va cau hinh Gluster brick.
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 hoac:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. Hoan tat bootstrap LibreNMS dau tien tai `/install`, sau do set:
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 Them host vao `librenms_nodes`, vao `librenms_web` hoac profile `librenms_poller`, dua vao `new_nodes`, dat `librenms_node_id` duy nhat, roi chay:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 Playbook se tai su dung `site.yml`, cau hinh host moi, can bang lai load balancer backends va render lai Redis / Galera / app config khi can.
@@ -284,7 +284,7 @@ Playbook se tai su dung `site.yml`, cau hinh host moi, can bang lai load balance
 Dua host ra khoi cac active groups, them vao `decommission_nodes`, roi chay:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 Lenh nay se dong bo cluster con lai voi inventory moi va tat hoac cleanup service tren node bi go bo.
@@ -344,7 +344,7 @@ Xem:
 Chay validation playbook:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 hoac voi standalone:

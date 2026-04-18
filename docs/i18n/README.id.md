@@ -106,7 +106,7 @@ Lihat juga:
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. Generate secret:
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 atau untuk standalone:
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. Pilih inventory:
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. Isi host IP, SSH user, `librenms_fqdn`, `librenms_app_key`, DB / Redis / VRRP secrets, VIP details, dan pengaturan Gluster brick.
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 atau:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. Selesaikan bootstrap pertama LibreNMS di `/install`, lalu set:
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 Tambahkan host ke `librenms_nodes`, ke `librenms_web` atau profil `librenms_poller`, masukkan ke `new_nodes`, beri `librenms_node_id` yang unik, lalu jalankan:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 Playbook menggunakan kembali `site.yml`, mengonfigurasi host baru, menyelaraskan backend load balancer, dan me-render ulang Redis / Galera / app config bila diperlukan.
@@ -284,7 +284,7 @@ Playbook menggunakan kembali `site.yml`, mengonfigurasi host baru, menyelaraskan
 Keluarkan host dari grup aktif, masukkan ke `decommission_nodes`, lalu jalankan:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 Ini akan menyelaraskan cluster yang tersisa dengan inventory terbaru dan menonaktifkan atau membersihkan service di node yang dihapus.
@@ -344,7 +344,7 @@ Lihat:
 Jalankan validation playbook:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 atau untuk standalone:

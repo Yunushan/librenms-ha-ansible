@@ -106,7 +106,7 @@ LibreNMS upstream docs 而家有 **Ubuntu 24.04**、**Ubuntu 22.04**、**Debian 
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. generate secrets：
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 或者 standalone：
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. 揀 inventory：
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. 填 host IP、SSH user、`librenms_fqdn`、`librenms_app_key`、DB / Redis / VRRP secrets、VIP details 同 Gluster brick settings。
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 或者：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. 喺 `/install` 完成第一個 LibreNMS bootstrap，之後 set：
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 將 host 加入 `librenms_nodes`、`librenms_web` 或 `librenms_poller` profile，放入 `new_nodes`，設定 unique `librenms_node_id`，然後執行：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 呢個 playbook 會 reuse `site.yml`，配置新 host、reconcile load balancer backends，同埋喺需要時重新 render Redis / Galera / app configs。
@@ -281,7 +281,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
 將 host 喺 active groups 移走，放入 `decommission_nodes`，然後執行：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 佢會令 surviving cluster 同 updated inventory 同步，並且 disable 或 cleanup removed node 上面嘅 services。
@@ -341,7 +341,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
 執行 validation playbook：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 或者 standalone：

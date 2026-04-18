@@ -119,7 +119,7 @@ Ayrica bak:
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -160,7 +160,7 @@ ansible-galaxy collection install -r requirements.yml
 ### 2) Secret uret
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 veya standalone icin:
@@ -172,7 +172,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 ### 3) Bir inventory sec
 
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 ### 4) Inventory ve group var dosyalarini duzenle
 
@@ -195,7 +195,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 HA / cluster:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 ### 6) Ilk LibreNMS bootstrap'ini tamamla
@@ -316,7 +316,7 @@ librenms_snmp_v3_users:
 3. Tekrar calistir:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 Bu playbook `site.yml` dosyasini yeniden kullanir, yeni host'u konfigure eder, load balancer backend'lerini uzlastirir ve gerektiginde Redis / Galera / app config dosyalarini yeniden uretir.
@@ -334,7 +334,7 @@ Bu playbook `site.yml` dosyasini yeniden kullanir, yeni host'u konfigure eder, l
 3. Calistir:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 Bu, guncellenmis inventory ile hayatta kalan cluster'i uzlastirir ve kaldirilan dugumde servisleri durdurur ya da istege bagli olarak temizler.
@@ -406,7 +406,7 @@ Bu proje zor kisimlarda bilerek acik sozludur.
 Validation playbook'unu calistir:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 veya standalone icin:

@@ -106,7 +106,7 @@ LibreNMS upstream docs ప్రస్తుతం **Ubuntu 24.04**, **Ubuntu 22
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. Secrets generate చేయండి:
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 లేదా standalone కోసం:
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. Inventory ఎంచుకోండి:
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. Host IPs, SSH user, `librenms_fqdn`, `librenms_app_key`, DB / Redis / VRRP secrets, VIP details, మరియు Gluster brick settings నింపండి.
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 లేదా:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. `/install` లో మొదటి LibreNMS bootstrap పూర్తి చేసి, తర్వాత ఇది set చేయండి:
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 Host ను `librenms_nodes`, `librenms_web` లేదా `librenms_poller` profile లో జోడించి, `new_nodes` లో ఉంచి, unique `librenms_node_id` సెట్ చేసి, తర్వాత నడపండి:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 ఈ playbook `site.yml` ను reuse చేసి కొత్త host ను configure చేస్తుంది, load balancer backends ను reconcile చేస్తుంది, మరియు అవసరమైతే Redis / Galera / app configs ను మళ్లీ render చేస్తుంది.
@@ -281,7 +281,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
 Host ను active groups నుండి తీసి `decommission_nodes` లో పెట్టి, తర్వాత నడపండి:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 ఇది surviving cluster ను updated inventory తో sync చేస్తుంది మరియు removed node పై services ను disable లేదా cleanup చేస్తుంది.
@@ -341,7 +341,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
 Validation playbook ను నడపండి:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 లేదా standalone కోసం:

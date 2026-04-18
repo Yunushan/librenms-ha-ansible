@@ -106,7 +106,7 @@ LibreNMS 上游文档目前提供 **Ubuntu 24.04**、**Ubuntu 22.04**、**Debian
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. 生成 secrets：
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 或者 standalone：
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. 选择 inventory：
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. 填写 host IP、SSH user、`librenms_fqdn`、`librenms_app_key`、DB / Redis / VRRP secrets、VIP 参数以及 Gluster brick 配置。
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 或：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. 在 `/install` 完成 LibreNMS 第一次 bootstrap，然后设置：
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 把 host 加入 `librenms_nodes`、`librenms_web` 或 `librenms_poller` 配置对应的组，再加入 `new_nodes`，设置唯一的 `librenms_node_id`，然后执行：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 这个 playbook 会复用 `site.yml`，配置新主机，协调 load balancer backends，并在需要时重新渲染 Redis / Galera / app 配置。
@@ -284,7 +284,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
 把 host 从活跃组移除，加入 `decommission_nodes`，然后执行：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 这会让剩余 cluster 与更新后的 inventory 对齐，并在被移除节点上停用或清理服务。
@@ -344,7 +344,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
 运行 validation playbook：
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 或 standalone：

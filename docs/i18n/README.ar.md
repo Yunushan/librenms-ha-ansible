@@ -106,7 +106,7 @@
 ├── .github/workflows/lint.yml
 ├── docs/
 ├── inventories/
-│   ├── ha-3node/
+│   ├── ha/
 │   └── standalone/
 ├── playbooks/
 │   ├── site.yml
@@ -147,7 +147,7 @@ ansible-galaxy collection install -r requirements.yml
 2. أنشئ secrets:
 
 ```bash
-python3 scripts/generate-secrets.py > inventories/ha-3node/group_vars/vault.yml
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
 ```
 
 أو لـ standalone:
@@ -158,7 +158,7 @@ python3 scripts/generate-secrets.py > inventories/standalone/group_vars/vault.ym
 
 3. اختر inventory:
 - standalone: `inventories/standalone/hosts.yml`
-- full HA: `inventories/ha-3node/hosts.yml`
+- full HA: `inventories/ha/hosts.yml`
 
 4. املأ host IPs و SSH user و `librenms_fqdn` و `librenms_app_key` و DB / Redis / VRRP secrets و VIP details وإعدادات Gluster brick.
 
@@ -171,7 +171,7 @@ ansible-playbook -i inventories/standalone/hosts.yml playbooks/standalone.yml
 أو:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/cluster.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml
 ```
 
 6. أكمل أول bootstrap لـ LibreNMS على `/install` ثم عيّن:
@@ -269,7 +269,7 @@ librenms_snmp_v3_users:
 أضف host إلى `librenms_nodes` وإلى `librenms_web` أو profile `librenms_poller`، ثم إلى `new_nodes`، واضبط `librenms_node_id` فريدًا، وبعد ذلك شغّل:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/add-node.yml
 ```
 
 يعيد هذا playbook استخدام `site.yml` ليضبط host الجديد ويعيد مواءمة load balancer backends ويعيد توليد Redis / Galera / app configs عند الحاجة.
@@ -281,7 +281,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/add-node.yml
 أخرج host من active groups، وضعه في `decommission_nodes`، ثم شغّل:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/remove-node.yml
 ```
 
 هذا يزامن cluster المتبقي مع inventory المحدث ويعطل أو ينظف الخدمات على العقدة التي تمت إزالتها.
@@ -341,7 +341,7 @@ ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/remove-node.yml
 شغّل validation playbook:
 
 ```bash
-ansible-playbook -i inventories/ha-3node/hosts.yml playbooks/validate.yml
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
 ```
 
 أو لـ standalone:
