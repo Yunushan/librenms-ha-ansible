@@ -11,6 +11,10 @@
 > 注意
 > 英文 README 先係 canonical version。呢個檔案係完整翻譯版本，方便快啲上手。如果內容有出入，請以 [README.md](../../README.md) 為準。
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## 點解要有呢個 project / Why This Exists
 
 LibreNMS 喺單一 server 上好容易起得郁，但當你需要以下一樣或幾樣功能之後，operations 就會好快變得複雜：

@@ -11,6 +11,10 @@
 > Примечание
 > Английский README является канонической версией. Этот файл представляет собой полную переведенную копию для удобного старта. Если есть расхождения, ориентируйтесь на [README.md](../../README.md).
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## Зачем Нужен Этот Проект / Why This Exists
 
 LibreNMS легко поднять на одном сервере, но эксплуатация быстро усложняется, когда вам нужно одно или несколько из следующего:

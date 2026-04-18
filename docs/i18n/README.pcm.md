@@ -11,6 +11,10 @@ Na production-minded Ansible automation wey fit deploy LibreNMS for **standalone
 > Note
 > English README na the canonical version. This file na full translated copy to make onboarding easier. If anything no match, follow [README.md](../../README.md).
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## Why This Project Dey / Why This Exists
 
 LibreNMS easy to run for one server, but operations go quickly rough once you need one or more of these things:

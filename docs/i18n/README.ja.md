@@ -11,6 +11,10 @@
 > 注記
 > 英語版 README が正本です。このファイルは導入しやすくするための完全翻訳版です。差分がある場合は [README.md](../../README.md) を優先してください。
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## このプロジェクトが必要な理由 / Why This Exists
 
 LibreNMS は 1 台のサーバーなら簡単に動かせますが、次のような要件が出てくると運用は一気に複雑になります。

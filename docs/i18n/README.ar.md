@@ -11,6 +11,10 @@
 > ملاحظة
 > ملف README الإنجليزي هو النسخة المرجعية. هذا الملف نسخة مترجمة كاملة لتسهيل البدء. إذا وُجد اختلاف فاعتمد [README.md](../../README.md).
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## لماذا يوجد هذا المشروع / Why This Exists
 
 من السهل تشغيل LibreNMS على خادم واحد، لكن التشغيل يصبح معقدًا بسرعة عندما تحتاج إلى واحد أو أكثر مما يلي:

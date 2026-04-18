@@ -11,6 +11,10 @@ Uretim odakli Ansible otomasyonu ile **standalone, distributed polling ve full H
 > Not
 > Ingilizce README kanonik surumdur. Bu dosya daha kolay onboard olmak icin tam ceviri olarak tutulur. Herhangi bir fark gorursen [README.md](../../README.md) dosyasini esas al.
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## Neden Var / Why This Exists
 
 LibreNMS tek bir sunucuda kolayca ayaga kalkar, ancak asagidaki ihtiyaclardan biri ya da birkaci ortaya ciktiginda operasyonel olarak hizla karmasiklasir:

@@ -19,7 +19,7 @@ The English README is the canonical version. The links below point to full trans
 | [Bahasa Indonesia](docs/i18n/README.id.md) | [Deutsch](docs/i18n/README.de.md) | [日本語](docs/i18n/README.ja.md) | [Naija Pidgin](docs/i18n/README.pcm.md) | [मराठी](docs/i18n/README.mr.md) |
 | [తెలుగు](docs/i18n/README.te.md) | [Türkçe](docs/i18n/README.tr.md) | [தமிழ்](docs/i18n/README.ta.md) | [粵語](docs/i18n/README.yue.md) | [Tiếng Việt](docs/i18n/README.vi.md) |
 
-Quick Start • Topology Modes • Support Matrix • Inventory Model • Variables • Add / Remove Nodes • Security • Contributing
+Quick Start • Topology Modes • Support Matrix • Network and Access Matrix • Inventory Model • Variables • Add / Remove Nodes • Security • Contributing
 
 ---
 
@@ -237,6 +237,59 @@ librenms_bootstrap_completed: true
 ```
 
 and rerun the same playbook. That enables the post-bootstrap `lnms config:set` tasks cleanly.
+
+---
+
+## Network and Access Matrix
+
+### Controller access and privilege model
+
+- This repo uses Ansible push over SSH. Open `tcp/22` from the controller to every managed host in `librenms_nodes`, `librenms_db`, `librenms_redis`, `lb_nodes`, and `gluster_nodes`.
+- Managed nodes do not need any dedicated inbound port opened to the Ansible controller. Stateful return traffic for the existing SSH session is enough.
+- The SSH automation user needs a real shell plus root-equivalent privilege via `sudo`, because the playbooks install packages, write under `/etc`, manage services, mount GlusterFS, create system users, and manage ACLs.
+- Passwordless `sudo` is recommended for unattended runs. If you intentionally keep a sudo password, use `--ask-become-pass` or store `ansible_become_password` securely with Ansible Vault.
+- A typical sudoers entry for an automation account is:
+
+```text
+ansible ALL=(ALL) NOPASSWD: ALL
+```
+
+### Required ports and protocols
+
+If a host has multiple roles, it needs the union of the rows that apply to those roles.
+
+| Source | Destination | Protocol / Port | Required When | Purpose |
+|---|---|---|---|---|
+| Ansible controller | All managed hosts | TCP 22 | Always | SSH transport, fact gathering, module execution |
+| Managed hosts | Ansible controller | No dedicated listener; reply traffic only | Always | Ansible is push-based |
+| Ansible controller | Ansible Galaxy, GitHub, internal mirrors | TCP 443 | During bootstrap and updates | Collection installs and repo sync on the controller |
+| Managed hosts | OS mirrors, GitHub, Packagist, internal mirrors | TCP 80 / 443 | During bootstrap and updates | Package installs, LibreNMS git checkout, Composer dependencies |
+| Managed hosts | DNS / NTP infrastructure | UDP/TCP 53, UDP 123 | Strongly recommended | Name resolution and clock sync for repos, clustering, and TLS |
+| Users / browsers | VIP or web nodes | TCP 80 | Default deployment | LibreNMS Web UI through HAProxy or directly to nginx |
+| Users / browsers | Reverse proxy / VIP | TCP 443 | Only if you add TLS outside the default config | HTTPS is recommended, but this repo does not configure TLS listeners by default |
+| LB nodes | Web or full LibreNMS nodes | TCP 80 | When HAProxy fronts the Web UI | Proxy traffic and HTTP health checks |
+| LibreNMS app nodes | DB VIP, LB nodes, or DB nodes | TCP 3306 | Any non-local DB mode | LibreNMS application database access |
+| DB nodes | DB nodes | TCP 3306 | `librenms_db_mode: galera` | MariaDB client traffic and health checks inside the cluster |
+| DB nodes | DB nodes | TCP 4444 | `librenms_db_mode: galera` with default `librenms_galera_sst_method: rsync` | Galera state snapshot transfer (SST) |
+| DB nodes | DB nodes | TCP 4567 and UDP 4567 | `librenms_db_mode: galera` | Galera replication traffic |
+| DB nodes | DB nodes | TCP 4568 | `librenms_db_mode: galera` | Galera incremental state transfer (IST) |
+| LibreNMS app nodes | Redis Sentinel nodes | TCP 26379 | `librenms_redis_mode: sentinel` | LibreNMS discovers the active Redis master through Sentinel |
+| Redis nodes | Redis nodes | TCP 6379 | `librenms_redis_mode: sentinel` | Redis replication and authenticated server traffic |
+| Redis nodes | Redis nodes | TCP 26379 | `librenms_redis_mode: sentinel` | Sentinel quorum, monitoring, and failover coordination |
+| LB nodes | LB nodes | IP protocol 112 (VRRP) | `librenms_vip_enabled: true` | Keepalived VIP advertisements; this is not TCP or UDP |
+| Gluster clients and Gluster nodes | Gluster nodes | TCP 24007, 24008, 49152-49251 | `librenms_rrd_mode: glusterfs` | glusterd management, volume operations, and brick traffic |
+| LibreNMS poller / app nodes | Monitored devices, and optionally the LibreNMS nodes themselves | UDP 161 | When polling via SNMP | SNMP polling traffic |
+| Monitored devices | LibreNMS nodes | UDP 162 | Only if you separately deploy trap reception | SNMP trap reception is not configured by this repo by default |
+| Operators | LB nodes | TCP 8404 | Only if `librenms_haproxy_stats_enabled: true` and you widen the bind beyond `127.0.0.1` | Optional HAProxy stats page |
+
+### Firewall notes
+
+- `librenms_db_bind_address` defaults to `0.0.0.0`, so restrict `3306/tcp` with host or network firewalls if you do not want broad exposure.
+- Keep Galera, Redis, GlusterFS, and VRRP limited to the cluster management subnet. None of those services should be exposed to general client networks.
+- Keepalived VRRP usually requires the `lb_nodes` to be on the same L2 segment or VLAN, with firewalls allowing protocol `112` and multicast to `224.0.0.18`.
+- This repo listens on `80/tcp` for the Web UI by default. If you need native `443/tcp`, add TLS termination in front of the VIP or extend the nginx / HAProxy templates.
+- When `librenms_manage_local_snmpd: true`, the nodes listen on `udp/161`. If you do not monitor the LibreNMS nodes themselves, you can keep that port restricted to your poller subnet.
+- GlusterFS uses management ports plus dynamic brick ports. The documented `49152-49251/tcp` range is the practical default to allow between Gluster peers and Gluster clients.
 
 ---
 

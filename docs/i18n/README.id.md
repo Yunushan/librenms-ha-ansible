@@ -11,6 +11,10 @@ Otomasi Ansible yang dirancang untuk production untuk deployment LibreNMS **stan
 > Catatan
 > README bahasa Inggris adalah versi kanonik. Berkas ini adalah salinan terjemahan penuh untuk memudahkan onboarding. Jika ada perbedaan, ikuti [README.md](../../README.md).
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## Mengapa Proyek Ini Ada / Why This Exists
 
 LibreNMS mudah dijalankan di satu server, tetapi operasionalnya cepat menjadi rumit ketika Anda memerlukan satu atau lebih hal berikut:

@@ -11,6 +11,10 @@ Automacao Ansible pensada para producao para implantar **standalone, distributed
 > Nota
 > O README em ingles e a versao canonica. Este arquivo e uma traducao completa para facilitar o onboarding. Se houver qualquer diferenca, siga [README.md](../../README.md).
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## Por Que Este Projeto Existe / Why This Exists
 
 O LibreNMS e facil de colocar em funcionamento em um unico servidor, mas a operacao fica rapidamente baguncada assim que voce precisa de um ou mais dos itens abaixo:

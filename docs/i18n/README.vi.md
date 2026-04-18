@@ -11,6 +11,10 @@ Tu dong hoa Ansible huong toi production de trien khai LibreNMS o cac che do **s
 > Luu y
 > README tieng Anh la ban chuan. Tep nay la ban dich day du de giup onboard nhanh hon. Neu co khac biet, hay uu tien [README.md](../../README.md).
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## Vi Sao Co Du An Nay / Why This Exists
 
 LibreNMS de chay tren mot may chu, nhung van hanh se nhanh chong phuc tap khi ban can mot hoac nhieu thu sau:

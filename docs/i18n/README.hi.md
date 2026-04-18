@@ -11,6 +11,10 @@
 > नोट
 > English README canonical version है। यह फ़ाइल आसान onboarding के लिए full translated copy है। अगर कहीं अंतर हो, तो [README.md](../../README.md) को follow करें।
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## यह प्रोजेक्ट क्यों है / Why This Exists
 
 LibreNMS को एक server पर चलाना आसान है, लेकिन जैसे ही आपको नीचे दी गई चीज़ों में से एक या अधिक चाहिए हों, operations जल्दी जटिल हो जाते हैं:

@@ -11,6 +11,10 @@
 > గమనిక
 > English README canonical version. ఈ ఫైల్ సులభమైన onboarding కోసం పూర్తి translated copy. ఏమైనా తేడా ఉంటే [README.md](../../README.md) ను అనుసరించండి.
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## ఈ ప్రాజెక్ట్ ఎందుకు ఉంది / Why This Exists
 
 ఒక server పై LibreNMS నడపడం సులభం, కానీ క్రింది వాటిలో ఒకటి లేదా ఎక్కువ అవసరమైతే operations త్వరగా క్లిష్టం అవుతాయి:

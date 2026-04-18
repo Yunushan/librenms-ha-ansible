@@ -11,6 +11,10 @@
 > 说明
 > 英文 README 是规范版本。这个文件是完整翻译副本，方便更快上手。如果内容有差异，请以 [README.md](../../README.md) 为准。
 
+## Network and Access Matrix
+
+For the exact controller-to-node ports, cluster east-west traffic, and sudo requirements, see the canonical English section [Network and Access Matrix](../../README.md#network-and-access-matrix).
+
 ## 为什么要做这个项目 / Why This Exists
 
 LibreNMS 在单台服务器上很容易跑起来，但一旦你需要下面这些能力中的一项或多项，运维复杂度就会明显上升：
