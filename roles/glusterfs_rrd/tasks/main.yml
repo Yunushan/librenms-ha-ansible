@@ -12,6 +12,63 @@
     enabled: true
   when: librenms_rrd_mode == 'glusterfs'
 
+- name: Verify Gluster management port is listening locally
+  block:
+    - name: Wait for Gluster management port locally
+      wait_for:
+        host: 127.0.0.1
+        port: 24007
+        state: started
+        timeout: 60
+  rescue:
+    - name: Capture Gluster service status
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_glusterd_service_name }}"
+          - --no-pager
+      register: glusterd_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Gluster service journal
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_glusterd_service_name }}"
+          - -n
+          - "50"
+          - --no-pager
+      register: glusterd_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture listening TCP sockets for diagnostics
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: glusterd_sockets
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Gluster startup diagnostics
+      fail:
+        msg: |-
+          Gluster service {{ librenms_glusterd_service_name }} did not open tcp/24007 on {{ inventory_hostname }}.
+
+          systemctl status:
+          {{ glusterd_status.stdout | default('') }}
+
+          journalctl:
+          {{ glusterd_journal.stdout | default('') }}
+
+          listening sockets:
+          {{ glusterd_sockets.stdout | default('') }}
+  when: librenms_rrd_mode == 'glusterfs'
+
 - name: Prepare Gluster brick filesystem when explicitly allowed
   filesystem:
     fstype: "{{ librenms_gluster_brick_fstype }}"
@@ -38,17 +95,6 @@
     group: root
     mode: "0755"
   when: librenms_rrd_mode == 'glusterfs'
-
-- name: Wait for Gluster management port on peer nodes
-  wait_for:
-    port: 24007
-    state: started
-    timeout: 60
-  delegate_to: "{{ item }}"
-  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
-  when:
-    - librenms_rrd_mode == 'glusterfs'
-    - inventory_hostname == librenms_gluster_bootstrap_host
 
 - name: Probe Gluster peers from bootstrap host
   command:
