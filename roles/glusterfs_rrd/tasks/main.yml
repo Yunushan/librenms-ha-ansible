@@ -5,10 +5,29 @@
     state: present
   when: librenms_rrd_mode == 'glusterfs'
 
+- name: Configure Gluster daemon transport address family
+  lineinfile:
+    path: "{{ librenms_glusterd_vol_path }}"
+    regexp: '^\s*option\s+transport\.address-family\s+'
+    line: "    option transport.address-family {{ librenms_gluster_transport_address_family }}"
+    insertbefore: '^\s*end-volume\s*$'
+  register: glusterd_transport_address_family
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_transport_address_family | length > 0
+
 - name: Ensure Gluster daemon is enabled and started
   service:
     name: "{{ librenms_glusterd_service_name }}"
-    state: started
+    state: >-
+      {{
+        'restarted'
+        if (
+          glusterd_transport_address_family is defined and
+          glusterd_transport_address_family.changed
+        )
+        else 'started'
+      }}
     enabled: true
   when: librenms_rrd_mode == 'glusterfs'
 
