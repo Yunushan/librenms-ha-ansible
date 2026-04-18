@@ -39,6 +39,7 @@
         if ansible_service_mgr == 'systemd' and ansible_os_family != 'Debian'
         else librenms_redis_sentinel_native_service_name
       }}
+  when: librenms_redis_mode == 'sentinel'
   block:
     - name: Restart Redis Sentinel service
       service:
@@ -69,4 +70,3 @@
           journalctl:
           {{ redis_sentinel_service_journal.stdout | default('') }}
           {{ redis_sentinel_service_journal.stderr | default('') }}
-  when: librenms_redis_mode == 'sentinel'
