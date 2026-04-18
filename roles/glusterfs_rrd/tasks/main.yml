@@ -39,12 +39,12 @@
     mode: "0755"
   when: librenms_rrd_mode == 'glusterfs'
 
-- name: Wait for Gluster management port on peer nodes from bootstrap host
+- name: Wait for Gluster management port on peer nodes
   wait_for:
-    host: "{{ hostvars[item].ansible_host | default(item) }}"
     port: 24007
     state: started
     timeout: 60
+  delegate_to: "{{ item }}"
   loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
   when:
     - librenms_rrd_mode == 'glusterfs'
