@@ -75,6 +75,14 @@
   when: librenms_redis_mode in ['local', 'sentinel']
 
 - name: Manage Redis Sentinel config on Debian-family systems
+  vars:
+    redis_name: "{{ librenms_redis_sentinel_service }}"
+    redis_quorum: "{{ librenms_redis_quorum }}"
+    redis_master_host: >-
+      {{
+        hostvars[librenms_redis_master_host].ansible_host
+        | default(librenms_redis_master_host)
+      }}
   blockinfile:
     path: "{{ librenms_redis_sentinel_conf_path }}"
     marker: "# {mark} ANSIBLE MANAGED BLOCK librenms-ha-ansible"
@@ -86,7 +94,7 @@
       bind 127.0.0.1 {{ ansible_host | default(inventory_hostname) }}
       protected-mode yes
       dir /var/lib/redis
-      sentinel monitor {{ librenms_redis_sentinel_service }} {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }} 6379 {{ librenms_redis_quorum }}
+      sentinel monitor {{ redis_name }} {{ redis_master_host }} 6379 {{ redis_quorum }}
       sentinel auth-pass {{ librenms_redis_sentinel_service }} {{ librenms_redis_password | to_json }}
       sentinel down-after-milliseconds {{ librenms_redis_sentinel_service }} 10000
       sentinel failover-timeout {{ librenms_redis_sentinel_service }} 60000
