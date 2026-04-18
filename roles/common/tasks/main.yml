@@ -18,11 +18,21 @@
 
 - name: Set support tier fact
   set_fact:
-    librenms_support_tier: "{{ librenms_support_tier_map.get(ansible_distribution, librenms_support_tier_map.get(ansible_os_family, 'best-effort')) }}"
+    librenms_support_tier: >-
+      {{
+        librenms_support_tier_map.get(
+          ansible_distribution,
+          librenms_support_tier_map.get(ansible_os_family, 'best-effort')
+        )
+      }}
 
 - name: Build active inventory host lists
   set_fact:
-    librenms_active_web_nodes: "{{ groups.get('librenms_web', groups.get('librenms_nodes', [])) | difference(groups.get('decommission_nodes', [])) }}"
+    librenms_active_web_nodes: >-
+      {{
+        groups.get('librenms_web', groups.get('librenms_nodes', []))
+        | difference(groups.get('decommission_nodes', []))
+      }}
     librenms_active_db_nodes: "{{ groups.get('librenms_db', []) | difference(groups.get('decommission_nodes', [])) }}"
     librenms_active_redis_nodes: "{{ groups.get('librenms_redis', []) | difference(groups.get('decommission_nodes', [])) }}"
     librenms_active_lb_nodes: "{{ groups.get('lb_nodes', []) | difference(groups.get('decommission_nodes', [])) }}"

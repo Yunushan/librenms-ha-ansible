@@ -108,7 +108,11 @@
 - name: Mount GlusterFS volume on LibreNMS nodes
   ansible.posix.mount:
     path: "{{ librenms_gluster_mountpoint }}"
-    src: "{{ hostvars[librenms_gluster_bootstrap_host].ansible_host | default(librenms_gluster_bootstrap_host) }}:/{{ librenms_gluster_volume_name }}"
+    src: >-
+      {{
+        hostvars[librenms_gluster_bootstrap_host].ansible_host
+        | default(librenms_gluster_bootstrap_host)
+      }}:/{{ librenms_gluster_volume_name }}
     fstype: glusterfs
     opts: defaults,_netdev
     state: mounted

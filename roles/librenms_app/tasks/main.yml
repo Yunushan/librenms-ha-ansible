@@ -6,7 +6,17 @@
         librenms_app_url
         if librenms_app_url | length > 0
         else
-        ('http://' ~ (librenms_fqdn if librenms_fqdn | length > 0 else (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else inventory_hostname)))
+        (
+          'http://' ~ (
+            librenms_fqdn
+            if librenms_fqdn | length > 0
+            else (
+              librenms_vip_ip
+              if librenms_vip_enabled and librenms_vip_ip | length > 0
+              else inventory_hostname
+            )
+          )
+        )
       }}
 
 - name: Determine effective DB host
