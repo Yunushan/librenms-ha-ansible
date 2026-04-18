@@ -9,6 +9,21 @@
   service_facts:
   when: librenms_rrd_mode == 'glusterfs'
 
+- name: Ensure Gluster peer name resolution entries exist
+  blockinfile:
+    path: /etc/hosts
+    insertbefore: BOF
+    marker: "# {mark} LIBRENMS GLUSTER NODES"
+    block: |-
+      {% for host in librenms_active_gluster_nodes %}
+      {{ hostvars[host].ansible_host | default(host) }} {{ host }}
+      {% endfor %}
+  register: gluster_hosts_entries
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_manage_gluster_hosts_entries | bool
+    - inventory_hostname in ((groups.get('gluster_nodes', []) + groups.get('librenms_nodes', [])) | unique)
+
 - name: Configure Gluster daemon transport address family
   lineinfile:
     path: "{{ librenms_glusterd_vol_path }}"
@@ -20,6 +35,21 @@
     - librenms_rrd_mode == 'glusterfs'
     - librenms_gluster_transport_address_family | length > 0
 
+- name: Configure Gluster daemon bind address
+  lineinfile:
+    path: "{{ librenms_glusterd_vol_path }}"
+    regexp: '^\s*option\s+transport\.socket\.bind-address\s+'
+    line: >-
+      option transport.socket.bind-address
+      {{
+        librenms_gluster_bind_address
+        if librenms_gluster_bind_address | length > 0
+        else (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)))
+      }}
+    insertbefore: '^\s*end-volume\s*$'
+  register: glusterd_socket_bind_address
+  when: librenms_rrd_mode == 'glusterfs'
+
 - name: Ensure Gluster daemon is enabled and started
   service:
     name: "{{ librenms_glusterd_service_name }}"
@@ -27,8 +57,10 @@
       {{
         'restarted'
         if (
+          (gluster_hosts_entries is defined and gluster_hosts_entries.changed) or
           glusterd_transport_address_family is defined and
-          glusterd_transport_address_family.changed
+          glusterd_transport_address_family.changed or
+          (glusterd_socket_bind_address is defined and glusterd_socket_bind_address.changed)
         )
         else 'started'
       }}
@@ -164,19 +196,6 @@
     group: root
     mode: "0755"
   when: librenms_rrd_mode == 'glusterfs'
-
-- name: Ensure Gluster peer name resolution entries exist
-  blockinfile:
-    path: /etc/hosts
-    marker: "# {mark} LIBRENMS GLUSTER NODES"
-    block: |-
-      {% for host in librenms_active_gluster_nodes %}
-      {{ hostvars[host].ansible_host | default(host) }} {{ host }}
-      {% endfor %}
-  when:
-    - librenms_rrd_mode == 'glusterfs'
-    - librenms_manage_gluster_hosts_entries | bool
-    - inventory_hostname in ((groups.get('gluster_nodes', []) + groups.get('librenms_nodes', [])) | unique)
 
 - name: Probe Gluster peers from bootstrap host
   command:
