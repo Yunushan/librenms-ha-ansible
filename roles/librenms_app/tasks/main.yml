@@ -134,10 +134,10 @@
         'redis://'
         ~ (hostvars[host].ansible_host | default(host))
         ~ ':26379?password='
-        ~ librenms_redis_password
+        ~ librenms_redis_sentinel_password
         ~ (
-          '&username=' ~ librenms_redis_username
-          if librenms_redis_username | length > 0
+          '&username=' ~ librenms_redis_sentinel_username
+          if librenms_redis_sentinel_username | length > 0
           else ''
         )
       ] -%}
@@ -531,6 +531,7 @@
     owner: "{{ librenms_user }}"
     group: "{{ librenms_group }}"
     mode: "0640"
+  notify: Restart PHP-FPM
 
 - name: Run LibreNMS database migrations on primary node
   command:
