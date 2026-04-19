@@ -168,6 +168,20 @@
     - librenms_origin_remote.rc == 0
     - librenms_origin_remote.stdout != librenms_repo_url
 
+- name: Remove runtime placeholder files that can block first LibreNMS checkout
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ librenms_install_dir }}/rrd/.gitignore"
+    - "{{ librenms_install_dir }}/logs/.gitignore"
+    - "{{ librenms_install_dir }}/bootstrap/.gitignore"
+    - "{{ librenms_install_dir }}/bootstrap/cache/.gitignore"
+    - "{{ librenms_install_dir }}/storage/.gitignore"
+  when:
+    - librenms_install_dir_stat.stat.exists
+    - not librenms_install_git_dir_stat.stat.exists
+
 - name: Checkout LibreNMS repository
   git:
     repo: "{{ librenms_repo_url }}"
@@ -237,6 +251,8 @@
     - "{{ librenms_install_dir }}/logs"
     - "{{ librenms_install_dir }}/bootstrap/cache"
     - "{{ librenms_install_dir }}/storage"
+  when:
+    - not (librenms_rrd_mode == 'glusterfs' and item == (librenms_install_dir ~ '/rrd'))
 
 - name: Install LibreNMS PHP dependencies
   command:
