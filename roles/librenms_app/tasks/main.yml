@@ -100,6 +100,14 @@
     group: root
     mode: "0755"
 
+- name: Ensure LibreNMS install directory exists and is writable by LibreNMS user
+  file:
+    path: "{{ librenms_install_dir }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0755"
+
 - name: Check whether LibreNMS install directory already exists
   stat:
     path: "{{ librenms_install_dir }}"
@@ -117,6 +125,8 @@
       - -C
       - "{{ librenms_install_dir }}"
       - init
+  become: true
+  become_user: "{{ librenms_user }}"
   when:
     - librenms_install_dir_stat.stat.exists
     - not librenms_install_git_dir_stat.stat.exists
@@ -131,6 +141,8 @@
       - get-url
       - origin
   register: librenms_origin_remote
+  become: true
+  become_user: "{{ librenms_user }}"
   changed_when: false
   failed_when: false
   when:
@@ -147,6 +159,8 @@
       - add
       - origin
       - "{{ librenms_repo_url }}"
+  become: true
+  become_user: "{{ librenms_user }}"
   when:
     - librenms_install_dir_stat.stat.exists
     - not librenms_install_git_dir_stat.stat.exists
@@ -162,6 +176,8 @@
       - set-url
       - origin
       - "{{ librenms_repo_url }}"
+  become: true
+  become_user: "{{ librenms_user }}"
   when:
     - librenms_install_dir_stat.stat.exists
     - not librenms_install_git_dir_stat.stat.exists
@@ -180,7 +196,6 @@
     - "{{ librenms_install_dir }}/storage/.gitignore"
   when:
     - librenms_install_dir_stat.stat.exists
-    - not librenms_install_git_dir_stat.stat.exists
 
 - name: Checkout LibreNMS repository
   git:
@@ -189,6 +204,8 @@
     version: "{{ librenms_version }}"
     update: true
     force: true
+  become: true
+  become_user: "{{ librenms_user }}"
   register: librenms_git_checkout
 
 - name: Detect PHP version on Debian-family systems
