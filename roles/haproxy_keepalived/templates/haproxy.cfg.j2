@@ -2,7 +2,7 @@
 {% set librenms_haproxy_web_backend_nodes =
   (
     librenms_prebootstrap_web_nodes
-    if not (librenms_bootstrap_completed | bool) and (librenms_prebootstrap_web_nodes | length > 0)
+    if not (librenms_bootstrap_completed_effective | bool) and (librenms_prebootstrap_web_nodes | length > 0)
     else librenms_active_web_nodes
   )
 %}
@@ -30,7 +30,7 @@ frontend librenms_web
 backend librenms_web_nodes
     mode http
     balance roundrobin
-{% if librenms_bootstrap_completed | bool %}
+{% if librenms_bootstrap_completed_effective | bool %}
     option httpchk GET /
 {% endif %}
 {% for host in librenms_haproxy_web_backend_nodes %}

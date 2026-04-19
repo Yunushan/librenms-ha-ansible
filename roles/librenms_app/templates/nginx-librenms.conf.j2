@@ -9,7 +9,7 @@ server {
       )
       else '80'
     }};
-    server_name {{ librenms_fqdn | default('_') }};
+    server_name {{ librenms_nginx_server_names_effective | default('_') }};
     root {{ librenms_install_dir }}/html;
     index index.php;
 

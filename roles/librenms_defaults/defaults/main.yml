@@ -10,6 +10,7 @@ librenms_user: librenms
 librenms_group: librenms
 librenms_shell: /bin/bash
 librenms_fqdn: librenms.example.com
+librenms_default_fqdn_placeholder: librenms.example.com
 librenms_app_url: ""
 librenms_app_key: CHANGE_ME
 
@@ -17,7 +18,22 @@ librenms_timezone: Etc/UTC
 librenms_web_server: nginx
 
 librenms_bootstrap_completed: false
-librenms_apply_post_bootstrap_config: "{{ librenms_bootstrap_completed | bool }}"
+librenms_bootstrap_auto_complete: false
+librenms_bootstrap_completed_effective: "{{ librenms_bootstrap_completed | bool or librenms_bootstrap_auto_complete | bool }}"
+librenms_apply_post_bootstrap_config: "{{ librenms_bootstrap_completed_effective | bool }}"
+
+librenms_manage_validation_schema_fixes: true
+librenms_manage_bash_completion: true
+librenms_manage_logrotate: true
+librenms_bash_completion_dir: /etc/bash_completion.d
+librenms_logrotate_path: /etc/logrotate.d/librenms
+librenms_nginx_server_aliases: []
+
+librenms_initial_admin_username: ""
+librenms_initial_admin_password: ""
+librenms_initial_admin_email: ""
+librenms_initial_admin_role: admin
+librenms_manage_initial_admin: "{{ librenms_initial_admin_username | length > 0 and librenms_initial_admin_password | length > 0 }}"
 
 librenms_db_mode: local
 librenms_db_host: ""
