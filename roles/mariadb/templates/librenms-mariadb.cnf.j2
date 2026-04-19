@@ -1,4 +1,13 @@
 [mysqld]
 innodb_file_per_table=1
 lower_case_table_names=0
-bind-address={{ librenms_db_bind_address }}
+bind-address={{
+  (
+    ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+  )
+  if (
+    inventory_hostname in (librenms_active_lb_nodes | default([]))
+    and librenms_db_bind_address in ['0.0.0.0', '::', '']
+  )
+  else librenms_db_bind_address
+}}

@@ -34,14 +34,6 @@
     - role: glusterfs_rrd
       when: librenms_rrd_mode == 'glusterfs'
 
-- name: Configure load balancer and VIP hosts
-  hosts: lb_nodes
-  become: true
-  gather_facts: true
-  roles:
-    - role: haproxy_keepalived
-      when: librenms_vip_enabled | bool or (librenms_db_mode == 'galera') or ((librenms_active_web_nodes | default([])) | length > 1)
-
 - name: Configure LibreNMS application nodes
   hosts: librenms_nodes
   become: true
@@ -50,3 +42,11 @@
     - role: librenms_app
     - role: snmpd
       when: librenms_manage_local_snmpd | bool
+
+- name: Configure load balancer and VIP hosts
+  hosts: lb_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: haproxy_keepalived
+      when: librenms_vip_enabled | bool or (librenms_db_mode == 'galera') or ((librenms_active_web_nodes | default([])) | length > 1)

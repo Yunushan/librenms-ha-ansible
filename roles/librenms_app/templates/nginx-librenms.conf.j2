@@ -1,5 +1,11 @@
 server {
-    listen 80;
+    listen {{
+      (
+        (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':80'
+      )
+      if inventory_hostname in (librenms_active_lb_nodes | default([]))
+      else '80'
+    }};
     server_name {{ librenms_fqdn | default('_') }};
     root {{ librenms_install_dir }}/html;
     index index.php;

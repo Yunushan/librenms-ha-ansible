@@ -4,6 +4,14 @@
     name: "{{ librenms_lb_packages }}"
     state: present
 
+- name: Allow HAProxy to bind the VIP before Keepalived owns it
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    state: present
+    reload: true
+  when: librenms_vip_enabled | bool
+
 - name: Deploy HAProxy config
   template:
     src: haproxy.cfg.j2
