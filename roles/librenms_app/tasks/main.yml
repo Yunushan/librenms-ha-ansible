@@ -19,6 +19,20 @@
         )
       }}
 
+- name: Determine effective app key
+  set_fact:
+    librenms_app_key_effective: >-
+      {{
+        librenms_app_key
+        if librenms_app_key.startswith('base64:')
+        else
+        (
+          'base64:' ~ librenms_app_key
+          if (librenms_app_key | regex_search('^[A-Za-z0-9+/]{43}=$'))
+          else librenms_app_key
+        )
+      }}
+
 - name: Determine effective DB host
   set_fact:
     librenms_db_host_effective: >-
