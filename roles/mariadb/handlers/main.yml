@@ -3,4 +3,4 @@
   service:
     name: "{{ librenms_mariadb_service_name }}"
     state: restarted
-  when: librenms_db_mode == 'local'
+  when: librenms_db_mode in ['local', 'galera']

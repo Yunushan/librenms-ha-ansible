@@ -3,7 +3,10 @@ server {
       (
         (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':80'
       )
-      if inventory_hostname in (librenms_active_lb_nodes | default([]))
+      if inventory_hostname in (
+        groups.get('lb_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      )
       else '80'
     }};
     server_name {{ librenms_fqdn | default('_') }};

@@ -6,7 +6,10 @@ bind-address={{
     ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
   )
   if (
-    inventory_hostname in (librenms_active_lb_nodes | default([]))
+    inventory_hostname in (
+      groups.get('lb_nodes', [])
+      | difference(groups.get('decommission_nodes', []))
+    )
     and librenms_db_bind_address in ['0.0.0.0', '::', '']
   )
   else librenms_db_bind_address

@@ -12,6 +12,7 @@
     owner: root
     group: root
     mode: "0644"
+  notify: Restart MariaDB
   when: librenms_db_mode == 'galera'
 
 - name: Check Galera bootstrap marker
