@@ -60,6 +60,8 @@ librenms_galera_conf_path: /etc/my.cnf.d/galera.cnf
 
 librenms_nginx_service_name: nginx
 librenms_nginx_conf_path: /etc/nginx/http.d/librenms.conf
+librenms_web_runtime_user: nginx
+librenms_web_runtime_group: nginx
 
 librenms_php_cli_ini_path: /etc/php83/php.ini
 librenms_php_fpm_ini_path: /etc/php83/php.ini

@@ -1,3 +1,12 @@
+{% set librenms_prebootstrap_web_nodes = groups.get('librenms_primary', []) | difference(groups.get('decommission_nodes', [])) %}
+{% set librenms_haproxy_web_backend_nodes =
+  (
+    librenms_prebootstrap_web_nodes
+    if not (librenms_bootstrap_completed | bool) and (librenms_prebootstrap_web_nodes | length > 0)
+    else librenms_active_web_nodes
+  )
+%}
+
 global
     log /dev/log local0
     log /dev/log local1 notice
@@ -24,7 +33,7 @@ backend librenms_web_nodes
 {% if librenms_bootstrap_completed | bool %}
     option httpchk GET /
 {% endif %}
-{% for host in librenms_active_web_nodes %}
+{% for host in librenms_haproxy_web_backend_nodes %}
     server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check
 {% endfor %}
 
