@@ -54,7 +54,7 @@
         url: >-
           http://{{
             ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
-          }}{{ librenms_haproxy_web_check_path }}
+          }}{{ librenms_nginx_health_check_path }}
         method: GET
         status_code: 200
   rescue:

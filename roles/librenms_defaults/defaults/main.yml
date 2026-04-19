@@ -94,7 +94,8 @@ librenms_keepalived_vrid: 51
 librenms_keepalived_priority: 100
 librenms_haproxy_web_port: 80
 librenms_haproxy_db_port: 3306
-librenms_haproxy_web_check_path: /healthz
+librenms_nginx_health_check_path: /healthz
+librenms_haproxy_web_check_path: /login
 librenms_haproxy_stats_enabled: false
 librenms_haproxy_stats_bind: 127.0.0.1:8404
 

@@ -755,6 +755,40 @@
     enabled: true
   when: librenms_manage_php_fpm | bool
 
+- name: Flush web service handlers before validating LibreNMS web nodes
+  meta: flush_handlers
+
+- name: Wait for LibreNMS PHP-FPM socket
+  wait_for:
+    path: /run/php-fpm-librenms.sock
+    state: present
+    timeout: 30
+  when: librenms_manage_php_fpm | bool
+
+- name: Verify LibreNMS application endpoint responds on each web node
+  uri:
+    url: >-
+      http://{{
+        ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+      }}{{ librenms_haproxy_web_check_path }}
+    method: GET
+    follow_redirects: none
+    status_code:
+      - 200
+      - 301
+      - 302
+      - 303
+      - 307
+      - 308
+  register: librenms_web_probe
+  retries: 6
+  delay: 5
+  until: librenms_web_probe.status in [200, 301, 302, 303, 307, 308]
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+
 - name: Deploy scheduler service file
   copy:
     remote_src: true

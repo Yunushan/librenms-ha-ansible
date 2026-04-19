@@ -32,7 +32,7 @@ backend librenms_web_nodes
     balance roundrobin
 {% if librenms_bootstrap_completed_effective | bool %}
     option httpchk GET {{ librenms_haproxy_web_check_path }}
-    http-check expect status 200
+    http-check expect rstatus ^(2|3)[0-9][0-9]$
 {% endif %}
 {% for host in librenms_haproxy_web_backend_nodes %}
     server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check
