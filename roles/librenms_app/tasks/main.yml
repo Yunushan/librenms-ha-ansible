@@ -503,8 +503,18 @@
     login_password: "{{ librenms_db_password }}"
     login_db: "{{ librenms_db_name }}"
     query:
-      - "SELECT COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), '') AS column_default FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '{{ librenms_db_name }}' AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'datetime'"
-      - "SELECT COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), '') AS column_default FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '{{ librenms_db_name }}' AND TABLE_NAME = 'users' AND COLUMN_NAME = 'created_at'"
+      - >-
+        SELECT COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), '')
+        AS column_default FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
+        AND TABLE_NAME = 'notifications'
+        AND COLUMN_NAME = 'datetime'
+      - >-
+        SELECT COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), '')
+        AS column_default FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
+        AND TABLE_NAME = 'users'
+        AND COLUMN_NAME = 'created_at'
   register: librenms_schema_defaults
   changed_when: false
   no_log: true
@@ -567,7 +577,12 @@
       - user:add
       - "--password={{ librenms_initial_admin_password }}"
       - "--role={{ librenms_initial_admin_role }}"
-      - "--email={{ librenms_initial_admin_email if librenms_initial_admin_email | length > 0 else (librenms_initial_admin_username ~ '@localhost') }}"
+      - >-
+        --email={{ (
+          librenms_initial_admin_email
+          if librenms_initial_admin_email | length > 0
+          else (librenms_initial_admin_username ~ '@localhost')
+        ) }}
       - "{{ librenms_initial_admin_username }}"
   args:
     chdir: "{{ librenms_install_dir }}"
