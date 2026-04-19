@@ -734,9 +734,9 @@
   file:
     path: "{{ librenms_gluster_mountpoint }}"
     state: directory
-    owner: "{{ librenms_user }}"
-    group: "{{ librenms_group }}"
-    mode: "0775"
+    owner: root
+    group: root
+    mode: "0755"
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
