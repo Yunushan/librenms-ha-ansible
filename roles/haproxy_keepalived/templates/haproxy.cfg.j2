@@ -21,7 +21,9 @@ frontend librenms_web
 backend librenms_web_nodes
     mode http
     balance roundrobin
+{% if librenms_bootstrap_completed | bool %}
     option httpchk GET /
+{% endif %}
 {% for host in librenms_active_web_nodes %}
     server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check
 {% endfor %}
