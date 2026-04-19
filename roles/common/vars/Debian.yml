@@ -1,6 +1,7 @@
 ---
 librenms_base_packages:
   - acl
+  - bash-completion
   - ca-certificates
   - curl
   - fping
@@ -30,6 +31,7 @@ librenms_base_packages:
   - python3-redis
   - python3-setuptools
   - python3-systemd
+  - rrdcached
   - rrdtool
   - rsync
   - snmp

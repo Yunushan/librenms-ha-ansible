@@ -16,3 +16,8 @@
   service:
     name: "{{ librenms_nginx_service_name }}"
     state: restarted
+
+- name: Restart rrdcached
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: restarted

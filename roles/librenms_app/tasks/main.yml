@@ -56,6 +56,13 @@
         | join(' ')
       }}
 
+- name: Determine effective trusted proxy list
+  set_fact:
+    librenms_trusted_proxies_effective: >-
+      {%- for host in librenms_active_lb_nodes -%}
+      {{ hostvars[host].ansible_host | default(host) }}{%- if not loop.last -%},{%- endif -%}
+      {%- endfor -%}
+
 - name: Determine effective app key
   set_fact:
     librenms_app_key_effective: >-
@@ -118,16 +125,67 @@
         )
       }}
 
-- name: Determine trusted proxy list
+- name: Determine effective Redis Sentinel host list
   set_fact:
-    librenms_trusted_proxies_effective: >-
+    librenms_redis_sentinel_hosts_effective: >-
+      {%- set ns = namespace(urls=[]) -%}
+      {%- for host in librenms_active_redis_nodes -%}
+      {%- set ns.urls = ns.urls + [
+        'redis://'
+        ~ (hostvars[host].ansible_host | default(host))
+        ~ ':26379?password='
+        ~ librenms_redis_password
+        ~ (
+          '&username=' ~ librenms_redis_username
+          if librenms_redis_username | length > 0
+          else ''
+        )
+      ] -%}
+      {%- endfor -%}
+      {{ ns.urls | join(',') }}
+
+- name: Determine effective Redis Sentinel poller list
+  set_fact:
+    librenms_redis_sentinel_effective: >-
+      {%- for host in librenms_active_redis_nodes -%}
+      {{ hostvars[host].ansible_host | default(host) }}:26379{%- if not loop.last -%},{%- endif -%}
+      {%- endfor -%}
+
+- name: Determine effective rrdcached endpoint
+  set_fact:
+    librenms_rrdcached_endpoint_effective: >-
       {{
-        librenms_active_lb_nodes
-        | map('extract', hostvars)
-        | map(attribute='ansible_host', default=None)
-        | list
+        librenms_rrdcached_endpoint
+        if librenms_rrdcached_endpoint | length > 0
+        else
+        (
+          (
+            hostvars[
+              (
+                groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
+                | first
+              )
+            ].ansible_host
+            | default(
+              groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
+              | first
+            )
+          )
+          ~ ':' ~ (librenms_rrdcached_bind_port | string)
+        )
       }}
-  when: librenms_active_lb_nodes | length > 0
+
+- name: Determine effective schema maintenance host
+  set_fact:
+    librenms_schema_fix_host_effective: >-
+      {{
+        librenms_db_bootstrap_host
+        if librenms_db_mode in ['local', 'galera']
+        else (
+          groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
+          | first
+        )
+      }}
 
 - name: Create LibreNMS group
   group:
@@ -497,12 +555,15 @@
 
 - name: Read LibreNMS schema defaults from database
   community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective }}"
-    login_port: "{{ librenms_db_port }}"
-    login_user: "{{ librenms_db_user }}"
-    login_password: "{{ librenms_db_password }}"
+    login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_user: "{{ librenms_db_user if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
+    check_implicit_admin: "{{ (librenms_db_mode in ['local', 'galera']) | ternary(true, omit) }}"
     login_db: "{{ librenms_db_name }}"
     query:
+      - "SET TIME_ZONE='+00:00'"
       - >-
         SELECT COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), '')
         AS column_default FROM INFORMATION_SCHEMA.COLUMNS
@@ -520,14 +581,16 @@
   no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS notifications.datetime schema default
   community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective }}"
-    login_port: "{{ librenms_db_port }}"
-    login_user: "{{ librenms_db_user }}"
-    login_password: "{{ librenms_db_password }}"
+    login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_user: "{{ librenms_db_user if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
+    check_implicit_admin: "{{ (librenms_db_mode in ['local', 'galera']) | ternary(true, omit) }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
@@ -535,15 +598,17 @@
   no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
-    - (librenms_schema_defaults.query_result[0][0].column_default | default('')) != '1970-01-02 00:00:00'
+    - inventory_hostname == librenms_schema_fix_host_effective
+    - (librenms_schema_defaults.query_result[1][0].column_default | default('')) != '1970-01-02 00:00:00'
 
 - name: Normalize LibreNMS users.created_at schema default
   community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective }}"
-    login_port: "{{ librenms_db_port }}"
-    login_user: "{{ librenms_db_user }}"
-    login_password: "{{ librenms_db_password }}"
+    login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_user: "{{ librenms_db_user if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
+    check_implicit_admin: "{{ (librenms_db_mode in ['local', 'galera']) | ternary(true, omit) }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
@@ -551,8 +616,8 @@
   no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
-    - (librenms_schema_defaults.query_result[1][0].column_default | default('')) != '1970-01-02 00:00:01'
+    - inventory_hostname == librenms_schema_fix_host_effective
+    - (librenms_schema_defaults.query_result[2][0].column_default | default('')) != '1970-01-02 00:00:01'
 
 - name: Check if the initial LibreNMS admin user already exists
   community.mysql.mysql_query:
@@ -601,11 +666,20 @@
     state: link
   when: librenms_manage_lnms_symlink | bool
 
+- name: Ensure bash completion directory exists
+  file:
+    path: "{{ librenms_bash_completion_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: librenms_manage_bash_completion | bool
+
 - name: Install LibreNMS bash completion
   copy:
     remote_src: true
     src: "{{ librenms_install_dir }}/misc/lnms-completion.bash"
-    dest: "{{ librenms_bash_completion_dir }}/lnms"
+    dest: "{{ librenms_bash_completion_dir }}/lnms-completion.bash"
     owner: root
     group: root
     mode: "0644"
@@ -620,6 +694,52 @@
     group: root
     mode: "0644"
   when: librenms_manage_logrotate | bool
+
+- name: Ensure rrdcached journal directory exists on Debian-family systems
+  file:
+    path: "{{ librenms_rrdcached_journal_path }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0755"
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Deploy rrdcached defaults on Debian-family systems
+  template:
+    src: rrdcached.default.j2
+    dest: "{{ librenms_rrdcached_default_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart rrdcached
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Enable and start rrdcached on the primary node
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: started
+    enabled: true
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Disable rrdcached on non-primary Debian-family nodes
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname != (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Enable nginx
   service:
@@ -787,6 +907,61 @@
     - librenms_apply_post_bootstrap_config | bool
     - librenms_mode != 'standalone'
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Set LibreNMS base_url after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - base_url
+      - "{{ librenms_app_url_effective }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Detect local rrdtool version
+  command:
+    argv:
+      - rrdtool
+      - --version
+  register: librenms_rrdtool_version_cmd
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_manage_rrdcached | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Set LibreNMS rrdcached endpoint after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - rrdcached
+      - "{{ librenms_rrdcached_endpoint_effective }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_manage_rrdcached | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Set LibreNMS rrdtool version after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - rrdtool_version
+      - "{{ librenms_rrdtool_version_cmd.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_manage_rrdcached | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - librenms_rrdtool_version_cmd.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+')
 
 - name: Set dispatcher schedule types after bootstrap
   command:

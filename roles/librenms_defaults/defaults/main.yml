@@ -18,7 +18,7 @@ librenms_timezone: Etc/UTC
 librenms_web_server: nginx
 
 librenms_bootstrap_completed: false
-librenms_bootstrap_auto_complete: false
+librenms_bootstrap_auto_complete: true
 librenms_bootstrap_completed_effective: "{{ librenms_bootstrap_completed | bool or librenms_bootstrap_auto_complete | bool }}"
 librenms_apply_post_bootstrap_config: "{{ librenms_bootstrap_completed_effective | bool }}"
 
@@ -50,12 +50,18 @@ librenms_galera_sst_method: rsync
 librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapped
 
 librenms_redis_mode: local
+librenms_redis_username: ""
 librenms_redis_password: CHANGE_ME_REDIS_PASSWORD
 librenms_redis_sentinel_password: CHANGE_ME_SENTINEL_PASSWORD
+librenms_redis_sentinel_username: ""
 librenms_redis_master_host: "{{ (groups.get('librenms_redis', [inventory_hostname]) | first) }}"
 librenms_redis_sentinel_service: mymaster
 librenms_redis_external_host: ""
 librenms_redis_external_port: 6379
+librenms_redis_db: 0
+librenms_redis_cache_db: 1
+librenms_redis_session_db: 0
+librenms_redis_timeout: 60
 librenms_redis_quorum: 2
 
 librenms_rrd_mode: local
@@ -109,6 +115,19 @@ librenms_net_snmp_config_binary: /usr/bin/net-snmp-config
 
 librenms_manage_dispatcher: true
 librenms_manage_scheduler: true
+librenms_manage_rrdcached: "{{ librenms_mode != 'standalone' }}"
+librenms_rrdcached_bind_port: 42217
+librenms_rrdcached_endpoint: ""
+librenms_rrdcached_socket: /run/rrdcached.sock
+librenms_rrdcached_journal_path: /var/lib/rrdcached/journal
+librenms_rrdcached_default_config_path: /etc/default/rrdcached
+librenms_rrdcached_service_name: rrdcached
+librenms_rrdcached_base_path: >-
+  {{
+    librenms_gluster_mountpoint
+    if librenms_rrd_mode == 'glusterfs'
+    else (librenms_install_dir ~ '/rrd')
+  }}
 librenms_manage_nginx: "{{ librenms_install_profile in ['full', 'web'] }}"
 librenms_manage_php_fpm: "{{ librenms_install_profile in ['full', 'web'] }}"
 librenms_manage_lnms_symlink: true
