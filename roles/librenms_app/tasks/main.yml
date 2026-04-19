@@ -437,6 +437,27 @@
     group: "{{ librenms_group }}"
     mode: "0640"
 
+- name: Run LibreNMS database migrations on primary node
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - migrate
+      - --force
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_db_migrate
+  changed_when: >-
+    'Nothing to migrate' not in
+    (
+      (librenms_db_migrate.stdout | default(''))
+      ~
+      (librenms_db_migrate.stderr | default(''))
+    )
+  when:
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
 - name: Create lnms symlink
   file:
     src: "{{ librenms_install_dir }}/lnms"
