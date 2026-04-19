@@ -30,6 +30,7 @@ frontend librenms_web
 backend librenms_web_nodes
     mode http
     balance roundrobin
+    default-server init-state fully-up
 {% if librenms_bootstrap_completed_effective | bool %}
     option httpchk GET /
 {% endif %}
@@ -46,6 +47,7 @@ frontend librenms_db
 backend galera_nodes
     mode tcp
     balance roundrobin
+    default-server init-state fully-up
     option tcp-check
 {% for host in librenms_active_db_nodes %}
     server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_db_port }} check
