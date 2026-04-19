@@ -1005,9 +1005,32 @@
     - librenms_manage_php_fpm | bool
     - librenms_apply_post_bootstrap_config | bool
 
-- name: Clear Laravel caches before final LibreNMS validation
+- name: Discover Laravel bootstrap cache files before final LibreNMS validation
+  find:
+    paths: "{{ librenms_install_dir }}/bootstrap/cache"
+    file_type: file
+    excludes: ".gitignore"
+  register: librenms_bootstrap_cache_files
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Remove Laravel bootstrap cache files before final LibreNMS validation
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_bootstrap_cache_files.files | default([]) }}"
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Run bounded Laravel cache clear before final LibreNMS validation
   command:
     argv:
+      - timeout
+      - 60s
       - php
       - artisan
       - optimize:clear
@@ -1015,7 +1038,9 @@
     chdir: "{{ librenms_install_dir }}"
   become: true
   become_user: "{{ librenms_user }}"
+  register: librenms_optimize_clear
   changed_when: false
+  failed_when: false
   when:
     - librenms_manage_nginx | bool
     - librenms_manage_php_fpm | bool
