@@ -360,24 +360,165 @@
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
 
-- name: Fail on unexpected Gluster peer probe errors from bootstrap host
-  fail:
-    msg: |-
-      Gluster peer probe failed for {{ item.item }}.
-
-      rc: {{ item.rc }}
-      stdout: {{ item.stdout | default('') }}
-      stderr: {{ item.stderr | default('') }}
-  loop: "{{ gluster_peer_probe.results | default([]) }}"
+- name: Record Gluster peers that returned transport endpoint probe errors
+  set_fact:
+    gluster_transport_error_peers: >-
+      {{
+        gluster_peer_probe.results
+        | default([])
+        | selectattr('rc', 'defined')
+        | selectattr('rc', 'ne', 0)
+        | selectattr('stderr', 'defined')
+        | selectattr('stderr', 'search', 'Transport endpoint is not connected')
+        | map(attribute='item')
+        | list
+      }}
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
-    - >-
-      item.rc != 0 or (
-        'peer probe: success' not in (item.stdout | default('') | lower) and
-        'already in peer list' not in (item.stdout | default('') | lower) and
-        'already in peer list' not in (item.stderr | default('') | lower)
-      )
+
+- name: Restart Gluster daemon on peers with transport endpoint probe errors
+  service:
+    name: "{{ librenms_glusterd_service_name }}"
+    state: restarted
+  delegate_to: "{{ item }}"
+  loop: "{{ gluster_transport_error_peers | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_error_peers | default([]) | length) > 0
+
+- name: Wait for restarted Gluster peers to reopen management port
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: 24007
+    state: started
+    timeout: 60
+  loop: "{{ gluster_transport_error_peers | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_error_peers | default([]) | length) > 0
+
+- name: Re-check Gluster peer probes from bootstrap host
+  command:
+    argv:
+      - gluster
+      - peer
+      - probe
+      - "{{ item }}"
+  register: gluster_peer_probe_final
+  failed_when: false
+  changed_when: "'peer probe: success' in (gluster_peer_probe_final.stdout | lower)"
+  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Record final unexpected Gluster peer probe failures
+  set_fact:
+    gluster_failed_peer_probe_results: >-
+      {{
+        gluster_peer_probe_final.results
+        | default([])
+        | selectattr('rc', 'defined')
+        | selectattr('rc', 'ne', 0)
+        | rejectattr('stdout', 'search', 'already in peer list')
+        | rejectattr('stderr', 'search', 'already in peer list')
+        | list
+      }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Capture Gluster peer service status for failed peer probes
+  command:
+    argv:
+      - systemctl
+      - status
+      - "{{ librenms_glusterd_service_name }}"
+      - --no-pager
+  register: gluster_failed_peer_service_status
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item.item }}"
+  loop: "{{ gluster_failed_peer_probe_results | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_failed_peer_probe_results | default([]) | length) > 0
+
+- name: Capture Gluster peer journal for failed peer probes
+  command:
+    argv:
+      - journalctl
+      - -u
+      - "{{ librenms_glusterd_service_name }}"
+      - -n
+      - "50"
+      - --no-pager
+  register: gluster_failed_peer_service_journal
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item.item }}"
+  loop: "{{ gluster_failed_peer_probe_results | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_failed_peer_probe_results | default([]) | length) > 0
+
+- name: Capture Gluster peer listening sockets for failed peer probes
+  command:
+    argv:
+      - ss
+      - -ltnp
+  register: gluster_failed_peer_sockets
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item.item }}"
+  loop: "{{ gluster_failed_peer_probe_results | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_failed_peer_probe_results | default([]) | length) > 0
+
+- name: Capture bootstrap host Gluster peer status for failed peer probes
+  command:
+    argv:
+      - gluster
+      - peer
+      - status
+  register: gluster_bootstrap_peer_status
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_failed_peer_probe_results | default([]) | length) > 0
+
+- name: Fail on unexpected Gluster peer probe errors from bootstrap host
+  fail:
+    msg: |-
+      Gluster peer probe still failed from bootstrap host {{ inventory_hostname }} after retry.
+
+      final probe results:
+      {{ gluster_failed_peer_probe_results | default([]) | to_nice_yaml(indent=2) }}
+
+      bootstrap peer status:
+      {{ gluster_bootstrap_peer_status.stdout | default('') }}
+
+      peer systemctl status:
+      {{ gluster_failed_peer_service_status.results | default([]) | to_nice_yaml(indent=2) }}
+
+      peer journalctl:
+      {{ gluster_failed_peer_service_journal.results | default([]) | to_nice_yaml(indent=2) }}
+
+      peer listening sockets:
+      {{ gluster_failed_peer_sockets.results | default([]) | to_nice_yaml(indent=2) }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_failed_peer_probe_results | default([]) | length) > 0
 
 - name: Wait for Gluster peers to reach cluster state from bootstrap host
   command:
