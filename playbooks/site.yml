@@ -38,6 +38,7 @@
   hosts: librenms_nodes
   become: true
   gather_facts: true
+  serial: 1
   roles:
     - role: librenms_app
     - role: snmpd

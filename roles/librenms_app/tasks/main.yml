@@ -118,6 +118,30 @@
     path: "{{ librenms_install_dir }}/.git"
   register: librenms_install_git_dir_stat
 
+- name: Ensure existing LibreNMS Git metadata is owned by LibreNMS user
+  file:
+    path: "{{ librenms_install_dir }}/.git"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    recurse: true
+  when: librenms_install_git_dir_stat.stat.exists
+
+- name: Ensure pre-existing LibreNMS writable paths are writable before Git checkout
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0775"
+  loop:
+    - "{{ librenms_install_dir }}/rrd"
+    - "{{ librenms_install_dir }}/logs"
+    - "{{ librenms_install_dir }}/bootstrap"
+    - "{{ librenms_install_dir }}/bootstrap/cache"
+    - "{{ librenms_install_dir }}/storage"
+  when: librenms_install_dir_stat.stat.exists
+
 - name: Initialize Git repository in pre-existing LibreNMS install directory
   command:
     argv:
@@ -127,6 +151,10 @@
       - init
   become: true
   become_user: "{{ librenms_user }}"
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
   when:
     - librenms_install_dir_stat.stat.exists
     - not librenms_install_git_dir_stat.stat.exists
@@ -143,6 +171,10 @@
   register: librenms_origin_remote
   become: true
   become_user: "{{ librenms_user }}"
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
   changed_when: false
   failed_when: false
   when:
@@ -161,6 +193,10 @@
       - "{{ librenms_repo_url }}"
   become: true
   become_user: "{{ librenms_user }}"
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
   when:
     - librenms_install_dir_stat.stat.exists
     - not librenms_install_git_dir_stat.stat.exists
@@ -178,6 +214,10 @@
       - "{{ librenms_repo_url }}"
   become: true
   become_user: "{{ librenms_user }}"
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
   when:
     - librenms_install_dir_stat.stat.exists
     - not librenms_install_git_dir_stat.stat.exists
@@ -196,6 +236,7 @@
     - "{{ librenms_install_dir }}/storage/.gitignore"
   when:
     - librenms_install_dir_stat.stat.exists
+  throttle: 1
 
 - name: Checkout LibreNMS repository
   git:
@@ -206,7 +247,12 @@
     force: true
   become: true
   become_user: "{{ librenms_user }}"
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
   register: librenms_git_checkout
+  throttle: 1
 
 - name: Detect PHP version on Debian-family systems
   command:
