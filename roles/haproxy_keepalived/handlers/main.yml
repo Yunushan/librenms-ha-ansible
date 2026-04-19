@@ -1,8 +1,59 @@
 ---
 - name: Restart HAProxy
-  service:
-    name: "{{ librenms_haproxy_service_name }}"
-    state: restarted
+  block:
+    - name: Validate HAProxy configuration before restart
+      command:
+        argv:
+          - haproxy
+          - -c
+          - -f
+          - /etc/haproxy/haproxy.cfg
+      register: librenms_haproxy_handler_config_check
+      changed_when: false
+
+    - name: Restart HAProxy service
+      service:
+        name: "{{ librenms_haproxy_service_name }}"
+        state: restarted
+  rescue:
+    - name: Capture HAProxy status after restart failure
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_haproxy_service_name }}"
+          - --no-pager
+      register: librenms_haproxy_handler_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture HAProxy journal after restart failure
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_haproxy_service_name }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_haproxy_handler_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with HAProxy restart diagnostics
+      fail:
+        msg: |-
+          HAProxy failed to restart on {{ inventory_hostname }}.
+
+          haproxy -c:
+          {{ librenms_haproxy_handler_config_check.stdout | default('') }}
+          {{ librenms_haproxy_handler_config_check.stderr | default('') }}
+
+          systemctl status:
+          {{ librenms_haproxy_handler_status.stdout | default('') }}
+
+          journalctl:
+          {{ librenms_haproxy_handler_journal.stdout | default('') }}
 
 - name: Restart Keepalived
   service:

@@ -21,11 +21,74 @@
     mode: "0644"
   notify: Restart HAProxy
 
+- name: Validate HAProxy configuration
+  command:
+    argv:
+      - haproxy
+      - -c
+      - -f
+      - /etc/haproxy/haproxy.cfg
+  register: librenms_haproxy_config_check
+  changed_when: false
+
 - name: Ensure HAProxy service is enabled and started
-  service:
-    name: "{{ librenms_haproxy_service_name }}"
-    state: started
-    enabled: true
+  block:
+    - name: Start and enable HAProxy service
+      service:
+        name: "{{ librenms_haproxy_service_name }}"
+        state: started
+        enabled: true
+  rescue:
+    - name: Capture HAProxy service status
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_haproxy_service_name }}"
+          - --no-pager
+      register: librenms_haproxy_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture HAProxy service journal
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_haproxy_service_name }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_haproxy_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture listening sockets for HAProxy diagnostics
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: librenms_haproxy_sockets
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with HAProxy startup diagnostics
+      fail:
+        msg: |-
+          HAProxy failed to start on {{ inventory_hostname }}.
+
+          haproxy -c:
+          {{ librenms_haproxy_config_check.stdout | default('') }}
+          {{ librenms_haproxy_config_check.stderr | default('') }}
+
+          systemctl status:
+          {{ librenms_haproxy_status.stdout | default('') }}
+
+          journalctl:
+          {{ librenms_haproxy_journal.stdout | default('') }}
+
+          listening sockets:
+          {{ librenms_haproxy_sockets.stdout | default('') }}
 
 - name: Deploy Keepalived config when VIP is enabled
   template:
