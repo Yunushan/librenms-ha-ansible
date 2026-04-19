@@ -99,7 +99,13 @@ Good for:
 - operators who already understand Galera / Redis / Gluster recovery
 
 > Important  
-> This project automates the platform and the LibreNMS filesystem and service layout. The initial app bootstrap is still intentionally conservative. Finish the first application bootstrap with the web installer, then rerun the playbook with `librenms_bootstrap_completed: true` to apply post-bootstrap settings cleanly.
+> By default, post-bootstrap tasks are applied automatically because
+> `librenms_bootstrap_auto_complete: true` is the default. Finish the first
+> application bootstrap with the web installer, then rerun the same playbook
+> without editing inventory. Only use the older two-phase flow if you
+> explicitly set `librenms_bootstrap_auto_complete: false`; in that mode,
+> complete the installer first, then rerun with
+> `librenms_bootstrap_completed: true`.
 
 ---
 
@@ -268,13 +274,21 @@ or on standalone:
 http://<your-hostname-or-ip>/install
 ```
 
-Then set:
+Then rerun the same playbook. By default, no inventory change is required,
+because `librenms_bootstrap_auto_complete: true` enables the post-bootstrap
+`lnms config:set` tasks automatically.
+
+If you explicitly want the older conservative two-phase flow, set:
+
+```yaml
+librenms_bootstrap_auto_complete: false
+```
+
+complete the installer, then rerun with:
 
 ```yaml
 librenms_bootstrap_completed: true
 ```
-
-and rerun the same playbook. That enables the post-bootstrap `lnms config:set` tasks cleanly.
 
 ---
 

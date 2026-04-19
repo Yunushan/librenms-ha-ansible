@@ -84,7 +84,13 @@ Su durumlar icin iyi:
 - Galera / Redis / Gluster recovery akisini bilen operatorler
 
 > Onemli
-> Bu proje platformu ve LibreNMS dosya / servis yerlesimini otomatize eder. Ilk uygulama bootstrap'i bilerek temkinli tutulmustur. Ilk bootstrap'i once web installer ile tamamla, sonra `librenms_bootstrap_completed: true` ile playbook'u yeniden calistirarak bootstrap sonrasi ayarlari temiz sekilde uygula.
+> Varsayilan olarak post-bootstrap gorevleri otomatik uygulanir, cunku
+> varsayilan deger `librenms_bootstrap_auto_complete: true` olarak gelir.
+> Ilk uygulama bootstrap'ini web installer ile tamamla ve inventory
+> degistirmeden ayni playbook'u yeniden calistir. Eski iki asamali akis sadece
+> `librenms_bootstrap_auto_complete: false` ayarlarsan gerekir; bu modda
+> installer'i tamamladiktan sonra `librenms_bootstrap_completed: true` ile
+> tekrar calistir.
 
 ---
 
@@ -216,13 +222,22 @@ veya standalone icin:
 http://<your-hostname-or-ip>/install
 ```
 
-Ardindan sunu ayarla:
+Ardindan ayni playbook'u yeniden calistir. Varsayilan olarak inventory
+degisikligi gerekmez; `librenms_bootstrap_auto_complete: true` post-bootstrap
+`lnms config:set` gorevlerini otomatik acar.
+
+Eski konservatif iki asamali akisi bilincli olarak kullanmak istersen sunu
+ayarla:
+
+```yaml
+librenms_bootstrap_auto_complete: false
+```
+
+installer'i tamamladiktan sonra sunu ayarlayip tekrar calistir:
 
 ```yaml
 librenms_bootstrap_completed: true
 ```
-
-ve ayni playbook'u tekrar calistir. Bu sayede bootstrap sonrasi `lnms config:set` gorevleri temiz sekilde etkinlesir.
 
 ---
 
