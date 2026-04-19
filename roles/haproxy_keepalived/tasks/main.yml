@@ -48,6 +48,15 @@
       service:
         name: "{{ librenms_nginx_service_name }}"
         state: restarted
+
+    - name: Verify nginx health endpoint before HAProxy startup
+      uri:
+        url: >-
+          http://{{
+            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+          }}{{ librenms_haproxy_web_check_path }}
+        method: GET
+        status_code: 200
   rescue:
     - name: Capture nginx service status before HAProxy startup
       command:
