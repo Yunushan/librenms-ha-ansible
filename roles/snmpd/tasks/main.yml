@@ -44,24 +44,56 @@
     group: root
     mode: "0755"
 
-- name: Create SNMPv3 users
-  shell: >
-    grep -q "createUser {{ item.username }}" {{ librenms_snmp_persistent_config_path }} ||
-    {{ librenms_net_snmp_config_binary }} --create-snmpv3-user -ro
-    -a {{ item.auth_protocol | default('SHA') }}
-    -A '{{ item.auth_password }}'
-    -x {{ item.priv_protocol | default('AES') }}
-    -X '{{ item.priv_password }}'
-    {{ item.username }}
-  args:
-    executable: /bin/bash
-  no_log: true
+- name: Ensure SNMP persistent config file exists
+  file:
+    path: "{{ librenms_snmp_persistent_config_path }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+  when: (librenms_snmp_v3_users | length) > 0
+
+- name: Check existing SNMPv3 users in persistent config
+  command:
+    argv:
+      - grep
+      - -F
+      - "{{ item.username }}"
+      - "{{ librenms_snmp_persistent_config_path }}"
+  register: librenms_snmp_v3_user_checks
+  changed_when: false
+  failed_when: false
   when:
     - item.username is defined
     - item.auth_password is defined
     - item.priv_password is defined
     - (librenms_snmp_v3_users | length) > 0
   loop: "{{ librenms_snmp_v3_users }}"
+  loop_control:
+    label: "{{ item.username | default('snmpv3-user') }}"
+
+- name: Create SNMPv3 bootstrap directives in persistent config
+  lineinfile:
+    path: "{{ librenms_snmp_persistent_config_path }}"
+    line: >-
+      createUser {{ item.item.username }}
+      {{ item.item.auth_protocol | default('SHA') }}
+      "{{ item.item.auth_password }}"
+      {{ item.item.priv_protocol | default('AES') }}
+      "{{ item.item.priv_password }}"
+    insertafter: EOF
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when:
+    - item.item.username is defined
+    - item.item.auth_password is defined
+    - item.item.priv_password is defined
+    - item.rc != 0
+  loop: "{{ librenms_snmp_v3_user_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.username | default('snmpv3-user') }}"
   notify: Restart snmpd
 
 - name: Download LibreNMS distro helper script
