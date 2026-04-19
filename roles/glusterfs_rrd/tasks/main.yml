@@ -377,10 +377,31 @@
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
 
+- name: Reset failed Gluster daemon state on peers with transport endpoint probe errors
+  command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_glusterd_service_name }}"
+  register: gluster_transport_restart_reset
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item }}"
+  loop: "{{ gluster_transport_error_peers | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_error_peers | default([]) | length) > 0
+
 - name: Restart Gluster daemon on peers with transport endpoint probe errors
-  service:
-    name: "{{ librenms_glusterd_service_name }}"
-    state: restarted
+  command:
+    argv:
+      - systemctl
+      - restart
+      - "{{ librenms_glusterd_service_name }}"
+  register: gluster_transport_restart_result
+  changed_when: "gluster_transport_restart_result.rc == 0"
+  failed_when: false
   delegate_to: "{{ item }}"
   loop: "{{ gluster_transport_error_peers | default([]) }}"
   when:
