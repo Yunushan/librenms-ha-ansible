@@ -72,6 +72,15 @@
       changed_when: false
       failed_when: false
 
+    - name: Capture nginx full configuration for HAProxy diagnostics
+      command:
+        argv:
+          - nginx
+          - -T
+      register: librenms_haproxy_nginx_config
+      changed_when: false
+      failed_when: false
+
     - name: Fail with HAProxy startup diagnostics
       fail:
         msg: |-
@@ -89,6 +98,10 @@
 
           listening sockets:
           {{ librenms_haproxy_sockets.stdout | default('') }}
+
+          nginx -T:
+          {{ librenms_haproxy_nginx_config.stdout | default('') }}
+          {{ librenms_haproxy_nginx_config.stderr | default('') }}
 
 - name: Deploy Keepalived config when VIP is enabled
   template:

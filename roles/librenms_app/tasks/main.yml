@@ -396,6 +396,25 @@
     - librenms_manage_nginx | bool
     - ansible_os_family == 'Debian'
 
+- name: Discover enabled Debian nginx site entries
+  find:
+    paths: /etc/nginx/sites-enabled
+    file_type: any
+  register: librenms_nginx_sites_enabled_entries
+  when:
+    - librenms_manage_nginx | bool
+    - ansible_os_family == 'Debian'
+
+- name: Remove unmanaged Debian nginx site entries
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_nginx_sites_enabled_entries.files | default([]) }}"
+  notify: Restart nginx
+  when:
+    - librenms_manage_nginx | bool
+    - ansible_os_family == 'Debian'
+
 - name: Deploy LibreNMS environment file
   template:
     src: librenms.env.j2
