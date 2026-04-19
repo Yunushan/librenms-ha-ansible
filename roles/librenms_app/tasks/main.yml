@@ -766,24 +766,186 @@
   when: librenms_manage_php_fpm | bool
 
 - name: Verify LibreNMS application endpoint responds on each web node
-  uri:
-    url: >-
-      http://{{
-        ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
-      }}{{ librenms_haproxy_web_check_path }}
-    method: GET
-    follow_redirects: none
-    status_code:
-      - 200
-      - 301
-      - 302
-      - 303
-      - 307
-      - 308
-  register: librenms_web_probe
-  retries: 6
-  delay: 5
-  until: librenms_web_probe.status in [200, 301, 302, 303, 307, 308]
+  block:
+    - name: Probe LibreNMS application endpoint
+      uri:
+        url: >-
+          http://{{
+            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+          }}{{ librenms_haproxy_web_check_path }}
+        method: GET
+        follow_redirects: none
+        status_code:
+          - 200
+          - 301
+          - 302
+          - 303
+          - 307
+          - 308
+      register: librenms_web_probe
+      failed_when: false
+      retries: 6
+      delay: 5
+      until: librenms_web_probe.status in [200, 301, 302, 303, 307, 308]
+  rescue:
+    - name: Restart PHP-FPM after failed LibreNMS web probe
+      service:
+        name: "{{ librenms_php_fpm_service_effective }}"
+        state: restarted
+
+    - name: Restart nginx after failed LibreNMS web probe
+      service:
+        name: "{{ librenms_nginx_service_name }}"
+        state: restarted
+
+    - name: Wait for LibreNMS PHP-FPM socket after service restart
+      wait_for:
+        path: /run/php-fpm-librenms.sock
+        state: present
+        timeout: 30
+
+    - name: Re-probe LibreNMS application endpoint after service restart
+      uri:
+        url: >-
+          http://{{
+            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+          }}{{ librenms_haproxy_web_check_path }}
+        method: GET
+        follow_redirects: none
+        status_code:
+          - 200
+          - 301
+          - 302
+          - 303
+          - 307
+          - 308
+      register: librenms_web_probe_retry
+      failed_when: false
+      retries: 6
+      delay: 5
+      until: librenms_web_probe_retry.status in [200, 301, 302, 303, 307, 308]
+      ignore_errors: true
+
+    - name: Capture PHP-FPM service status after failed LibreNMS web probe
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_php_fpm_service_effective }}"
+          - --no-pager
+      register: librenms_php_fpm_probe_status
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+    - name: Capture PHP-FPM journal after failed LibreNMS web probe
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_php_fpm_service_effective }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_php_fpm_probe_journal
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+    - name: Capture nginx service status after failed LibreNMS web probe
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_nginx_service_name }}"
+          - --no-pager
+      register: librenms_nginx_probe_status
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+    - name: Capture nginx journal after failed LibreNMS web probe
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_nginx_service_name }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_nginx_probe_journal
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+    - name: Capture UNIX socket listeners after failed LibreNMS web probe
+      command:
+        argv:
+          - ss
+          - -xlpn
+      register: librenms_php_fpm_probe_sockets
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+    - name: Capture LibreNMS PHP-FPM error log after failed LibreNMS web probe
+      command:
+        argv:
+          - tail
+          - -n
+          - "100"
+          - "{{ librenms_install_dir }}/logs/php-fpm-error.log"
+      register: librenms_php_fpm_error_log
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+    - name: Capture LibreNMS application log after failed LibreNMS web probe
+      command:
+        argv:
+          - tail
+          - -n
+          - "100"
+          - "{{ librenms_install_dir }}/logs/librenms.log"
+      register: librenms_application_log
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+    - name: Fail with LibreNMS web probe diagnostics
+      fail:
+        msg: |-
+          LibreNMS web endpoint did not become healthy on {{ inventory_hostname }}.
+
+          initial probe:
+          status={{ librenms_web_probe.status | default('n/a') }}
+          msg={{ librenms_web_probe.msg | default('') }}
+
+          probe after service restart:
+          status={{ librenms_web_probe_retry.status | default('n/a') }}
+          msg={{ librenms_web_probe_retry.msg | default('') }}
+
+          php-fpm systemctl status:
+          {{ librenms_php_fpm_probe_status.stdout | default('') }}
+
+          php-fpm journal:
+          {{ librenms_php_fpm_probe_journal.stdout | default('') }}
+
+          nginx systemctl status:
+          {{ librenms_nginx_probe_status.stdout | default('') }}
+
+          nginx journal:
+          {{ librenms_nginx_probe_journal.stdout | default('') }}
+
+          unix socket listeners:
+          {{ librenms_php_fpm_probe_sockets.stdout | default('') }}
+
+          php-fpm error log:
+          {{ librenms_php_fpm_error_log.stdout | default('') }}
+
+          librenms application log:
+          {{ librenms_application_log.stdout | default('') }}
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
   when:
     - librenms_manage_nginx | bool
     - librenms_manage_php_fpm | bool
