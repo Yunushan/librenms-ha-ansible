@@ -100,12 +100,81 @@
     group: root
     mode: "0755"
 
+- name: Check whether LibreNMS install directory already exists
+  stat:
+    path: "{{ librenms_install_dir }}"
+  register: librenms_install_dir_stat
+
+- name: Check whether LibreNMS install directory is already a Git checkout
+  stat:
+    path: "{{ librenms_install_dir }}/.git"
+  register: librenms_install_git_dir_stat
+
+- name: Initialize Git repository in pre-existing LibreNMS install directory
+  command:
+    argv:
+      - git
+      - -C
+      - "{{ librenms_install_dir }}"
+      - init
+  when:
+    - librenms_install_dir_stat.stat.exists
+    - not librenms_install_git_dir_stat.stat.exists
+
+- name: Detect existing origin remote in LibreNMS checkout
+  command:
+    argv:
+      - git
+      - -C
+      - "{{ librenms_install_dir }}"
+      - remote
+      - get-url
+      - origin
+  register: librenms_origin_remote
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_install_dir_stat.stat.exists
+    - not librenms_install_git_dir_stat.stat.exists
+
+- name: Add origin remote to bootstrapped LibreNMS checkout
+  command:
+    argv:
+      - git
+      - -C
+      - "{{ librenms_install_dir }}"
+      - remote
+      - add
+      - origin
+      - "{{ librenms_repo_url }}"
+  when:
+    - librenms_install_dir_stat.stat.exists
+    - not librenms_install_git_dir_stat.stat.exists
+    - librenms_origin_remote.rc != 0
+
+- name: Update origin remote URL in bootstrapped LibreNMS checkout
+  command:
+    argv:
+      - git
+      - -C
+      - "{{ librenms_install_dir }}"
+      - remote
+      - set-url
+      - origin
+      - "{{ librenms_repo_url }}"
+  when:
+    - librenms_install_dir_stat.stat.exists
+    - not librenms_install_git_dir_stat.stat.exists
+    - librenms_origin_remote.rc == 0
+    - librenms_origin_remote.stdout != librenms_repo_url
+
 - name: Checkout LibreNMS repository
   git:
     repo: "{{ librenms_repo_url }}"
     dest: "{{ librenms_install_dir }}"
     version: "{{ librenms_version }}"
     update: true
+    force: true
   register: librenms_git_checkout
 
 - name: Detect PHP version on Debian-family systems
