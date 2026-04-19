@@ -557,10 +557,9 @@
   community.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
     login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_user: "{{ librenms_db_user if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_user: "{{ 'root' if librenms_db_mode in ['local', 'galera'] else librenms_db_user }}"
     login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
     login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
-    check_implicit_admin: "{{ (librenms_db_mode in ['local', 'galera']) | ternary(true, omit) }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
@@ -588,10 +587,9 @@
   community.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
     login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_user: "{{ librenms_db_user if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_user: "{{ 'root' if librenms_db_mode in ['local', 'galera'] else librenms_db_user }}"
     login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
     login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
-    check_implicit_admin: "{{ (librenms_db_mode in ['local', 'galera']) | ternary(true, omit) }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
@@ -607,10 +605,9 @@
   community.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
     login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_user: "{{ librenms_db_user if librenms_db_mode not in ['local', 'galera'] else omit }}"
+    login_user: "{{ 'root' if librenms_db_mode in ['local', 'galera'] else librenms_db_user }}"
     login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
     login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
-    check_implicit_admin: "{{ (librenms_db_mode in ['local', 'galera']) | ternary(true, omit) }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
