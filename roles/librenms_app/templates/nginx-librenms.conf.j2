@@ -25,6 +25,12 @@ server {
         return 200 "ok\n";
     }
 
+    location = {{ librenms_php_fpm_ping_path }} {
+        access_log off;
+        include fastcgi.conf;
+        fastcgi_pass unix:/run/php-fpm-librenms.sock;
+    }
+
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }

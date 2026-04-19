@@ -998,6 +998,90 @@
     - librenms_mode != 'standalone'
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
+- name: Flush web service handlers before final LibreNMS validation
+  meta: flush_handlers
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Clear Laravel caches before final LibreNMS validation
+  command:
+    argv:
+      - php
+      - artisan
+      - optimize:clear
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: false
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Recover PHP-FPM endpoint before final LibreNMS web probe
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+  block:
+    - name: Probe PHP-FPM ping endpoint
+      uri:
+        url: >-
+          http://{{
+            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+          }}{{ librenms_php_fpm_ping_path }}
+        headers:
+          Host: "{{ librenms_haproxy_web_check_host_effective }}"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: librenms_php_fpm_ping
+      failed_when: false
+      retries: 6
+      delay: 5
+      until:
+        - librenms_php_fpm_ping.status | default(0) == 200
+        - "'pong' in (librenms_php_fpm_ping.content | default(''))"
+  rescue:
+    - name: Restart PHP-FPM after failed ping probe
+      service:
+        name: "{{ librenms_php_fpm_service_effective }}"
+        state: restarted
+
+    - name: Restart nginx after failed ping probe
+      service:
+        name: "{{ librenms_nginx_service_name }}"
+        state: restarted
+
+    - name: Wait for LibreNMS PHP-FPM socket after failed ping probe
+      wait_for:
+        path: /run/php-fpm-librenms.sock
+        state: present
+        timeout: 30
+
+    - name: Re-probe PHP-FPM ping endpoint after service restart
+      uri:
+        url: >-
+          http://{{
+            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+          }}{{ librenms_php_fpm_ping_path }}
+        headers:
+          Host: "{{ librenms_haproxy_web_check_host_effective }}"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: librenms_php_fpm_ping_retry
+      failed_when: false
+      retries: 6
+      delay: 5
+      until:
+        - librenms_php_fpm_ping_retry.status | default(0) == 200
+        - "'pong' in (librenms_php_fpm_ping_retry.content | default(''))"
+      ignore_errors: true
+
 - name: Verify LibreNMS application endpoint responds on each web node
   when:
     - librenms_manage_nginx | bool

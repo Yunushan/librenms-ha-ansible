@@ -6,6 +6,8 @@ listen = /run/php-fpm-librenms.sock
 listen.owner = {{ librenms_web_runtime_user | default(librenms_user) }}
 listen.group = {{ librenms_web_runtime_group | default(librenms_group) }}
 listen.mode = 0660
+ping.path = {{ librenms_php_fpm_ping_path }}
+ping.response = pong
 
 pm = dynamic
 pm.max_children = 20
