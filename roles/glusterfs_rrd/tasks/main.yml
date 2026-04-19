@@ -69,6 +69,16 @@
 - name: Ensure Gluster daemon is enabled and started
   when: librenms_rrd_mode == 'glusterfs'
   block:
+    - name: Reset failed Gluster daemon state before start or restart
+      command:
+        argv:
+          - systemctl
+          - reset-failed
+          - "{{ librenms_glusterd_service_name }}"
+      changed_when: false
+      failed_when: false
+      when: ansible_service_mgr == 'systemd'
+
     - name: Start or restart Gluster daemon
       service:
         name: "{{ librenms_glusterd_service_name }}"
@@ -85,6 +95,40 @@
           }}
         enabled: true
   rescue:
+    - name: Capture Gluster service status after startup failure
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_glusterd_service_name }}"
+          - --no-pager
+      register: glusterd_service_start_status
+      changed_when: false
+      failed_when: false
+
+    - name: Reset failed Gluster daemon state after startup failure
+      command:
+        argv:
+          - systemctl
+          - reset-failed
+          - "{{ librenms_glusterd_service_name }}"
+      register: glusterd_service_reset_failed_after_error
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_service_mgr == 'systemd'
+        - "'start-limit-hit' in (glusterd_service_start_status.stdout | default(''))"
+
+    - name: Retry Gluster daemon start after clearing start-limit-hit
+      service:
+        name: "{{ librenms_glusterd_service_name }}"
+        state: started
+        enabled: true
+      register: glusterd_service_retry_start
+      when:
+        - ansible_service_mgr == 'systemd'
+        - "'start-limit-hit' in (glusterd_service_start_status.stdout | default(''))"
+
     - name: Capture Gluster service status after startup failure
       command:
         argv:
@@ -145,6 +189,11 @@
 
           glusterd.vol:
           {{ glusterd_service_start_volfile.stdout | default('') }}
+      when: >-
+        not (
+          glusterd_service_retry_start is defined and
+          not (glusterd_service_retry_start.failed | default(false))
+        )
 
 - name: Verify Gluster management port is listening locally
   when: librenms_rrd_mode == 'glusterfs'
