@@ -31,6 +31,88 @@
   register: librenms_haproxy_config_check
   changed_when: false
 
+- name: Rebind nginx on co-located web and load balancer nodes before HAProxy startup
+  when:
+    - librenms_manage_nginx | bool
+    - inventory_hostname in groups.get('librenms_nodes', [])
+  block:
+    - name: Validate nginx configuration before HAProxy startup
+      command:
+        argv:
+          - nginx
+          - -t
+      register: librenms_nginx_pre_haproxy_check
+      changed_when: false
+
+    - name: Restart nginx before HAProxy startup
+      service:
+        name: "{{ librenms_nginx_service_name }}"
+        state: restarted
+  rescue:
+    - name: Capture nginx service status before HAProxy startup
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_nginx_service_name }}"
+          - --no-pager
+      register: librenms_nginx_pre_haproxy_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture nginx journal before HAProxy startup
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_nginx_service_name }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_nginx_pre_haproxy_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture nginx full configuration before HAProxy startup
+      command:
+        argv:
+          - nginx
+          - -T
+      register: librenms_nginx_pre_haproxy_config
+      changed_when: false
+      failed_when: false
+
+    - name: Capture listening sockets before HAProxy startup
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: librenms_nginx_pre_haproxy_sockets
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with nginx pre-HAProxy diagnostics
+      fail:
+        msg: |-
+          Nginx failed to converge before HAProxy startup on {{ inventory_hostname }}.
+
+          nginx -t:
+          {{ librenms_nginx_pre_haproxy_check.stdout | default('') }}
+          {{ librenms_nginx_pre_haproxy_check.stderr | default('') }}
+
+          systemctl status:
+          {{ librenms_nginx_pre_haproxy_status.stdout | default('') }}
+
+          journalctl:
+          {{ librenms_nginx_pre_haproxy_journal.stdout | default('') }}
+
+          nginx -T:
+          {{ librenms_nginx_pre_haproxy_config.stdout | default('') }}
+          {{ librenms_nginx_pre_haproxy_config.stderr | default('') }}
+
+          listening sockets:
+          {{ librenms_nginx_pre_haproxy_sockets.stdout | default('') }}
+
 - name: Ensure HAProxy service is enabled and started
   block:
     - name: Start and enable HAProxy service
