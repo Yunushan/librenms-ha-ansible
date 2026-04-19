@@ -30,7 +30,6 @@
   hosts: gluster_nodes
   become: true
   gather_facts: true
-  serial: 1
   roles:
     - role: glusterfs_rrd
       when: librenms_rrd_mode == 'glusterfs'
