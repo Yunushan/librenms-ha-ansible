@@ -766,6 +766,10 @@
   when: librenms_manage_php_fpm | bool
 
 - name: Verify LibreNMS application endpoint responds on each web node
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
   block:
     - name: Probe LibreNMS application endpoint
       uri:
@@ -946,10 +950,6 @@
           librenms application log:
           {{ librenms_application_log.stdout | default('') }}
       when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
-  when:
-    - librenms_manage_nginx | bool
-    - librenms_manage_php_fpm | bool
-    - librenms_apply_post_bootstrap_config | bool
 
 - name: Deploy scheduler service file
   copy:
