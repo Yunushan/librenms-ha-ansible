@@ -502,8 +502,8 @@
 - name: Enable and start scheduler timer
   service:
     name: librenms-scheduler.timer
-    state: started
-    enabled: true
+    state: "{{ 'started' if librenms_bootstrap_completed | bool else 'stopped' }}"
+    enabled: "{{ librenms_bootstrap_completed | bool }}"
   when:
     - librenms_manage_scheduler | bool
     - ansible_service_mgr == 'systemd'
@@ -511,8 +511,8 @@
 - name: Enable and start dispatcher service
   service:
     name: librenms.service
-    state: started
-    enabled: true
+    state: "{{ 'started' if librenms_bootstrap_completed | bool else 'stopped' }}"
+    enabled: "{{ librenms_bootstrap_completed | bool }}"
   when:
     - librenms_manage_dispatcher | bool
     - ansible_service_mgr == 'systemd'
