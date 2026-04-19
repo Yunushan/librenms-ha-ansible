@@ -37,48 +37,114 @@
     - librenms_manage_gluster_hosts_entries | bool
     - inventory_hostname in ((groups.get('gluster_nodes', []) + groups.get('librenms_nodes', [])) | unique)
 
-- name: Configure Gluster daemon transport address family
+- name: Remove Gluster daemon transport address-family override
   lineinfile:
     path: "{{ librenms_glusterd_vol_path }}"
     regexp: '^\s*option\s+transport\.address-family\s+'
-    line: "    option transport.address-family {{ librenms_gluster_transport_address_family }}"
-    insertbefore: '^\s*end-volume\s*$'
-  register: glusterd_transport_address_family
-  when:
-    - librenms_rrd_mode == 'glusterfs'
-    - librenms_gluster_transport_address_family | length > 0
+    state: absent
+  register: glusterd_transport_address_family_cleanup
+  when: librenms_rrd_mode == 'glusterfs'
 
-- name: Configure Gluster daemon bind address
+- name: Configure Gluster daemon bind address when explicitly requested
   lineinfile:
     path: "{{ librenms_glusterd_vol_path }}"
     regexp: '^\s*option\s+transport\.socket\.bind-address\s+'
-    line: >-
-      option transport.socket.bind-address
-      {{
-        librenms_gluster_bind_address
-        if librenms_gluster_bind_address | length > 0
-        else (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)))
-      }}
+    line: "    option transport.socket.bind-address {{ librenms_gluster_bind_address }}"
     insertbefore: '^\s*end-volume\s*$'
-  register: glusterd_socket_bind_address
-  when: librenms_rrd_mode == 'glusterfs'
+  register: glusterd_socket_bind_address_config
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_bind_address | length > 0
+
+- name: Remove Gluster daemon bind address override when not explicitly requested
+  lineinfile:
+    path: "{{ librenms_glusterd_vol_path }}"
+    regexp: '^\s*option\s+transport\.socket\.bind-address\s+'
+    state: absent
+  register: glusterd_socket_bind_address_cleanup
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_bind_address | length == 0
 
 - name: Ensure Gluster daemon is enabled and started
-  service:
-    name: "{{ librenms_glusterd_service_name }}"
-    state: >-
-      {{
-        'restarted'
-        if (
-          (gluster_hosts_entries is defined and gluster_hosts_entries.changed) or
-          glusterd_transport_address_family is defined and
-          glusterd_transport_address_family.changed or
-          (glusterd_socket_bind_address is defined and glusterd_socket_bind_address.changed)
-        )
-        else 'started'
-      }}
-    enabled: true
   when: librenms_rrd_mode == 'glusterfs'
+  block:
+    - name: Start or restart Gluster daemon
+      service:
+        name: "{{ librenms_glusterd_service_name }}"
+        state: >-
+          {{
+            'restarted'
+            if (
+              (gluster_hosts_entries is defined and gluster_hosts_entries.changed) or
+              (glusterd_transport_address_family_cleanup is defined and glusterd_transport_address_family_cleanup.changed) or
+              (glusterd_socket_bind_address_config is defined and glusterd_socket_bind_address_config.changed) or
+              (glusterd_socket_bind_address_cleanup is defined and glusterd_socket_bind_address_cleanup.changed)
+            )
+            else 'started'
+          }}
+        enabled: true
+  rescue:
+    - name: Capture Gluster service status after startup failure
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_glusterd_service_name }}"
+          - --no-pager
+      register: glusterd_service_start_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Gluster service journal after startup failure
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_glusterd_service_name }}"
+          - -n
+          - "50"
+          - --no-pager
+      register: glusterd_service_start_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture listening TCP sockets after Gluster startup failure
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: glusterd_service_start_sockets
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Gluster daemon volfile after startup failure
+      command:
+        argv:
+          - sed
+          - -n
+          - 1,200p
+          - "{{ librenms_glusterd_vol_path }}"
+      register: glusterd_service_start_volfile
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Gluster daemon startup diagnostics
+      fail:
+        msg: |-
+          Gluster service {{ librenms_glusterd_service_name }} failed to start on {{ inventory_hostname }}.
+
+          systemctl status:
+          {{ glusterd_service_start_status.stdout | default('') }}
+
+          journalctl:
+          {{ glusterd_service_start_journal.stdout | default('') }}
+
+          listening sockets:
+          {{ glusterd_service_start_sockets.stdout | default('') }}
+
+          glusterd.vol:
+          {{ glusterd_service_start_volfile.stdout | default('') }}
 
 - name: Verify Gluster management port is listening locally
   when: librenms_rrd_mode == 'glusterfs'
@@ -355,6 +421,29 @@
     'already in peer list' in (gluster_peer_probe.stderr | default('') | lower)
   retries: 10
   delay: 6
+  loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Probe bootstrap host back from Gluster peers
+  command:
+    argv:
+      - gluster
+      - peer
+      - probe
+      - "{{ inventory_hostname }}"
+  register: gluster_bootstrap_back_probe
+  failed_when: false
+  changed_when: "'peer probe: success' in (gluster_bootstrap_back_probe.stdout | lower)"
+  until: >-
+    gluster_bootstrap_back_probe.rc == 0 or
+    'peer probe: success' in (gluster_bootstrap_back_probe.stdout | default('') | lower) or
+    'already in peer list' in (gluster_bootstrap_back_probe.stdout | default('') | lower) or
+    'already in peer list' in (gluster_bootstrap_back_probe.stderr | default('') | lower)
+  retries: 10
+  delay: 6
+  delegate_to: "{{ item }}"
   loop: "{{ librenms_active_gluster_nodes | difference([inventory_hostname]) }}"
   when:
     - librenms_rrd_mode == 'glusterfs'
@@ -729,6 +818,52 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Refresh Gluster volume details after create/start
+  command:
+    argv:
+      - gluster
+      - volume
+      - info
+      - "{{ librenms_gluster_volume_name }}"
+  register: gluster_volume_info_current
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+
+- name: Set Gluster volume transport address family when explicitly requested
+  command:
+    argv:
+      - gluster
+      - volume
+      - set
+      - "{{ librenms_gluster_volume_name }}"
+      - transport.address-family
+      - "{{ librenms_gluster_transport_address_family }}"
+  register: gluster_volume_transport_address_family
+  changed_when: >-
+    'success' in (
+      (
+        (gluster_volume_transport_address_family.stdout | default('')) ~
+        ' ' ~
+        (gluster_volume_transport_address_family.stderr | default(''))
+      ) | lower
+    )
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - librenms_gluster_transport_address_family | length > 0
+    - gluster_volume_info_current.rc == 0
+    - >-
+      (
+        gluster_volume_info_current.stdout | default('')
+        | regex_search(
+            'transport\\.address-family:\\s*' ~
+            (librenms_gluster_transport_address_family | regex_escape())
+          )
+      ) is none
 
 - name: Ensure RRD mountpoint exists on LibreNMS nodes
   file:
