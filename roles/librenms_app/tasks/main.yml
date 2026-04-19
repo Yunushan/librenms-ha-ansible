@@ -886,6 +886,18 @@
       failed_when: false
       when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
 
+    - name: Capture nginx error log after failed LibreNMS web probe
+      command:
+        argv:
+          - tail
+          - -n
+          - "100"
+          - /var/log/nginx/error.log
+      register: librenms_nginx_error_log
+      changed_when: false
+      failed_when: false
+      when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
     - name: Capture UNIX socket listeners after failed LibreNMS web probe
       command:
         argv:
@@ -944,6 +956,9 @@
 
           nginx journal:
           {{ librenms_nginx_probe_journal.stdout | default('') }}
+
+          nginx error log:
+          {{ librenms_nginx_error_log.stdout | default('') }}
 
           unix socket listeners:
           {{ librenms_php_fpm_probe_sockets.stdout | default('') }}

@@ -1,3 +1,8 @@
+global_defs {
+  enable_script_security
+  script_user root
+}
+
 vrrp_script chk_haproxy {
   script "/usr/bin/pgrep -x haproxy"
   interval 2
@@ -12,7 +17,7 @@ vrrp_instance VI_1 {
   advert_int 1
   authentication {
     auth_type PASS
-    auth_pass {{ librenms_keepalived_auth_pass }}
+    auth_pass {{ librenms_keepalived_auth_pass[:8] }}
   }
   virtual_ipaddress {
     {{ librenms_vip_ip }}/{{ librenms_vip_cidr }}
