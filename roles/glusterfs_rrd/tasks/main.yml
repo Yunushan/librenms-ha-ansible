@@ -415,11 +415,129 @@
     port: 24007
     state: started
     timeout: 60
+  register: gluster_transport_restart_wait
+  changed_when: false
+  failed_when: false
   loop: "{{ gluster_transport_error_peers | default([]) }}"
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
     - (gluster_transport_error_peers | default([]) | length) > 0
+
+- name: Record Gluster peers that did not reopen port 24007 after restart
+  set_fact:
+    gluster_transport_restart_unreachable_peers: >-
+      {{
+        gluster_transport_restart_wait.results
+        | default([])
+        | selectattr('failed', 'defined')
+        | selectattr('failed')
+        | map(attribute='item')
+        | list
+      }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_error_peers | default([]) | length) > 0
+
+- name: Capture Gluster peer service status after failed restart recovery
+  command:
+    argv:
+      - systemctl
+      - status
+      - "{{ librenms_glusterd_service_name }}"
+      - --no-pager
+  register: gluster_transport_restart_service_status
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item }}"
+  loop: "{{ gluster_transport_restart_unreachable_peers | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_restart_unreachable_peers | default([]) | length) > 0
+
+- name: Capture Gluster peer journal after failed restart recovery
+  command:
+    argv:
+      - journalctl
+      - -u
+      - "{{ librenms_glusterd_service_name }}"
+      - -n
+      - "50"
+      - --no-pager
+  register: gluster_transport_restart_service_journal
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item }}"
+  loop: "{{ gluster_transport_restart_unreachable_peers | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_restart_unreachable_peers | default([]) | length) > 0
+
+- name: Capture Gluster peer listening sockets after failed restart recovery
+  command:
+    argv:
+      - ss
+      - -ltnp
+  register: gluster_transport_restart_sockets
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item }}"
+  loop: "{{ gluster_transport_restart_unreachable_peers | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_restart_unreachable_peers | default([]) | length) > 0
+
+- name: Capture UFW status after failed restart recovery
+  command:
+    argv:
+      - ufw
+      - status
+      - verbose
+  register: gluster_transport_restart_ufw_status
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ item }}"
+  loop: "{{ gluster_transport_restart_unreachable_peers | default([]) }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - ansible_os_family == 'Debian'
+    - (gluster_transport_restart_unreachable_peers | default([]) | length) > 0
+
+- name: Fail with Gluster restart recovery diagnostics
+  fail:
+    msg: |-
+      Gluster peers did not reopen tcp/24007 after restart recovery from bootstrap host {{ inventory_hostname }}.
+
+      restart wait results:
+      {{
+        gluster_transport_restart_wait.results
+        | default([])
+        | selectattr('failed', 'defined')
+        | selectattr('failed')
+        | list
+        | to_nice_yaml(indent=2)
+      }}
+
+      peer systemctl status:
+      {{ gluster_transport_restart_service_status.results | default([]) | to_nice_yaml(indent=2) }}
+
+      peer journalctl:
+      {{ gluster_transport_restart_service_journal.results | default([]) | to_nice_yaml(indent=2) }}
+
+      peer listening sockets:
+      {{ gluster_transport_restart_sockets.results | default([]) | to_nice_yaml(indent=2) }}
+
+      peer ufw status:
+      {{ gluster_transport_restart_ufw_status.results | default([]) | to_nice_yaml(indent=2) }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == librenms_gluster_bootstrap_host
+    - (gluster_transport_restart_unreachable_peers | default([]) | length) > 0
 
 - name: Re-check Gluster peer probes from bootstrap host
   command:
