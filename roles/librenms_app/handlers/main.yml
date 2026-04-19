@@ -4,6 +4,14 @@
     name: "{{ librenms_php_fpm_service_effective }}"
     state: restarted
 
+- name: Validate nginx configuration before restart
+  command:
+    argv:
+      - nginx
+      - -t
+  changed_when: false
+  listen: Restart nginx
+
 - name: Restart nginx
   service:
     name: "{{ librenms_nginx_service_name }}"
