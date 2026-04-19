@@ -777,6 +777,8 @@
           http://{{
             ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
           }}{{ librenms_haproxy_web_check_path }}
+        headers:
+          Host: "{{ librenms_haproxy_web_check_host_effective }}"
         method: GET
         follow_redirects: none
         status_code:
@@ -814,6 +816,8 @@
           http://{{
             ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
           }}{{ librenms_haproxy_web_check_path }}
+        headers:
+          Host: "{{ librenms_haproxy_web_check_host_effective }}"
         method: GET
         follow_redirects: none
         status_code:

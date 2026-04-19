@@ -1,5 +1,5 @@
 vrrp_script chk_haproxy {
-  script "pidof haproxy"
+  script "/usr/bin/systemctl is-active --quiet {{ librenms_haproxy_service_name }}"
   interval 2
   weight 20
 }

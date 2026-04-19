@@ -38,6 +38,24 @@
     librenms_active_lb_nodes: "{{ groups.get('lb_nodes', []) | difference(groups.get('decommission_nodes', [])) }}"
     librenms_active_gluster_nodes: "{{ groups.get('gluster_nodes', []) | difference(groups.get('decommission_nodes', [])) }}"
 
+- name: Determine effective HAProxy web health-check host
+  set_fact:
+    librenms_haproxy_web_check_host_effective: >-
+      {{
+        librenms_haproxy_web_check_host
+        if librenms_haproxy_web_check_host | length > 0
+        else
+        (
+          librenms_fqdn
+          if librenms_fqdn | length > 0 and librenms_fqdn != librenms_default_fqdn_placeholder
+          else (
+            librenms_vip_ip
+            if librenms_vip_enabled and librenms_vip_ip | length > 0
+            else inventory_hostname
+          )
+        )
+      }}
+
 - name: Validate APP_KEY has been set
   assert:
     that:

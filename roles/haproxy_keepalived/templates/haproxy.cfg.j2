@@ -6,6 +6,8 @@
     else librenms_active_web_nodes
   )
 %}
+{% set librenms_hc_uri = librenms_haproxy_web_check_path %}
+{% set librenms_hc_host = librenms_haproxy_web_check_host_effective %}
 
 global
     log /dev/log local0
@@ -31,7 +33,9 @@ backend librenms_web_nodes
     mode http
     balance roundrobin
 {% if librenms_bootstrap_completed_effective | bool %}
-    option httpchk GET {{ librenms_haproxy_web_check_path }}
+    default-server inter 5s fall 3 rise 2
+    option httpchk
+    http-check send meth GET uri {{ librenms_hc_uri }} ver HTTP/1.1 hdr Host {{ librenms_hc_host }} hdr Connection close
     http-check expect rstatus ^(2|3)[0-9][0-9]$
 {% endif %}
 {% for host in librenms_haproxy_web_backend_nodes %}
