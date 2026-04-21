@@ -319,12 +319,35 @@ librenms_bootstrap_completed: true
 - This repo uses Ansible push over SSH. Open `tcp/22` from the controller to every managed host in `librenms_nodes`, `librenms_db`, `librenms_redis`, `lb_nodes`, and `gluster_nodes`.
 - Managed nodes do not need any dedicated inbound port opened to the Ansible controller. Stateful return traffic for the existing SSH session is enough.
 - The SSH automation user needs a real shell plus root-equivalent privilege via `sudo`, because the playbooks install packages, write under `/etc`, manage services, mount GlusterFS, create system users, and manage ACLs.
-- Passwordless `sudo` is recommended for unattended runs. If you intentionally keep a sudo password, use `--ask-become-pass` or store `ansible_become_password` securely with Ansible Vault.
+- Passwordless `sudo` is recommended for unattended runs. If you intentionally keep a sudo password, use `--ask-become-pass` / `-K` or store `ansible_become_password` securely with Ansible Vault.
+- SSH login passwords and sudo passwords are separate in Ansible. If SSH key authentication is not configured, also pass `--ask-pass` / `-k`; `--ask-become-pass` only answers the later sudo prompt after SSH has already connected.
 - A typical sudoers entry for an automation account is:
 
 ```text
 ansible ALL=(ALL) NOPASSWD: ALL
 ```
+
+### Password-based SSH quick checks
+
+Check SSH login only:
+
+```bash
+ansible -i inventories/ha/hosts.yml all -m ping -k
+```
+
+Check sudo/become after SSH login succeeds:
+
+```bash
+ansible -i inventories/ha/hosts.yml all -m command -a whoami -b -k -K
+```
+
+Run a playbook with both an SSH password and a sudo password:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml -k -K
+```
+
+If the SSH and sudo password are the same, enter the same value at both prompts. Password-based SSH requires `sshpass` on the controller, for example `sudo apt install sshpass` on Ubuntu/Debian. SSH keys plus passwordless sudo are still the recommended unattended production setup.
 
 ### Required ports and protocols
 
