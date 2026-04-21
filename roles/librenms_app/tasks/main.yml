@@ -411,6 +411,7 @@
     librenms_php_fpm_ini_effective: "/etc/php/{{ librenms_php_version_cmd.stdout }}/fpm/php.ini"
     librenms_php_fpm_pool_dir_effective: "/etc/php/{{ librenms_php_version_cmd.stdout }}/fpm/pool.d"
     librenms_php_fpm_service_effective: "php{{ librenms_php_version_cmd.stdout }}-fpm"
+    librenms_php_fpm_binary_effective: "/usr/sbin/php-fpm{{ librenms_php_version_cmd.stdout }}"
   when: ansible_os_family == 'Debian'
 
 - name: Set effective PHP paths on non-Debian systems
@@ -419,6 +420,7 @@
     librenms_php_fpm_ini_effective: "{{ librenms_php_fpm_ini_path }}"
     librenms_php_fpm_pool_dir_effective: "{{ librenms_php_fpm_pool_dir }}"
     librenms_php_fpm_service_effective: "{{ librenms_php_fpm_service_name }}"
+    librenms_php_fpm_binary_effective: "{{ librenms_php_fpm_service_name }}"
   when: ansible_os_family != 'Debian'
 
 - name: Ensure LibreNMS writable directories exist
@@ -495,6 +497,7 @@
   file:
     path: "{{ librenms_php_fpm_pool_dir_effective }}/www.conf"
     state: absent
+  notify: Restart PHP-FPM
   when:
     - librenms_manage_php_fpm | bool
     - ansible_os_family == 'Debian'
@@ -792,12 +795,92 @@
 - name: Flush web service handlers before validating LibreNMS web nodes
   meta: flush_handlers
 
-- name: Wait for LibreNMS PHP-FPM socket
-  wait_for:
-    path: /run/php-fpm-librenms.sock
-    state: present
-    timeout: 30
+- name: Check for LibreNMS PHP-FPM socket after handler flush
+  stat:
+    path: "{{ librenms_php_fpm_socket }}"
+  register: librenms_php_fpm_socket_stat
   when: librenms_manage_php_fpm | bool
+
+- name: Restart PHP-FPM when LibreNMS socket is missing
+  service:
+    name: "{{ librenms_php_fpm_service_effective }}"
+    state: restarted
+  when:
+    - librenms_manage_php_fpm | bool
+    - not librenms_php_fpm_socket_stat.stat.exists
+
+- name: Wait for LibreNMS PHP-FPM socket
+  when: librenms_manage_php_fpm | bool
+  block:
+    - name: Wait for LibreNMS PHP-FPM socket
+      wait_for:
+        path: "{{ librenms_php_fpm_socket }}"
+        state: present
+        timeout: 30
+  rescue:
+    - name: Capture PHP-FPM service status after missing socket
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_php_fpm_service_effective }}"
+          - --no-pager
+      register: librenms_php_fpm_socket_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture PHP-FPM journal after missing socket
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_php_fpm_service_effective }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_php_fpm_socket_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture generated LibreNMS PHP-FPM pool config after missing socket
+      command:
+        argv:
+          - cat
+          - "{{ librenms_php_fpm_pool_dir_effective }}/librenms.conf"
+      register: librenms_php_fpm_socket_pool_config
+      changed_when: false
+      failed_when: false
+
+    - name: Capture PHP-FPM configuration test after missing socket
+      command:
+        argv:
+          - "{{ librenms_php_fpm_binary_effective }}"
+          - -t
+      register: librenms_php_fpm_socket_config_test
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with PHP-FPM socket diagnostics
+      fail:
+        msg: |-
+          LibreNMS PHP-FPM socket {{ librenms_php_fpm_socket }} was not created on {{ inventory_hostname }}.
+
+          service name:
+          {{ librenms_php_fpm_service_effective }}
+
+          systemctl status:
+          {{ librenms_php_fpm_socket_status.stdout | default('') }}
+          {{ librenms_php_fpm_socket_status.stderr | default('') }}
+
+          journal:
+          {{ librenms_php_fpm_socket_journal.stdout | default('') }}
+
+          pool config:
+          {{ librenms_php_fpm_socket_pool_config.stdout | default('') }}
+
+          php-fpm config test:
+          {{ librenms_php_fpm_socket_config_test.stdout | default('') }}
+          {{ librenms_php_fpm_socket_config_test.stderr | default('') }}
 
 - name: Deploy scheduler service file
   copy:
@@ -1117,7 +1200,7 @@
 
     - name: Wait for LibreNMS PHP-FPM socket after failed ping probe
       wait_for:
-        path: /run/php-fpm-librenms.sock
+        path: "{{ librenms_php_fpm_socket }}"
         state: present
         timeout: 30
 
@@ -1182,7 +1265,7 @@
 
     - name: Wait for LibreNMS PHP-FPM socket after service restart
       wait_for:
-        path: /run/php-fpm-librenms.sock
+        path: "{{ librenms_php_fpm_socket }}"
         state: present
         timeout: 30
 

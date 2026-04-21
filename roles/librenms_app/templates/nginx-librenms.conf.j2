@@ -28,7 +28,7 @@ server {
     location = {{ librenms_php_fpm_ping_path }} {
         access_log off;
         include fastcgi.conf;
-        fastcgi_pass unix:/run/php-fpm-librenms.sock;
+        fastcgi_pass unix:{{ librenms_php_fpm_socket }};
     }
 
     location / {
@@ -36,7 +36,7 @@ server {
     }
 
     location ~ [^/]\.php(/|$) {
-        fastcgi_pass unix:/run/php-fpm-librenms.sock;
+        fastcgi_pass unix:{{ librenms_php_fpm_socket }};
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
         include fastcgi.conf;
     }

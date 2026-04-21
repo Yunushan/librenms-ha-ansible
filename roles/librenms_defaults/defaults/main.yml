@@ -136,6 +136,7 @@ librenms_rrdcached_base_path: >-
   }}
 librenms_manage_nginx: "{{ librenms_install_profile in ['full', 'web'] }}"
 librenms_manage_php_fpm: "{{ librenms_install_profile in ['full', 'web'] }}"
+librenms_php_fpm_socket: /run/php-fpm-librenms.sock
 librenms_manage_lnms_symlink: true
 
 librenms_enable_extra_repos: true
