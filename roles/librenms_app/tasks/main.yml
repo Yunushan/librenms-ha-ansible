@@ -380,11 +380,42 @@
     - librenms_install_dir_stat.stat.exists
   throttle: 1
 
+- name: Resolve latest stable LibreNMS release tag
+  shell: >-
+    set -o pipefail &&
+    git ls-remote --tags --refs {{ librenms_repo_url | quote }} |
+    awk -F/ '/refs\/tags\/[0-9]+\.[0-9]+(\.[0-9]+)?$/ { print $NF }' |
+    sort -V |
+    tail -n 1
+  args:
+    executable: /bin/bash
+  register: librenms_latest_stable_tag
+  changed_when: false
+  when: librenms_version | lower in ['latest-stable', 'latest_stable', 'latest']
+
+- name: Determine effective LibreNMS checkout version
+  set_fact:
+    librenms_version_effective: >-
+      {{
+        librenms_latest_stable_tag.stdout | trim
+        if librenms_version | lower in ['latest-stable', 'latest_stable', 'latest']
+        else librenms_version
+      }}
+
+- name: Verify LibreNMS checkout version was resolved
+  assert:
+    that:
+      - librenms_version_effective | length > 0
+    fail_msg: >-
+      Unable to resolve a stable LibreNMS release tag from {{ librenms_repo_url }}.
+      Set librenms_version to an explicit tag such as "26.4.0" if the managed
+      node cannot query GitHub tags during deployment.
+
 - name: Checkout LibreNMS repository
   git:
     repo: "{{ librenms_repo_url }}"
     dest: "{{ librenms_install_dir }}"
-    version: "{{ librenms_version }}"
+    version: "{{ librenms_version_effective }}"
     update: true
     force: true
   become: true
@@ -1250,8 +1281,8 @@
           - 308
       register: librenms_web_probe
       failed_when: false
-      retries: 6
-      delay: 5
+      retries: "{{ librenms_app_probe_retries }}"
+      delay: "{{ librenms_app_probe_delay }}"
       until: librenms_web_probe.status in [200, 301, 302, 303, 307, 308]
   rescue:
     - name: Restart PHP-FPM after failed LibreNMS web probe
@@ -1289,8 +1320,8 @@
           - 308
       register: librenms_web_probe_retry
       failed_when: false
-      retries: 6
-      delay: 5
+      retries: "{{ librenms_app_probe_retries }}"
+      delay: "{{ librenms_app_probe_delay }}"
       until: librenms_web_probe_retry.status in [200, 301, 302, 303, 307, 308]
       ignore_errors: true
 

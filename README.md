@@ -421,6 +421,16 @@ librenms_mode: standalone           # standalone | cluster | ha
 librenms_install_profile: full      # full | web | poller
 ```
 
+### LibreNMS source version
+
+```yaml
+librenms_version: latest-stable     # latest stable tag; use master only for dev testing
+```
+
+`latest-stable` resolves the newest numeric release tag, such as `26.4.0`, from the
+LibreNMS GitHub tags page during deployment. For repeatable production rebuilds,
+pin this to an explicit released tag instead of tracking `master`.
+
 ### Database mode
 
 ```yaml
@@ -456,6 +466,16 @@ librenms_vip_interface: ""        # empty = use the default IPv4 route interface
 ```
 
 Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.
+
+### Web health probes
+
+```yaml
+librenms_app_probe_path: /
+librenms_app_probe_retries: 3
+librenms_app_probe_delay: 3
+```
+
+Increase the retries or delay only if your LibreNMS web nodes routinely need more warm-up time after PHP-FPM or nginx restarts.
 
 ### SNMP
 
