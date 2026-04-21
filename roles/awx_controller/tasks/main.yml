@@ -69,6 +69,7 @@
 
 - name: Apply provided AWX admin password secret
   no_log: true
+  when: awx_controller_admin_password | length > 0
   block:
     - name: Create temporary AWX admin password manifest
       ansible.builtin.tempfile:
@@ -114,10 +115,10 @@
       when:
         - awx_controller_admin_secret_manifest is defined
         - awx_controller_admin_secret_manifest.path is defined
-  when: awx_controller_admin_password | length > 0
 
 - name: Apply provided AWX secret key secret
   no_log: true
+  when: awx_controller_secret_key | length > 0
   block:
     - name: Create temporary AWX secret key manifest
       ansible.builtin.tempfile:
@@ -163,7 +164,6 @@
       when:
         - awx_controller_secret_key_manifest is defined
         - awx_controller_secret_key_manifest.path is defined
-  when: awx_controller_secret_key | length > 0
 
 - name: Ensure AWX manifest directory exists
   ansible.builtin.file:
