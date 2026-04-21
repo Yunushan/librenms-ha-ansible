@@ -1,0 +1,265 @@
+---
+- name: Validate AWX controller options
+  ansible.builtin.assert:
+    that:
+      - awx_controller_kubernetes_backend in ['k3s', 'existing']
+      - awx_controller_service_type in ['ClusterIP', 'LoadBalancer', 'NodePort']
+      - awx_controller_ingress_type in ['none', 'ingress', 'route']
+      - awx_controller_admin_user | length > 0
+      - awx_controller_namespace | length > 0
+      - awx_controller_instance_name | length > 0
+      - awx_controller_operator_version | length > 0
+      - awx_controller_service_type != 'NodePort' or awx_controller_nodeport_port | int >= 30000
+      - awx_controller_service_type != 'NodePort' or awx_controller_nodeport_port | int <= 32767
+    fail_msg: "Invalid AWX controller settings. Review awx_controller_* variables."
+
+- name: Install AWX controller prerequisite packages
+  ansible.builtin.package:
+    name: "{{ awx_controller_prereq_packages }}"
+    state: present
+  when: awx_controller_manage_prereq_packages | bool
+
+- name: Download k3s installer
+  ansible.builtin.get_url:
+    url: "{{ awx_controller_k3s_install_url }}"
+    dest: "{{ awx_controller_k3s_install_script_path }}"
+    mode: "0755"
+  when: awx_controller_kubernetes_backend == 'k3s'
+
+- name: Install k3s
+  ansible.builtin.command:
+    argv:
+      - /bin/sh
+      - "{{ awx_controller_k3s_install_script_path }}"
+    creates: "{{ awx_controller_k3s_binary_path }}"
+  environment:
+    INSTALL_K3S_EXEC: "{{ awx_controller_k3s_exec }}"
+  when: awx_controller_kubernetes_backend == 'k3s'
+
+- name: Ensure k3s service is running
+  ansible.builtin.service:
+    name: k3s
+    state: started
+    enabled: true
+  when: awx_controller_kubernetes_backend == 'k3s'
+
+- name: Verify Kubernetes API access
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_controller_kubectl }}"
+      - get
+      - nodes
+  environment: "{{ awx_controller_kubectl_environment }}"
+  register: awx_controller_kubectl_nodes
+  changed_when: false
+
+- name: Ensure AWX namespace exists
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_controller_kubectl }}"
+      - create
+      - namespace
+      - "{{ awx_controller_namespace }}"
+  environment: "{{ awx_controller_kubectl_environment }}"
+  register: awx_controller_namespace_create
+  changed_when: awx_controller_namespace_create.rc == 0
+  failed_when:
+    - awx_controller_namespace_create.rc != 0
+    - "'AlreadyExists' not in awx_controller_namespace_create.stderr"
+
+- name: Apply provided AWX admin password secret
+  no_log: true
+  block:
+    - name: Create temporary AWX admin password manifest
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -awx-admin-password.yml
+      register: awx_controller_admin_secret_manifest
+
+    - name: Write temporary AWX admin password manifest
+      ansible.builtin.copy:
+        dest: "{{ awx_controller_admin_secret_manifest.path }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {{ (awx_controller_instance_name ~ '-admin-password') | to_json }}
+            namespace: {{ awx_controller_namespace | to_json }}
+          type: Opaque
+          stringData:
+            password: {{ awx_controller_admin_password | to_json }}
+
+    - name: Apply AWX admin password secret
+      ansible.builtin.command:
+        argv:
+          - "{{ awx_controller_kubectl }}"
+          - apply
+          - -f
+          - "{{ awx_controller_admin_secret_manifest.path }}"
+      environment: "{{ awx_controller_kubectl_environment }}"
+      register: awx_controller_admin_secret_apply
+      changed_when: >-
+        'created' in awx_controller_admin_secret_apply.stdout
+        or 'configured' in awx_controller_admin_secret_apply.stdout
+        or 'patched' in awx_controller_admin_secret_apply.stdout
+  always:
+    - name: Remove temporary AWX admin password manifest
+      ansible.builtin.file:
+        path: "{{ awx_controller_admin_secret_manifest.path }}"
+        state: absent
+      when:
+        - awx_controller_admin_secret_manifest is defined
+        - awx_controller_admin_secret_manifest.path is defined
+  when: awx_controller_admin_password | length > 0
+
+- name: Apply provided AWX secret key secret
+  no_log: true
+  block:
+    - name: Create temporary AWX secret key manifest
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -awx-secret-key.yml
+      register: awx_controller_secret_key_manifest
+
+    - name: Write temporary AWX secret key manifest
+      ansible.builtin.copy:
+        dest: "{{ awx_controller_secret_key_manifest.path }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {{ (awx_controller_instance_name ~ '-secret-key') | to_json }}
+            namespace: {{ awx_controller_namespace | to_json }}
+          type: Opaque
+          stringData:
+            secret_key: {{ awx_controller_secret_key | to_json }}
+
+    - name: Apply AWX secret key secret
+      ansible.builtin.command:
+        argv:
+          - "{{ awx_controller_kubectl }}"
+          - apply
+          - -f
+          - "{{ awx_controller_secret_key_manifest.path }}"
+      environment: "{{ awx_controller_kubectl_environment }}"
+      register: awx_controller_secret_key_apply
+      changed_when: >-
+        'created' in awx_controller_secret_key_apply.stdout
+        or 'configured' in awx_controller_secret_key_apply.stdout
+        or 'patched' in awx_controller_secret_key_apply.stdout
+  always:
+    - name: Remove temporary AWX secret key manifest
+      ansible.builtin.file:
+        path: "{{ awx_controller_secret_key_manifest.path }}"
+        state: absent
+      when:
+        - awx_controller_secret_key_manifest is defined
+        - awx_controller_secret_key_manifest.path is defined
+  when: awx_controller_secret_key | length > 0
+
+- name: Ensure AWX manifest directory exists
+  ansible.builtin.file:
+    path: "{{ awx_controller_manifest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render AWX operator kustomization
+  ansible.builtin.template:
+    src: kustomization.yaml.j2
+    dest: "{{ awx_controller_manifest_dir }}/kustomization.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render AWX custom resource
+  ansible.builtin.template:
+    src: awx.yml.j2
+    dest: "{{ awx_controller_manifest_dir }}/awx.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply AWX operator and instance manifests
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_controller_kubectl }}"
+      - apply
+      - -k
+      - "{{ awx_controller_manifest_dir }}"
+  environment: "{{ awx_controller_kubectl_environment }}"
+  register: awx_controller_apply
+  changed_when: >-
+    'created' in awx_controller_apply.stdout
+    or 'configured' in awx_controller_apply.stdout
+    or 'patched' in awx_controller_apply.stdout
+
+- name: Wait for AWX operator rollout
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_controller_kubectl }}"
+      - -n
+      - "{{ awx_controller_namespace }}"
+      - rollout
+      - status
+      - deployment/awx-operator-controller-manager
+      - "--timeout={{ awx_controller_operator_rollout_timeout }}"
+  environment: "{{ awx_controller_kubectl_environment }}"
+  changed_when: false
+  when: awx_controller_wait | bool
+
+- name: Wait for AWX managed pods to exist
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_controller_kubectl }}"
+      - -n
+      - "{{ awx_controller_namespace }}"
+      - get
+      - pods
+      - -l
+      - app.kubernetes.io/managed-by=awx-operator
+      - -o
+      - name
+  environment: "{{ awx_controller_kubectl_environment }}"
+  register: awx_controller_managed_pods
+  changed_when: false
+  until: awx_controller_managed_pods.stdout | length > 0
+  retries: "{{ awx_controller_wait_retries }}"
+  delay: "{{ awx_controller_wait_delay }}"
+  when: awx_controller_wait | bool
+
+- name: Wait for AWX managed pods to become ready
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_controller_kubectl }}"
+      - -n
+      - "{{ awx_controller_namespace }}"
+      - wait
+      - --for=condition=Ready
+      - pod
+      - -l
+      - app.kubernetes.io/managed-by=awx-operator
+      - "--timeout={{ awx_controller_instance_ready_timeout }}"
+  environment: "{{ awx_controller_kubectl_environment }}"
+  changed_when: false
+  when: awx_controller_wait | bool
+
+- name: Show AWX access notes
+  ansible.builtin.debug:
+    msg:
+      - "AWX deployment requested for {{ awx_controller_instance_name }} in namespace {{ awx_controller_namespace }}."
+      - "Check services with: {{ awx_controller_kubectl }} -n {{ awx_controller_namespace }} get svc"
+      - >-
+        Retrieve the admin password with:
+        {{ awx_controller_kubectl }} -n {{ awx_controller_namespace }}
+        get secret {{ awx_controller_instance_name }}-admin-password
+        -o jsonpath='{.data.password}' | base64 --decode ; echo

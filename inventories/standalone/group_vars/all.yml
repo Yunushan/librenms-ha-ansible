@@ -23,6 +23,9 @@ librenms_vip_enabled: false
 librenms_bootstrap_completed: false
 librenms_manage_local_snmpd: true
 
+# Optional AWX controller deployment. See docs/awx-controller.md.
+awx_controller_enabled: false
+
 librenms_snmp_versions_enabled:
   - v2c
   - v3

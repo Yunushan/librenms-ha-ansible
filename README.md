@@ -46,6 +46,7 @@ This repository gives you one Ansible project that can deploy:
    - HAProxy + Keepalived
    - GlusterFS-backed RRD storage
 4. **Experimental Dockerized HA bundle** for operators who want containerized LibreNMS, Galera, Redis Sentinel, and HAProxy examples
+5. **Optional AWX controller** for GUI-based playbook execution, scheduling, RBAC, and run history
 
 ---
 
@@ -59,6 +60,7 @@ This repository gives you one Ansible project that can deploy:
 - optional local SNMP agent management
 - support for SNMP **v1**, **v2c**, and **v3**
 - optional experimental Dockerized HA example bundle for operators who prefer containerized service layers
+- optional AWX controller deployment for teams that want GUI-driven operations
 - workflows for **adding** and **removing** LibreNMS nodes
 - GitHub-ready repo structure with:
   - MIT license
@@ -218,6 +220,24 @@ See also:
 - [docs/docker.md](docs/docker.md)
 - [examples/docker-ha/README.md](examples/docker-ha/README.md)
 
+### Optional: deploy an AWX controller
+
+If you want a GUI for running and scheduling these playbooks, add a dedicated VM to the `ansible_controller` inventory group and enable:
+
+```yaml
+awx_controller_enabled: true
+```
+
+Then run:
+
+```bash
+make awx-controller
+```
+
+The optional AWX role can install k3s on the controller VM or use an existing Kubernetes cluster. It is deliberately separate from the main LibreNMS deployment because AWX has its own Kubernetes, PostgreSQL, credential, backup, and upgrade lifecycle.
+
+See [docs/awx-controller.md](docs/awx-controller.md).
+
 ### 2) Generate secrets
 
 ```bash
@@ -315,6 +335,9 @@ If a host has multiple roles, it needs the union of the rows that apply to those
 | Ansible controller | All managed hosts | TCP 22 | Always | SSH transport, fact gathering, module execution |
 | Managed hosts | Ansible controller | No dedicated listener; reply traffic only | Always | Ansible is push-based |
 | Ansible controller | Ansible Galaxy, GitHub, internal mirrors | TCP 443 | During bootstrap and updates | Collection installs and repo sync on the controller |
+| AWX controller | All managed hosts | TCP 22 | When `awx_controller_enabled: true` and AWX runs jobs | SSH transport from AWX job execution to managed hosts |
+| AWX controller | GitHub, Ansible Galaxy, container registries, OS mirrors | TCP 443 | When installing or updating AWX and job execution environments | k3s, AWX Operator, image pulls, project syncs, and collections |
+| Operators / browsers | AWX controller, ingress, or load balancer | TCP 80 / 443 / selected NodePort | When `awx_controller_enabled: true` | AWX web UI and API |
 | Managed hosts | OS mirrors, GitHub, Packagist, internal mirrors | TCP 80 / 443 | During bootstrap and updates | Package installs, LibreNMS git checkout, Composer dependencies |
 | Managed hosts | DNS / NTP infrastructure | UDP/TCP 53, UDP 123 | Strongly recommended | Name resolution and clock sync for repos, clustering, and TLS |
 | Users / browsers | VIP or web nodes | TCP 80 | Default deployment | LibreNMS Web UI through HAProxy or directly to nginx |

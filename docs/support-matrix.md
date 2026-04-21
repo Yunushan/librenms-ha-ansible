@@ -49,3 +49,9 @@ Supported by package/service mappings in this repo, but expect some distro-speci
 - Redis sentinel service behavior on non-systemd hosts
 - MariaDB config path
 - SNMP persistent config path
+
+## Optional AWX controller
+
+The optional AWX controller path is best tested on a dedicated Ubuntu or Debian controller VM. The default role path installs k3s and then deploys AWX through the upstream AWX Operator.
+
+Other Linux families may work if k3s and `kubectl` are available, but treat them as best-effort until validated in a lab.

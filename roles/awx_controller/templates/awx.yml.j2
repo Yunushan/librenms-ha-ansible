@@ -1,0 +1,67 @@
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: {{ awx_controller_instance_name | to_json }}
+  namespace: {{ awx_controller_namespace | to_json }}
+spec:
+  admin_user: {{ awx_controller_admin_user | to_json }}
+  admin_email: {{ awx_controller_admin_email | to_json }}
+{% if awx_controller_admin_password | length > 0 %}
+  admin_password_secret: {{ (awx_controller_instance_name ~ '-admin-password') | to_json }}
+{% endif %}
+{% if awx_controller_secret_key | length > 0 %}
+  secret_key_secret: {{ (awx_controller_instance_name ~ '-secret-key') | to_json }}
+{% endif %}
+  service_type: {{ awx_controller_service_type | to_json }}
+{% if awx_controller_service_type == 'NodePort' %}
+  nodeport_port: {{ awx_controller_nodeport_port }}
+{% endif %}
+{% if awx_controller_service_type == 'LoadBalancer' %}
+  loadbalancer_protocol: {{ awx_controller_loadbalancer_protocol | to_json }}
+  loadbalancer_port: {{ awx_controller_loadbalancer_port }}
+{% if awx_controller_loadbalancer_ip | length > 0 %}
+  loadbalancer_ip: {{ awx_controller_loadbalancer_ip | to_json }}
+{% endif %}
+{% if awx_controller_loadbalancer_class | length > 0 %}
+  loadbalancer_class: {{ awx_controller_loadbalancer_class | to_json }}
+{% endif %}
+{% endif %}
+  ingress_type: {{ awx_controller_ingress_type | to_json }}
+{% if awx_controller_ingress_type == 'ingress' %}
+{% if awx_controller_ingress_hosts | length > 0 %}
+  ingress_hosts:
+{{ awx_controller_ingress_hosts | to_nice_yaml(indent=2, sort_keys=False) | indent(4, true) }}
+{% endif %}
+{% if awx_controller_ingress_class_name | length > 0 %}
+  ingress_class_name: {{ awx_controller_ingress_class_name | to_json }}
+{% endif %}
+  ingress_path: {{ awx_controller_ingress_path | to_json }}
+  ingress_path_type: {{ awx_controller_ingress_path_type | to_json }}
+{% if awx_controller_ingress_annotations | length > 0 %}
+  ingress_annotations: |
+{{ awx_controller_ingress_annotations | indent(4, true) }}
+{% endif %}
+{% if awx_controller_ingress_controller | length > 0 %}
+  ingress_controller: {{ awx_controller_ingress_controller | to_json }}
+{% endif %}
+{% endif %}
+{% if awx_controller_ingress_type == 'route' %}
+{% if awx_controller_route_host | length > 0 %}
+  route_host: {{ awx_controller_route_host | to_json }}
+{% endif %}
+  route_tls_termination_mechanism: {{ awx_controller_route_tls_termination_mechanism | to_json }}
+{% if awx_controller_route_tls_secret | length > 0 %}
+  route_tls_secret: {{ awx_controller_route_tls_secret | to_json }}
+{% endif %}
+{% endif %}
+  postgres_storage_requirements:
+    requests:
+      storage: {{ awx_controller_postgres_storage_size | to_json }}
+{% if awx_controller_postgres_storage_class | length > 0 %}
+  postgres_storage_class: {{ awx_controller_postgres_storage_class | to_json }}
+{% endif %}
+  postgres_data_volume_init: {{ awx_controller_postgres_data_volume_init | bool | lower }}
+{% if awx_controller_extra_spec | length > 0 %}
+{{ awx_controller_extra_spec | to_nice_yaml(indent=2, sort_keys=False) | indent(2, true) }}
+{% endif %}

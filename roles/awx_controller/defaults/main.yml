@@ -1,0 +1,64 @@
+---
+awx_controller_enabled: false
+
+# Use "k3s" to bootstrap a lightweight Kubernetes runtime on the controller VM,
+# or "existing" when kubectl already points at a Kubernetes cluster.
+awx_controller_kubernetes_backend: k3s
+awx_controller_kubeconfig: "{{ '/etc/rancher/k3s/k3s.yaml' if awx_controller_kubernetes_backend == 'k3s' else '' }}"
+awx_controller_kubectl: kubectl
+awx_controller_kubectl_environment: "{{ {'KUBECONFIG': awx_controller_kubeconfig} if (awx_controller_kubeconfig | length > 0) else {} }}"
+
+awx_controller_manage_prereq_packages: true
+awx_controller_prereq_packages:
+  - ca-certificates
+  - curl
+  - git
+  - tar
+
+awx_controller_k3s_install_url: https://get.k3s.io
+awx_controller_k3s_install_script_path: /usr/local/src/k3s-install.sh
+awx_controller_k3s_binary_path: /usr/local/bin/k3s
+awx_controller_k3s_exec: "server --write-kubeconfig-mode 0644"
+
+awx_controller_manifest_dir: /opt/librenms-ha-awx
+awx_controller_namespace: awx
+awx_controller_instance_name: librenms-awx
+
+# Check https://github.com/ansible/awx-operator/releases before production use.
+awx_controller_operator_version: 2.19.1
+awx_controller_operator_source: "github.com/ansible/awx-operator/config/default?ref={{ awx_controller_operator_version }}"
+
+awx_controller_admin_user: admin
+awx_controller_admin_email: noc@example.com
+awx_controller_admin_password: ""
+awx_controller_secret_key: ""
+
+awx_controller_service_type: NodePort
+awx_controller_nodeport_port: 30080
+awx_controller_loadbalancer_protocol: http
+awx_controller_loadbalancer_port: 80
+awx_controller_loadbalancer_ip: ""
+awx_controller_loadbalancer_class: ""
+
+awx_controller_ingress_type: none
+awx_controller_ingress_hosts: []
+awx_controller_ingress_class_name: ""
+awx_controller_ingress_path: /
+awx_controller_ingress_path_type: Prefix
+awx_controller_ingress_annotations: ""
+awx_controller_ingress_controller: ""
+awx_controller_route_host: ""
+awx_controller_route_tls_termination_mechanism: Edge
+awx_controller_route_tls_secret: ""
+
+awx_controller_postgres_storage_size: 8Gi
+awx_controller_postgres_storage_class: ""
+awx_controller_postgres_data_volume_init: false
+
+awx_controller_extra_spec: {}
+
+awx_controller_wait: true
+awx_controller_wait_retries: 60
+awx_controller_wait_delay: 10
+awx_controller_operator_rollout_timeout: 600s
+awx_controller_instance_ready_timeout: 900s

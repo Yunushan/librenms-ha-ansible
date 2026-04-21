@@ -2,12 +2,13 @@
 
 ## Design goals
 
-This repository supports four practical patterns:
+This repository supports five practical patterns:
 
 1. **Standalone**
 2. **Clustered app nodes with external shared services**
 3. **Full HA**
 4. **Experimental Dockerized HA**
+5. **Optional AWX controller** for GUI-driven playbook operations
 
 ## Full HA reference topology
 
@@ -35,6 +36,7 @@ This repository supports four practical patterns:
 - `librenms_redis`: redis and sentinel hosts
 - `lb_nodes`: haproxy / keepalived hosts
 - `gluster_nodes`: shared RRD storage hosts
+- `ansible_controller`: optional AWX controller VM
 
 ## Operating advice
 
@@ -94,3 +96,9 @@ That model is intended for operators who want:
 - HAProxy in a containerized frontend role
 
 It does **not** replace the main Ansible package-based deployment model, and it still assumes operator-reviewed decisions around persistent shared storage, VIP ownership, and failure recovery.
+
+## Optional AWX controller
+
+The optional AWX controller path is documented in [docs/awx-controller.md](awx-controller.md).
+
+It provides a GUI and job-management layer for running the existing playbooks, but it is deliberately separate from the LibreNMS application topology. AWX introduces its own Kubernetes runtime, PostgreSQL state, credentials, and upgrade lifecycle, so it should be operated as a management-plane component rather than as another LibreNMS node.

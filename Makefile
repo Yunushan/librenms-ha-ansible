@@ -1,6 +1,7 @@
-.PHONY: install lint standalone cluster validate docker-build docker-lint docker-shell docker-standalone docker-cluster docker-validate
+.PHONY: install lint standalone cluster validate awx-controller docker-build docker-lint docker-shell docker-standalone docker-cluster docker-validate docker-awx-controller
 
 SSH_DIR ?= $(HOME)/.ssh
+AWX_INVENTORY ?= inventories/ha/hosts.yml
 
 install:
 	ansible-galaxy collection install -r requirements.yml
@@ -17,6 +18,9 @@ cluster:
 
 validate:
 	ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
+
+awx-controller:
+	ansible-playbook -i $(AWX_INVENTORY) playbooks/awx-controller.yml
 
 docker-build:
 	docker compose build ansible
@@ -35,3 +39,6 @@ docker-cluster:
 
 docker-validate:
 	docker compose run --rm -v $(SSH_DIR):/root/.ssh:ro ansible ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
+
+docker-awx-controller:
+	docker compose run --rm -v $(SSH_DIR):/root/.ssh:ro ansible ansible-playbook -i $(AWX_INVENTORY) playbooks/awx-controller.yml
