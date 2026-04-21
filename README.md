@@ -452,8 +452,10 @@ librenms_rrd_mode: local            # local | glusterfs | external
 librenms_vip_enabled: true
 librenms_vip_ip: 10.10.10.10
 librenms_vip_cidr: 24
-librenms_vip_interface: ens18
+librenms_vip_interface: ""        # empty = use the default IPv4 route interface
 ```
+
+Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.
 
 ### SNMP
 

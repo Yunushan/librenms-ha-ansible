@@ -32,7 +32,7 @@ librenms_gluster_brick_device: /dev/sdb1
 librenms_vip_enabled: true
 librenms_vip_ip: 10.10.10.10
 librenms_vip_cidr: 24
-librenms_vip_interface: ens18
+librenms_vip_interface: ""
 librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
 librenms_keepalived_vrid: 51
 

@@ -11,7 +11,7 @@ vrrp_script chk_haproxy {
 
 vrrp_instance VI_1 {
   state {{ 'MASTER' if inventory_hostname == (librenms_active_lb_nodes | first) else 'BACKUP' }}
-  interface {{ librenms_vip_interface }}
+  interface {{ librenms_vip_interface_effective }}
   virtual_router_id {{ librenms_keepalived_vrid }}
   priority {{ hostvars[inventory_hostname].librenms_keepalived_priority | default(librenms_keepalived_priority) }}
   advert_int 1

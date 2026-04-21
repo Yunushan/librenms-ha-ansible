@@ -4,6 +4,27 @@
     name: "{{ librenms_lb_packages }}"
     state: present
 
+- name: Determine effective VIP interface
+  set_fact:
+    librenms_vip_interface_effective: >-
+      {{
+        librenms_vip_interface
+        if (librenms_vip_interface | default('') | trim | length > 0)
+        else (ansible_default_ipv4.interface | default(''))
+      }}
+  when: librenms_vip_enabled | bool
+
+- name: Validate effective VIP interface
+  assert:
+    that:
+      - librenms_vip_interface_effective | length > 0
+      - librenms_vip_interface_effective in ansible_interfaces
+    fail_msg: >-
+      VIP interface '{{ librenms_vip_interface_effective | default('') }}' is not available on {{ inventory_hostname }}.
+      Set librenms_vip_interface to an existing interface, or leave it empty to use the default route interface.
+      Available interfaces: {{ ansible_interfaces | default([]) | join(', ') }}.
+  when: librenms_vip_enabled | bool
+
 - name: Allow HAProxy to bind the VIP before Keepalived owns it
   ansible.posix.sysctl:
     name: net.ipv4.ip_nonlocal_bind
@@ -204,9 +225,102 @@
   when: librenms_vip_enabled | bool
   notify: Restart Keepalived
 
-- name: Ensure Keepalived service is enabled and started when VIP is enabled
-  service:
-    name: "{{ librenms_keepalived_service_name }}"
-    state: started
-    enabled: true
+- name: Validate Keepalived configuration when VIP is enabled
+  command:
+    argv:
+      - keepalived
+      - -t
+      - -f
+      - /etc/keepalived/keepalived.conf
+  register: librenms_keepalived_config_check
+  changed_when: false
   when: librenms_vip_enabled | bool
+
+- name: Ensure Keepalived service is enabled and started when VIP is enabled
+  when: librenms_vip_enabled | bool
+  block:
+    - name: Start and enable Keepalived service
+      service:
+        name: "{{ librenms_keepalived_service_name }}"
+        state: started
+        enabled: true
+  rescue:
+    - name: Capture Keepalived service status
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_keepalived_service_name }}"
+          - --no-pager
+      register: librenms_keepalived_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Keepalived service journal
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_keepalived_service_name }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_keepalived_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Keepalived configuration
+      command:
+        argv:
+          - cat
+          - /etc/keepalived/keepalived.conf
+      register: librenms_keepalived_config
+      changed_when: false
+      failed_when: false
+
+    - name: Capture network interfaces for Keepalived diagnostics
+      command:
+        argv:
+          - ip
+          - -brief
+          - addr
+      register: librenms_keepalived_interfaces
+      changed_when: false
+      failed_when: false
+
+    - name: Capture routing table for Keepalived diagnostics
+      command:
+        argv:
+          - ip
+          - route
+      register: librenms_keepalived_routes
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Keepalived startup diagnostics
+      fail:
+        msg: |-
+          Keepalived failed to start on {{ inventory_hostname }}.
+
+          effective VIP interface:
+          {{ librenms_vip_interface_effective | default('') }}
+
+          keepalived -t:
+          {{ librenms_keepalived_config_check.stdout | default('') }}
+          {{ librenms_keepalived_config_check.stderr | default('') }}
+
+          systemctl status:
+          {{ librenms_keepalived_status.stdout | default('') }}
+          {{ librenms_keepalived_status.stderr | default('') }}
+
+          journalctl:
+          {{ librenms_keepalived_journal.stdout | default('') }}
+
+          keepalived.conf:
+          {{ librenms_keepalived_config.stdout | default('') }}
+
+          interfaces:
+          {{ librenms_keepalived_interfaces.stdout | default('') }}
+
+          routes:
+          {{ librenms_keepalived_routes.stdout | default('') }}

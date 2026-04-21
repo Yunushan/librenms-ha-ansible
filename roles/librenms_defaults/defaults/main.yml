@@ -89,7 +89,7 @@ librenms_gluster_firewall_port_ranges:
 librenms_vip_enabled: false
 librenms_vip_ip: ""
 librenms_vip_cidr: 24
-librenms_vip_interface: eth0
+librenms_vip_interface: ""
 librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
 librenms_keepalived_vrid: 51
 librenms_keepalived_priority: 100

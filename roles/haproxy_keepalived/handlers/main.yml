@@ -14,6 +14,16 @@
     name: "{{ librenms_haproxy_service_name }}"
     state: reloaded
 
+- name: Validate Keepalived configuration before restart
+  command:
+    argv:
+      - keepalived
+      - -t
+      - -f
+      - /etc/keepalived/keepalived.conf
+  changed_when: false
+  listen: Restart Keepalived
+
 - name: Restart Keepalived
   service:
     name: "{{ librenms_keepalived_service_name }}"
