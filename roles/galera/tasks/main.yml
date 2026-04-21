@@ -12,6 +12,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: librenms_galera_config_deploy
   notify: Restart MariaDB
   when: librenms_db_mode == 'galera'
 
@@ -21,13 +22,17 @@
   register: librenms_galera_marker
   when: librenms_db_mode == 'galera'
 
-- name: Probe Galera nodes for an existing live MariaDB listener
-  wait_for:
-    host: "{{ hostvars[item].ansible_host | default(item) }}"
-    port: "{{ librenms_db_port }}"
-    timeout: 2
+- name: Probe Galera nodes for an existing primary component
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
   loop: "{{ librenms_active_db_nodes }}"
-  register: librenms_galera_reachability
+  delegate_to: "{{ item }}"
+  register: librenms_galera_component_probe
   failed_when: false
   changed_when: false
   when: librenms_db_mode == 'galera'
@@ -37,8 +42,9 @@
     librenms_galera_cluster_has_live_member: >-
       {{
         (
-          librenms_galera_reachability.results
-          | selectattr('state', 'defined')
+          librenms_galera_component_probe.results
+          | selectattr('stdout', 'search', 'wsrep_cluster_status\\s+Primary')
+          | selectattr('stdout', 'search', 'wsrep_ready\\s+ON')
           | list
           | length
         ) > 0
@@ -85,10 +91,34 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname != librenms_db_bootstrap_host
 
+- name: Check local Galera readiness before service convergence
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
+  register: librenms_galera_pre_start_status
+  failed_when: false
+  changed_when: false
+  when: librenms_db_mode == 'galera'
+
 - name: Ensure MariaDB service is enabled and started on Galera nodes
   service:
     name: "{{ librenms_mariadb_service_name }}"
-    state: started
+    state: >-
+      {{
+        'restarted'
+        if (
+          (librenms_galera_config_deploy.changed | default(false))
+          or not (
+            (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+            and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+          )
+        )
+        else 'started'
+      }}
     enabled: true
   when:
     - librenms_db_mode == 'galera'
@@ -98,6 +128,35 @@
   wait_for:
     path: "{{ librenms_mariadb_socket }}"
     timeout: 60
+  when: librenms_db_mode == 'galera'
+
+- name: Wait for Galera node TCP listener
+  wait_for:
+    host: "{{ ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)) }}"
+    port: "{{ librenms_db_port }}"
+    timeout: 60
+  when: librenms_db_mode == 'galera'
+
+- name: Verify local Galera node is ready
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
+  register: librenms_galera_local_status
+  changed_when: false
+  when: librenms_db_mode == 'galera'
+
+- name: Assert local Galera node joined the primary component
+  assert:
+    that:
+      - librenms_galera_local_status.stdout is search('wsrep_cluster_status\\s+Primary')
+      - librenms_galera_local_status.stdout is search('wsrep_ready\\s+ON')
+    fail_msg: >-
+      {{ inventory_hostname }} MariaDB is running, but it has not joined the Galera primary component.
+      Status output: {{ librenms_galera_local_status.stdout | default('') }}
   when: librenms_db_mode == 'galera'
 
 - name: Create LibreNMS database in Galera mode

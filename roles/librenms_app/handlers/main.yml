@@ -1,4 +1,19 @@
 ---
+- name: Discover LibreNMS bootstrap cache files
+  find:
+    paths: "{{ librenms_install_dir }}/bootstrap/cache"
+    file_type: file
+    excludes: ".gitignore"
+  register: librenms_handler_bootstrap_cache_files
+  listen: Clear LibreNMS bootstrap cache
+
+- name: Remove LibreNMS bootstrap cache files
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_handler_bootstrap_cache_files.files | default([]) }}"
+  listen: Clear LibreNMS bootstrap cache
+
 - name: Restart PHP-FPM
   service:
     name: "{{ librenms_php_fpm_service_effective }}"

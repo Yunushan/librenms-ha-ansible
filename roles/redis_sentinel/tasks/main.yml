@@ -193,3 +193,75 @@
           journalctl:
           {{ redis_sentinel_native_start_service_journal.stdout | default('') }}
           {{ redis_sentinel_native_start_service_journal.stderr | default('') }}
+
+- name: Apply Redis Sentinel config changes before validation
+  meta: flush_handlers
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Query Redis Sentinel for the current master endpoint
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 26379
+    {% if librenms_redis_sentinel_username | length > 0 %}
+    --user {{ librenms_redis_sentinel_username | quote }}
+    {% endif %}
+    SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }}
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+  register: librenms_redis_sentinel_master_query
+  changed_when: false
+  failed_when: false
+  retries: 12
+  delay: 5
+  until:
+    - librenms_redis_sentinel_master_query.rc == 0
+    - (librenms_redis_sentinel_master_query.stdout_lines | default([]) | length) >= 2
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Set discovered Redis Sentinel master endpoint
+  set_fact:
+    librenms_redis_sentinel_master_host_effective: >-
+      {{ (librenms_redis_sentinel_master_query.stdout_lines | default([]))[0] | default('') }}
+    librenms_redis_sentinel_master_port_effective: >-
+      {{ (librenms_redis_sentinel_master_query.stdout_lines | default([]))[1] | default('6379') }}
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Verify Redis Sentinel discovered a master endpoint
+  assert:
+    that:
+      - librenms_redis_sentinel_master_host_effective | length > 0
+      - librenms_redis_sentinel_master_port_effective | string | length > 0
+    fail_msg: >-
+      Redis Sentinel did not return a master endpoint for
+      {{ librenms_redis_sentinel_service }} on {{ inventory_hostname }}.
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Verify Redis Sentinel master accepts cache writes
+  no_log: true
+  command: >-
+    redis-cli
+    -h {{ librenms_redis_sentinel_master_host_effective | quote }}
+    -p {{ librenms_redis_sentinel_master_port_effective | quote }}
+    {% if librenms_redis_username | length > 0 %}
+    --user {{ librenms_redis_username | quote }}
+    {% endif %}
+    SET librenms:sentinel-write-check {{ inventory_hostname | quote }} EX 30
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_sentinel_write_check
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 5
+  until:
+    - librenms_redis_sentinel_write_check.rc == 0
+    - (librenms_redis_sentinel_write_check.stdout | default('') | trim) == 'OK'
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Confirm Redis Sentinel writable master
+  debug:
+    msg: >-
+      Redis Sentinel {{ librenms_redis_sentinel_service }} reports writable
+      master {{ librenms_redis_sentinel_master_host_effective }}:{{
+      librenms_redis_sentinel_master_port_effective }} on {{ inventory_hostname }}.
+  when: librenms_redis_mode == 'sentinel'
