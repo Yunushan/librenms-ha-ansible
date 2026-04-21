@@ -9,6 +9,7 @@ librenms_install_dir: /opt/librenms
 librenms_user: librenms
 librenms_group: librenms
 librenms_shell: /bin/bash
+librenms_ansible_remote_tmp: "{{ librenms_install_dir }}/.ansible/tmp"
 librenms_fqdn: librenms.example.com
 librenms_default_fqdn_placeholder: librenms.example.com
 librenms_app_url: ""

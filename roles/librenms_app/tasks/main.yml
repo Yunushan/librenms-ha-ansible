@@ -77,7 +77,7 @@
         )
       }}
 
-- name: Determine effective DB host
+- name: Determine effective runtime DB host
   set_fact:
     librenms_db_host_effective: >-
       {{
@@ -102,6 +102,25 @@
                 else '127.0.0.1'
               )
             )
+          )
+        )
+      }}
+
+- name: Determine effective install-time DB host
+  set_fact:
+    librenms_db_host_install_effective: >-
+      {{
+        librenms_db_host
+        if librenms_db_host | length > 0
+        else
+        (
+          '127.0.0.1'
+          if librenms_db_mode == 'local'
+          else
+          (
+            hostvars[librenms_db_bootstrap_host].ansible_host | default(librenms_db_bootstrap_host)
+            if librenms_db_mode == 'galera'
+            else librenms_db_host_effective
           )
         )
       }}
@@ -216,6 +235,19 @@
     owner: "{{ librenms_user }}"
     group: "{{ librenms_group }}"
     mode: "0755"
+
+- name: Ensure LibreNMS Ansible remote temp directory exists
+  file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ librenms_ansible_remote_tmp | dirname }}"
+      mode: "0700"
+    - path: "{{ librenms_ansible_remote_tmp }}"
+      mode: "0700"
 
 - name: Check whether LibreNMS install directory already exists
   stat:
@@ -524,14 +556,15 @@
     - librenms_manage_nginx | bool
     - ansible_os_family == 'Debian'
 
-- name: Deploy LibreNMS environment file
+- name: Deploy LibreNMS install-time environment file
   template:
     src: librenms.env.j2
     dest: "{{ librenms_install_dir }}/.env"
     owner: "{{ librenms_user }}"
     group: "{{ librenms_group }}"
     mode: "0640"
-  notify: Restart PHP-FPM
+  vars:
+    librenms_env_db_host_effective: "{{ librenms_db_host_install_effective }}"
 
 - name: Run LibreNMS database migrations on primary node
   command:
@@ -622,7 +655,7 @@
 
 - name: Check if the initial LibreNMS admin user already exists
   community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective }}"
+    login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
     login_password: "{{ librenms_db_password }}"
@@ -1312,3 +1345,12 @@
           librenms application log:
           {{ librenms_application_log.stdout | default('') }}
       when: (librenms_web_probe_retry.status | default(0)) not in [200, 301, 302, 303, 307, 308]
+
+- name: Deploy final LibreNMS runtime environment file
+  template:
+    src: librenms.env.j2
+    dest: "{{ librenms_install_dir }}/.env"
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0640"
+  notify: Restart PHP-FPM
