@@ -385,6 +385,7 @@
     timeout 20 systemctl stop "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
     systemctl kill --kill-who=all --signal=KILL "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
     pkill -KILL -x mariadbd >/dev/null 2>&1 || true
+    systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
     systemctl reset-failed "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
   args:
     executable: /bin/bash
@@ -668,6 +669,16 @@
       changed_when: false
       failed_when: false
 
+    - name: Clear Galera bootstrap systemd environment before service start
+      command:
+        argv:
+          - systemctl
+          - unset-environment
+          - MYSQLD_OPTS
+          - _WSREP_NEW_CLUSTER
+      changed_when: false
+      failed_when: false
+
     - name: Ensure MariaDB service is enabled and started on Galera nodes
       service:
         name: "{{ librenms_mariadb_service_name }}"
@@ -763,10 +774,44 @@
           {{ librenms_galera_service_grastate.stdout | default('') }}
 
 - name: Wait for local MariaDB socket on Galera nodes
-  wait_for:
-    path: "{{ librenms_mariadb_socket }}"
-    timeout: "{{ librenms_galera_wait_timeout | int }}"
   when: librenms_db_mode == 'galera'
+  block:
+    - name: Wait for local MariaDB socket file
+      wait_for:
+        path: "{{ librenms_mariadb_socket }}"
+        timeout: "{{ librenms_galera_wait_timeout | int }}"
+  rescue:
+    - name: Capture MariaDB socket wait diagnostics
+      shell: |-
+        set -o pipefail
+        {
+          echo "--- systemctl ---"
+          systemctl status "{{ librenms_mariadb_service_name }}" --no-pager -l || true
+          echo "--- systemd environment ---"
+          systemctl show-environment | grep -E '^(MYSQLD_OPTS|_WSREP_)=' || true
+          echo "--- processes ---"
+          ps -eo pid,ppid,stat,cmd | grep -E '[m]ariadbd|[m]ysql' || true
+          echo "--- listeners ---"
+          ss -ltnp || true
+          echo "--- config ---"
+          cat "{{ librenms_galera_conf_path }}" || true
+          echo "--- grastate ---"
+          cat /var/lib/mysql/grastate.dat || true
+          echo "--- journal ---"
+          journalctl -u "{{ librenms_mariadb_service_name }}" -n 160 --no-pager || true
+        }
+      args:
+        executable: /bin/bash
+      register: librenms_galera_socket_wait_diagnostics
+      changed_when: false
+
+    - name: Fail with MariaDB socket wait diagnostics
+      fail:
+        msg: |-
+          MariaDB did not create {{ librenms_mariadb_socket }} on {{ inventory_hostname }}.
+
+          Diagnostics:
+          {{ librenms_galera_socket_wait_diagnostics.stdout | default('') }}
 
 - name: Wait for Galera node TCP listener
   wait_for:
