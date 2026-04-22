@@ -132,27 +132,55 @@
   register: librenms_galera_install_db_probe
   changed_when: false
   failed_when: false
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
     - librenms_db_host | length == 0
+
+- name: Initialize live Galera install-time database host list
+  set_fact:
+    librenms_galera_install_db_hosts: []
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_db_host | length == 0
+
+- name: Collect live Galera install-time database hosts
+  set_fact:
+    librenms_galera_install_db_hosts: "{{ librenms_galera_install_db_hosts + [item.item] }}"
+  loop: "{{ librenms_galera_install_db_probe.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_db_host | length == 0
+    - (item.stdout | default('')) is search('wsrep_cluster_status[ \t]+Primary')
+    - (item.stdout | default('')) is search('wsrep_ready[ \t]+ON')
 
 - name: Determine live Galera install-time database host
   set_fact:
     librenms_galera_install_db_host: >-
       {{
-        (
-          librenms_galera_install_db_probe.results | default([])
-          | selectattr('stdout', 'search', 'wsrep_cluster_status\\s+Primary')
-          | selectattr('stdout', 'search', 'wsrep_ready\\s+ON')
-          | map(attribute='item')
-          | list
-          | first
-        )
-        | default(librenms_db_bootstrap_host, true)
+        (librenms_galera_install_db_hosts | default([]))
+        | first
+        | default('')
       }}
   when:
     - librenms_db_mode == 'galera'
     - librenms_db_host | length == 0
+
+- name: Fail when no live Galera install-time database host was found
+  fail:
+    msg: |-
+      No live Galera install-time database host was found.
+
+      At least one Galera node must report:
+      wsrep_cluster_status Primary
+      wsrep_ready ON
+
+      Probe results:
+      {{ librenms_galera_install_db_probe.results | default([]) }}
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_db_host | length == 0
+    - librenms_galera_install_db_host | default('') | length == 0
 
 - name: Determine effective install-time DB host
   set_fact:
@@ -770,6 +798,7 @@
       register: librenms_install_db_galera_diagnostics
       changed_when: false
       failed_when: false
+      ignore_unreachable: true
 
     - name: Fail with LibreNMS install-time database diagnostics
       fail:
