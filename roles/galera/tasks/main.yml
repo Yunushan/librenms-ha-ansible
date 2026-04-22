@@ -331,3 +331,18 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == librenms_galera_bootstrap_effective_host
+
+- name: Create HAProxy Galera health-check user
+  no_log: true
+  community.mysql.mysql_user:
+    name: "{{ librenms_haproxy_db_health_user }}"
+    password: ""
+    host: "{{ librenms_haproxy_db_health_user_host }}"
+    priv: "*.*:USAGE"
+    state: present
+    login_unix_socket: "{{ librenms_mariadb_socket }}"
+    check_implicit_admin: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_haproxy_db_mysql_check_enabled | bool
+    - inventory_hostname == librenms_galera_bootstrap_effective_host

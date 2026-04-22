@@ -45,6 +45,7 @@ librenms_db_password: CHANGE_ME_DB_PASSWORD
 librenms_db_bind_address: 0.0.0.0
 librenms_db_user_host: "%"
 librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname]) | first) }}"
+librenms_runtime_db_prefer_local_galera: true
 
 librenms_galera_cluster_name: librenms_cluster
 librenms_galera_sst_method: rsync
@@ -64,6 +65,8 @@ librenms_redis_cache_db: 1
 librenms_redis_session_db: 0
 librenms_redis_timeout: 60
 librenms_redis_quorum: 2
+librenms_redis_sentinel_consensus_retries: 12
+librenms_redis_sentinel_consensus_delay: 5
 
 librenms_rrd_mode: local
 librenms_gluster_bootstrap_host: "{{ (groups.get('gluster_nodes', [inventory_hostname]) | first) }}"
@@ -99,6 +102,9 @@ librenms_haproxy_web_check_host: ""
 librenms_nginx_health_check_path: /healthz
 librenms_php_fpm_ping_path: /php-fpm-ping
 librenms_haproxy_web_check_path: "{{ librenms_php_fpm_ping_path }}"
+librenms_haproxy_db_mysql_check_enabled: true
+librenms_haproxy_db_health_user: haproxy_check
+librenms_haproxy_db_health_user_host: "%"
 librenms_haproxy_timeout_connect: 5s
 librenms_haproxy_timeout_client: 180s
 librenms_haproxy_timeout_server: 180s

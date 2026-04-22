@@ -51,7 +51,12 @@ frontend librenms_db
 backend galera_nodes
     mode tcp
     balance roundrobin
+    default-server inter 5s fall 3 rise 2
+{% if librenms_haproxy_db_mysql_check_enabled | bool %}
+    option mysql-check user {{ librenms_haproxy_db_health_user }}
+{% else %}
     option tcp-check
+{% endif %}
 {% for host in librenms_active_db_nodes %}
     server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_db_port }} check
 {% endfor %}

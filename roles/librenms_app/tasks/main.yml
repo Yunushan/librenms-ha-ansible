@@ -89,17 +89,26 @@
           if librenms_db_mode == 'local'
           else
           (
-            librenms_vip_ip
-            if librenms_db_mode == 'galera' and librenms_vip_enabled and librenms_vip_ip | length > 0
+            '127.0.0.1'
+            if (
+              librenms_db_mode == 'galera'
+              and librenms_runtime_db_prefer_local_galera | bool
+              and inventory_hostname in librenms_active_db_nodes
+            )
             else
             (
-              hostvars[(librenms_active_lb_nodes | first)].ansible_host | default(librenms_active_lb_nodes | first)
-              if librenms_db_mode == 'galera' and (librenms_active_lb_nodes | length > 0)
+              librenms_vip_ip
+              if librenms_db_mode == 'galera' and librenms_vip_enabled and librenms_vip_ip | length > 0
               else
               (
-                hostvars[(librenms_active_db_nodes | first)].ansible_host | default(librenms_active_db_nodes | first)
-                if (librenms_active_db_nodes | length > 0)
-                else '127.0.0.1'
+                hostvars[(librenms_active_lb_nodes | first)].ansible_host | default(librenms_active_lb_nodes | first)
+                if librenms_db_mode == 'galera' and (librenms_active_lb_nodes | length > 0)
+                else
+                (
+                  hostvars[(librenms_active_db_nodes | first)].ansible_host | default(librenms_active_db_nodes | first)
+                  if (librenms_active_db_nodes | length > 0)
+                  else '127.0.0.1'
+                )
               )
             )
           )
