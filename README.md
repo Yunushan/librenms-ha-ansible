@@ -467,7 +467,18 @@ librenms_redis_master_host: lnms1
 
 ```yaml
 librenms_rrd_mode: local            # local | glusterfs | external
+librenms_rrdcached_scope: all       # all for Gluster-backed HA; primary for a single TCP daemon
+librenms_rrdcached_endpoint_strategy: vip_tcp  # vip_tcp | primary_tcp | unix
 ```
+
+With `librenms_rrd_mode: glusterfs` and a VIP, the role defaults to an HAProxy
+TCP endpoint for `rrdcached` on the VIP. `rrdcached` runs on each LibreNMS node,
+but HAProxy keeps only the first healthy backend active and treats the others as
+failover backends. This follows LibreNMS' recommendation to keep one active
+RRDCacheD writer while still allowing another node to take over. Set
+`librenms_rrdcached_scope: primary` and
+`librenms_rrdcached_endpoint_strategy: primary_tcp` only if you intentionally
+want the older primary-node TCP endpoint behavior.
 
 ### VIP / HAProxy / Keepalived
 
@@ -477,10 +488,34 @@ librenms_vip_ip: 10.10.10.10
 librenms_vip_cidr: 24
 librenms_vip_interface: ""        # empty = use the default IPv4 route interface
 librenms_haproxy_web_check_path: /php-fpm-ping
+librenms_haproxy_timeout_connect: 3s
 librenms_haproxy_timeout_server: 180s
+librenms_haproxy_web_check_interval: 2s
+librenms_haproxy_web_check_fall: 2
+librenms_haproxy_db_check_interval: 2s
+librenms_haproxy_db_check_fall: 2
 ```
 
 Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.
+
+For failover tests, HAProxy retries and redispatches failed backend selections
+by default. With the default checks above, a failed web or DB backend is usually
+removed from rotation after roughly four seconds.
+
+### Redis failover tuning
+
+```yaml
+librenms_redis_timeout: 5
+librenms_redis_sentinel_down_after_milliseconds: 5000
+librenms_redis_sentinel_failover_timeout: 30000
+librenms_redis_sentinel_parallel_syncs: 1
+```
+
+If the Redis master node disappears, Sentinel needs a short window to agree on
+failure and promote a replica. During that window, UI actions can feel slow
+because cache, lock, and session writes are waiting on Redis failover. These
+defaults favor faster lab and LAN cluster recovery while still being adjustable
+for slower networks.
 
 ### HTTPS / TLS
 

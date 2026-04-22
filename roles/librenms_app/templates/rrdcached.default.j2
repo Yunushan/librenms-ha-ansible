@@ -10,4 +10,8 @@ SOCKGROUP={{ librenms_group }}
 DAEMON_GROUP={{ librenms_group }}
 DAEMON_USER={{ librenms_user }}
 BASE_OPTIONS="-B -F -R"
-NETWORK_OPTIONS="-L"
+{% if librenms_rrdcached_network_enabled | bool %}
+NETWORK_OPTIONS="-L -l {{ librenms_rrdcached_network_bind_address }}:{{ librenms_rrdcached_bind_port }}"
+{% else %}
+NETWORK_OPTIONS=""
+{% endif %}

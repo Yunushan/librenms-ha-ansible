@@ -15,8 +15,8 @@ dir /var/lib/redis
 
 sentinel monitor {{ librenms_redis_sentinel_service }} {{ redis_master_address }} 6379 {{ librenms_redis_quorum }}
 sentinel auth-pass {{ librenms_redis_sentinel_service }} {{ librenms_redis_password | to_json }}
-sentinel down-after-milliseconds {{ librenms_redis_sentinel_service }} 10000
-sentinel failover-timeout {{ librenms_redis_sentinel_service }} 60000
-sentinel parallel-syncs {{ librenms_redis_sentinel_service }} 1
+sentinel down-after-milliseconds {{ librenms_redis_sentinel_service }} {{ librenms_redis_sentinel_down_after_milliseconds }}
+sentinel failover-timeout {{ librenms_redis_sentinel_service }} {{ librenms_redis_sentinel_failover_timeout }}
+sentinel parallel-syncs {{ librenms_redis_sentinel_service }} {{ librenms_redis_sentinel_parallel_syncs }}
 
 requirepass {{ librenms_redis_sentinel_password | to_json }}

@@ -14,6 +14,24 @@
 {% set librenms_haproxy_tls_bind =
   librenms_haproxy_bind_address ~ ':' ~ librenms_haproxy_https_port
 %}
+{% set librenms_haproxy_web_default_server =
+  'inter ' ~ librenms_haproxy_web_check_interval
+  ~ ' fall ' ~ librenms_haproxy_web_check_fall
+  ~ ' rise ' ~ librenms_haproxy_web_check_rise
+%}
+{% set librenms_haproxy_db_default_server =
+  'inter ' ~ librenms_haproxy_db_check_interval
+  ~ ' fall ' ~ librenms_haproxy_db_check_fall
+  ~ ' rise ' ~ librenms_haproxy_db_check_rise
+%}
+{% set librenms_haproxy_rrdcached_backend_nodes =
+  groups.get('librenms_nodes', []) | difference(groups.get('decommission_nodes', []))
+%}
+{% set librenms_haproxy_rrdcached_default_server =
+  'inter ' ~ librenms_haproxy_rrdcached_check_interval
+  ~ ' fall ' ~ librenms_haproxy_rrdcached_check_fall
+  ~ ' rise ' ~ librenms_haproxy_rrdcached_check_rise
+%}
 
 global
     log /dev/log local0
@@ -26,6 +44,10 @@ defaults
     timeout connect {{ librenms_haproxy_timeout_connect }}
     timeout client {{ librenms_haproxy_timeout_client }}
     timeout server {{ librenms_haproxy_timeout_server }}
+    retries {{ librenms_haproxy_retries }}
+{% if librenms_haproxy_redispatch | bool %}
+    option redispatch
+{% endif %}
 
 frontend librenms_web_http
     bind {{ librenms_haproxy_bind_address }}:{{ librenms_haproxy_web_port }}
@@ -54,7 +76,7 @@ backend librenms_web_nodes
     mode http
     balance roundrobin
 {% if librenms_bootstrap_completed_effective | bool %}
-    default-server inter 5s fall 3 rise 2
+    default-server {{ librenms_haproxy_web_default_server }}
     option httpchk
     http-check send meth GET uri {{ librenms_hc_uri }} ver HTTP/1.1 hdr Host {{ librenms_hc_host }} hdr Connection close
     http-check expect rstatus ^(2|3)[0-9][0-9]$
@@ -72,7 +94,7 @@ frontend librenms_db
 backend galera_nodes
     mode tcp
     balance roundrobin
-    default-server inter 5s fall 3 rise 2
+    default-server {{ librenms_haproxy_db_default_server }}
 {% if librenms_haproxy_db_mysql_check_enabled | bool %}
     option mysql-check user {{ librenms_haproxy_db_health_user }}
 {% else %}
@@ -80,6 +102,26 @@ backend galera_nodes
 {% endif %}
 {% for host in librenms_active_db_nodes %}
     server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_db_port }} check
+{% endfor %}
+{% endif %}
+
+{% if librenms_haproxy_rrdcached_enabled | bool %}
+frontend librenms_rrdcached
+    bind {{ librenms_haproxy_bind_address }}:{{ librenms_rrdcached_bind_port }}
+    mode tcp
+    default_backend librenms_rrdcached_nodes
+
+backend librenms_rrdcached_nodes
+    mode tcp
+    balance roundrobin
+    default-server {{ librenms_haproxy_rrdcached_default_server }}
+    option tcp-check
+{% for host in librenms_haproxy_rrdcached_backend_nodes %}
+{% set rrdcached_host =
+  hostvars[host].librenms_rrdcached_network_bind_address
+  | default(hostvars[host].ansible_host | default(host))
+%}
+    server {{ host }} {{ rrdcached_host }}:{{ librenms_rrdcached_bind_port }} check{% if not loop.first %} backup{% endif %}
 {% endfor %}
 {% endif %}
 

@@ -78,8 +78,11 @@ librenms_redis_external_port: 6379
 librenms_redis_db: 0
 librenms_redis_cache_db: 1
 librenms_redis_session_db: 0
-librenms_redis_timeout: 60
+librenms_redis_timeout: 5
 librenms_redis_quorum: 2
+librenms_redis_sentinel_down_after_milliseconds: 5000
+librenms_redis_sentinel_failover_timeout: 30000
+librenms_redis_sentinel_parallel_syncs: 1
 librenms_redis_sentinel_enforce_configured_master: true
 librenms_redis_sentinel_consensus_retries: 12
 librenms_redis_sentinel_consensus_delay: 5
@@ -144,9 +147,25 @@ librenms_nginx_redirect_unmatched_hosts: "{{ librenms_vip_enabled | bool }}"
 librenms_haproxy_db_mysql_check_enabled: true
 librenms_haproxy_db_health_user: haproxy_check
 librenms_haproxy_db_health_user_host: "%"
-librenms_haproxy_timeout_connect: 5s
+librenms_haproxy_timeout_connect: 3s
 librenms_haproxy_timeout_client: 180s
 librenms_haproxy_timeout_server: 180s
+librenms_haproxy_retries: 2
+librenms_haproxy_redispatch: true
+librenms_haproxy_web_check_interval: 2s
+librenms_haproxy_web_check_fall: 2
+librenms_haproxy_web_check_rise: 2
+librenms_haproxy_db_check_interval: 2s
+librenms_haproxy_db_check_fall: 2
+librenms_haproxy_db_check_rise: 2
+librenms_haproxy_rrdcached_enabled: >-
+  {{
+    librenms_manage_rrdcached | bool
+    and librenms_rrdcached_endpoint_strategy == 'vip_tcp'
+  }}
+librenms_haproxy_rrdcached_check_interval: 2s
+librenms_haproxy_rrdcached_check_fall: 2
+librenms_haproxy_rrdcached_check_rise: 2
 librenms_app_probe_path: /
 librenms_app_probe_success_statuses:
   - 200
@@ -202,6 +221,23 @@ librenms_dispatcher_registration_delay: 3
 librenms_dispatcher_registration_window: 300
 librenms_rrdcached_bind_port: 42217
 librenms_rrdcached_endpoint: ""
+librenms_rrdcached_endpoint_strategy: >-
+  {{
+    'vip_tcp'
+    if (
+      librenms_rrd_mode == 'glusterfs'
+      and librenms_vip_enabled | bool
+      and librenms_vip_ip | length > 0
+    )
+    else 'primary_tcp'
+  }}
+librenms_rrdcached_scope: "{{ 'all' if librenms_rrdcached_endpoint_strategy == 'vip_tcp' else 'primary' }}"
+librenms_rrdcached_network_enabled: "{{ librenms_rrdcached_endpoint_strategy != 'unix' }}"
+librenms_rrdcached_network_bind_address: >-
+  {{
+    ansible_host
+    | default(ansible_default_ipv4.address | default(inventory_hostname))
+  }}
 librenms_rrdcached_socket: /run/rrdcached.sock
 librenms_rrdcached_journal_path: /var/lib/rrdcached/journal
 librenms_rrdcached_default_config_path: /etc/default/rrdcached

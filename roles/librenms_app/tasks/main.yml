@@ -184,6 +184,52 @@
       {{ hostvars[host].ansible_host | default(host) }}:26379{%- if not loop.last -%},{%- endif -%}
       {%- endfor -%}
 
+- name: Determine effective primary LibreNMS node
+  set_fact:
+    librenms_primary_node_effective: >-
+      {{
+        groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
+        | first
+      }}
+
+- name: Determine effective runtime config node
+  set_fact:
+    librenms_runtime_config_node_effective: "{{ ansible_play_hosts | first }}"
+
+- name: Determine whether rrdcached should run on this node
+  set_fact:
+    librenms_rrdcached_runs_on_host: >-
+      {{
+        librenms_rrdcached_scope == 'all'
+        or inventory_hostname == librenms_primary_node_effective
+      }}
+
+- name: Determine effective rrdcached TCP host
+  set_fact:
+    librenms_rrdcached_tcp_host_effective: >-
+      {{
+        librenms_vip_ip
+        if (
+          librenms_rrdcached_endpoint_strategy == 'vip_tcp'
+          and librenms_vip_enabled | bool
+          and librenms_vip_ip | length > 0
+        )
+        else
+        (
+          hostvars[(librenms_active_lb_nodes | first)].ansible_host
+          | default(librenms_active_lb_nodes | first)
+          if (
+            librenms_rrdcached_endpoint_strategy == 'vip_tcp'
+            and (librenms_active_lb_nodes | length > 0)
+          )
+          else
+          (
+            hostvars[librenms_primary_node_effective].ansible_host
+            | default(librenms_primary_node_effective)
+          )
+        )
+      }}
+
 - name: Determine effective rrdcached endpoint
   set_fact:
     librenms_rrdcached_endpoint_effective: >-
@@ -192,19 +238,14 @@
         if librenms_rrdcached_endpoint | length > 0
         else
         (
+          'unix:' ~ librenms_rrdcached_socket
+          if librenms_rrdcached_endpoint_strategy == 'unix'
+          else
           (
-            hostvars[
-              (
-                groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
-                | first
-              )
-            ].ansible_host
-            | default(
-              groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
-              | first
-            )
+            librenms_rrdcached_tcp_host_effective
+            ~ ':'
+            ~ (librenms_rrdcached_bind_port | string)
           )
-          ~ ':' ~ (librenms_rrdcached_bind_port | string)
         )
       }}
 
@@ -718,9 +759,9 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
     - >-
-      (librenms_schema_columns.query_result[1][0].data_type | default('') | lower) != 'timestamp'
-      or (librenms_schema_columns.query_result[1][0].is_nullable | default('') | upper) != 'NO'
-      or (librenms_schema_columns.query_result[1][0].column_default | default('')) != '1970-01-02 00:00:00'
+      (librenms_schema_columns.query_result[-2][0].data_type | default('') | lower) != 'timestamp'
+      or (librenms_schema_columns.query_result[-2][0].is_nullable | default('') | upper) != 'NO'
+      or (librenms_schema_columns.query_result[-2][0].column_default | default('')) != '1970-01-02 00:00:00'
 
 - name: Normalize LibreNMS users.created_at schema default
   community.mysql.mysql_query:
@@ -739,9 +780,9 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
     - >-
-      (librenms_schema_columns.query_result[2][0].data_type | default('') | lower) != 'timestamp'
-      or (librenms_schema_columns.query_result[2][0].is_nullable | default('') | upper) != 'NO'
-      or (librenms_schema_columns.query_result[2][0].column_default | default('')) != '1970-01-02 00:00:01'
+      (librenms_schema_columns.query_result[-1][0].data_type | default('') | lower) != 'timestamp'
+      or (librenms_schema_columns.query_result[-1][0].is_nullable | default('') | upper) != 'NO'
+      or (librenms_schema_columns.query_result[-1][0].column_default | default('')) != '1970-01-02 00:00:01'
 
 - name: Check if the initial LibreNMS admin user already exists
   community.mysql.mysql_query:
@@ -829,7 +870,7 @@
   when:
     - librenms_manage_rrdcached | bool
     - ansible_os_family == 'Debian'
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - librenms_rrdcached_runs_on_host | bool
 
 - name: Deploy rrdcached defaults on Debian-family systems
   template:
@@ -842,9 +883,9 @@
   when:
     - librenms_manage_rrdcached | bool
     - ansible_os_family == 'Debian'
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - librenms_rrdcached_runs_on_host | bool
 
-- name: Enable and start rrdcached on the primary node
+- name: Enable and start rrdcached on eligible nodes
   service:
     name: "{{ librenms_rrdcached_service_name }}"
     state: started
@@ -852,9 +893,9 @@
   when:
     - librenms_manage_rrdcached | bool
     - ansible_os_family == 'Debian'
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - librenms_rrdcached_runs_on_host | bool
 
-- name: Disable rrdcached on non-primary Debian-family nodes
+- name: Disable rrdcached on ineligible Debian-family nodes
   service:
     name: "{{ librenms_rrdcached_service_name }}"
     state: stopped
@@ -863,7 +904,7 @@
   when:
     - librenms_manage_rrdcached | bool
     - ansible_os_family == 'Debian'
-    - inventory_hostname != (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - not (librenms_rrdcached_runs_on_host | bool)
 
 - name: Enable nginx
   service:
@@ -1458,7 +1499,7 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_manage_rrdcached | bool
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - inventory_hostname == librenms_runtime_config_node_effective
 
 - name: Set LibreNMS rrdcached endpoint after bootstrap
   command:
@@ -1472,7 +1513,7 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_manage_rrdcached | bool
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - inventory_hostname == librenms_runtime_config_node_effective
 
 - name: Set LibreNMS rrdtool version after bootstrap
   command:
@@ -1486,7 +1527,7 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_manage_rrdcached | bool
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - inventory_hostname == librenms_runtime_config_node_effective
     - librenms_rrdtool_version_cmd.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+')
 
 - name: Set dispatcher schedule types after bootstrap
