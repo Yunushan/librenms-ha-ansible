@@ -35,21 +35,60 @@
   register: librenms_galera_component_probe
   failed_when: false
   changed_when: false
+  ignore_unreachable: true
+  when: librenms_db_mode == 'galera'
+
+- name: Determine live Galera members
+  set_fact:
+    librenms_galera_live_members: >-
+      {{
+        librenms_galera_component_probe.results | default([])
+        | selectattr('stdout', 'defined')
+        | selectattr('stdout', 'search', 'wsrep_cluster_status\\s+Primary')
+        | selectattr('stdout', 'search', 'wsrep_ready\\s+ON')
+        | map(attribute='item')
+        | list
+      }}
   when: librenms_db_mode == 'galera'
 
 - name: Determine whether Galera bootstrap is required
   set_fact:
-    librenms_galera_cluster_has_live_member: >-
-      {{
-        (
-          librenms_galera_component_probe.results
-          | selectattr('stdout', 'search', 'wsrep_cluster_status\\s+Primary')
-          | selectattr('stdout', 'search', 'wsrep_ready\\s+ON')
-          | list
-          | length
-        ) > 0
-      }}
+    librenms_galera_cluster_has_live_member: "{{ (librenms_galera_live_members | length) > 0 }}"
   when: librenms_db_mode == 'galera'
+
+- name: Quiesce LibreNMS workers while Galera is degraded
+  shell: |-
+    set -o pipefail
+    changed=0
+
+    for unit in \
+      librenms-scheduler.timer \
+      librenms-scheduler.service \
+      librenms-daily.timer \
+      librenms-daily.service \
+      librenms.service; do
+      if systemctl list-unit-files "${unit}" >/dev/null 2>&1; then
+        if systemctl is-active --quiet "${unit}"; then
+          systemctl stop "${unit}"
+          changed=1
+        fi
+      fi
+    done
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_active_web_nodes | default(groups.get('librenms_nodes', [])) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_quiesce_librenms_workers
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_quiesce_librenms_services | bool
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - (librenms_galera_live_members | length) < (librenms_active_db_nodes | length)
 
 - name: Read Galera saved bootstrap state on database nodes
   command:
@@ -233,24 +272,54 @@
   set_fact:
     librenms_galera_bootstrap_effective_host: >-
       {{
-        (librenms_galera_safe_bootstrap_hosts | first)
+        (librenms_galera_live_members | first)
         if (
-          not librenms_galera_cluster_has_live_member | bool
-          and (librenms_galera_safe_bootstrap_hosts | length) > 0
+          librenms_galera_cluster_has_live_member | bool
+          and (librenms_galera_live_members | length) > 0
         )
         else
         (
-          librenms_galera_recovered_bootstrap_host
+          (librenms_galera_safe_bootstrap_hosts | first)
           if (
             not librenms_galera_cluster_has_live_member | bool
-            and (librenms_galera_safe_bootstrap_hosts | length) == 0
-            and (librenms_galera_recovered_bootstrap_host | default('') | length) > 0
-            and (librenms_galera_max_recovered_seqno | default(-1) | int) >= 0
+            and (librenms_galera_safe_bootstrap_hosts | length) > 0
           )
-          else librenms_db_bootstrap_host
+          else
+          (
+            librenms_galera_recovered_bootstrap_host
+            if (
+              not librenms_galera_cluster_has_live_member | bool
+              and (librenms_galera_safe_bootstrap_hosts | length) == 0
+              and (librenms_galera_recovered_bootstrap_host | default('') | length) > 0
+              and (librenms_galera_max_recovered_seqno | default(-1) | int) >= 0
+            )
+            else librenms_db_bootstrap_host
+          )
         )
       }}
   when: librenms_db_mode == 'galera'
+
+- name: Determine Galera selected live member
+  set_fact:
+    librenms_galera_bootstrap_selected_from_live_member: >-
+      {{
+        librenms_galera_cluster_has_live_member | bool
+        and (librenms_galera_live_members | length) > 0
+        and librenms_galera_bootstrap_effective_host == (librenms_galera_live_members | first)
+      }}
+  when: librenms_db_mode == 'galera'
+
+- name: Report Galera live member selected for database actions
+  debug:
+    msg: >-
+      Galera already has a live primary component on
+      {{ librenms_galera_bootstrap_effective_host }}; database setup and joiner
+      recovery will use that node as the effective primary.
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_bootstrap_selected_from_live_member | default(false)
+    - librenms_galera_bootstrap_effective_host != librenms_db_bootstrap_host
+    - inventory_hostname == (librenms_active_db_nodes | first)
 
 - name: Determine whether Galera bootstrap host came from recovery
   set_fact:
@@ -665,6 +734,59 @@
       }}
   when: librenms_db_mode == 'galera'
 
+- name: Stop non-ready Galera joiner before stale state cleanup # noqa: command-instead-of-module
+  shell: |-
+    set -o pipefail
+    timeout "{{ librenms_galera_stop_timeout | int }}" \
+      systemctl stop "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+
+    if pgrep -x mariadbd >/dev/null; then
+      systemctl kill --kill-who=all --signal=KILL \
+        "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+      pkill -KILL -x mariadbd >/dev/null 2>&1 || true
+    fi
+
+    systemctl reset-failed "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+  args:
+    executable: /bin/bash
+  register: librenms_galera_joiner_state_cleanup_stop
+  changed_when: librenms_galera_joiner_state_cleanup_stop.rc == 0
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_clear_joiner_state | bool
+    - librenms_galera_cluster_has_live_member | bool
+    - inventory_hostname != librenms_galera_bootstrap_effective_host
+    - >-
+      not (
+        (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+        and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+      )
+
+- name: Clear stale Galera joiner view/cache state
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{
+      ['/var/lib/mysql/gvwstate.dat']
+      + (
+        ['/var/lib/mysql/galera.cache']
+        if librenms_galera_clear_joiner_cache | bool
+        else []
+      )
+    }}
+  register: librenms_galera_joiner_state_cleanup
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_clear_joiner_state | bool
+    - librenms_galera_cluster_has_live_member | bool
+    - inventory_hostname != librenms_galera_bootstrap_effective_host
+    - >-
+      not (
+        (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+        and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+      )
+
 - name: Converge MariaDB service on Galera nodes
   when:
     - librenms_db_mode == 'galera'
@@ -919,6 +1041,157 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_local_recovery_status is defined
     - not librenms_galera_local_recovery_status.skipped | default(false)
+
+- name: Capture Galera join failure journal for cleanup decision
+  command:
+    argv:
+      - journalctl
+      - -u
+      - "{{ librenms_mariadb_service_name }}"
+      - -n
+      - "160"
+      - --no-pager
+  register: librenms_galera_join_failure_journal
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_clear_joiner_state | bool
+    - librenms_galera_local_service_expected | bool
+    - inventory_hostname != librenms_galera_bootstrap_effective_host
+    - >-
+      not (
+        (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+        and (librenms_galera_local_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+      )
+
+- name: Rebuild stale Galera joiner state after IST failure
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_clear_joiner_state | bool
+    - librenms_galera_local_service_expected | bool
+    - inventory_hostname != librenms_galera_bootstrap_effective_host
+    - >-
+      not (
+        (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+        and (librenms_galera_local_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+      )
+    - >-
+      (
+        librenms_galera_join_failure_journal.stdout | default('')
+      ) is search('IST failed|Unsupported CC action version|node restart required|Failed to JOIN|Cert position .* less than last committed')
+  block:
+    - name: Stop MariaDB before Galera joiner state rebuild # noqa: command-instead-of-module
+      shell: |-
+        set -o pipefail
+        timeout "{{ librenms_galera_stop_timeout | int }}" \
+          systemctl stop "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+
+        if pgrep -x mariadbd >/dev/null; then
+          systemctl kill --kill-who=all --signal=KILL \
+            "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+          pkill -KILL -x mariadbd >/dev/null 2>&1 || true
+        fi
+
+        systemctl reset-failed "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+      register: librenms_galera_joiner_rebuild_stop
+      changed_when: librenms_galera_joiner_rebuild_stop.rc == 0
+
+    - name: Clear Galera joiner view/cache after IST failure
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{
+          ['/var/lib/mysql/gvwstate.dat']
+          + (
+            ['/var/lib/mysql/galera.cache']
+            if librenms_galera_clear_joiner_cache | bool
+            else []
+          )
+        }}
+      register: librenms_galera_joiner_rebuild_cleanup
+
+    - name: Reset Galera joiner service state before rebuild retry
+      command:
+        argv:
+          - systemctl
+          - "{{ item }}"
+          - "{{ librenms_mariadb_service_name }}"
+      loop:
+        - reset-failed
+      changed_when: false
+      failed_when: false
+
+    - name: Clear Galera bootstrap systemd environment before rebuild retry
+      command:
+        argv:
+          - systemctl
+          - unset-environment
+          - MYSQLD_OPTS
+          - _WSREP_NEW_CLUSTER
+      changed_when: false
+      failed_when: false
+
+    - name: Start MariaDB after Galera joiner state rebuild
+      service:
+        name: "{{ librenms_mariadb_service_name }}"
+        state: started
+      register: librenms_galera_joiner_rebuild_start
+      failed_when: false
+
+    - name: Wait for MariaDB socket after Galera joiner state rebuild
+      wait_for:
+        path: "{{ librenms_mariadb_socket }}"
+        timeout: "{{ librenms_galera_wait_timeout | int }}"
+      register: librenms_galera_joiner_rebuild_socket
+      failed_when: false
+
+    - name: Wait for rebuilt Galera joiner to join the primary component
+      shell: |-
+        set -o pipefail
+
+        attempts=$(( {{ librenms_galera_wait_timeout | int }} / 5 ))
+        if [ "${attempts}" -lt 1 ]; then
+          attempts=1
+        fi
+
+        status=''
+        for attempt in $(seq 1 "${attempts}"); do
+          status=$(mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+            "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" 2>&1 || true)
+
+          printf '%s\n' "${status}"
+
+          if printf '%s\n' "${status}" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \
+            && printf '%s\n' "${status}" | grep -Eq 'wsrep_ready[[:space:]]+ON'; then
+            exit 0
+          fi
+
+          if [ "${attempt}" -lt "${attempts}" ]; then
+            sleep 5
+          fi
+        done
+
+        exit 1
+      args:
+        executable: /bin/bash
+      register: librenms_galera_joiner_rebuild_status
+      changed_when: false
+      failed_when: false
+
+- name: Use local Galera status after joiner state rebuild
+  set_fact:
+    librenms_galera_local_status:
+      stdout: "{{ librenms_galera_joiner_rebuild_status.stdout | default('') }}"
+      stderr: "{{ librenms_galera_joiner_rebuild_status.stderr | default('') }}"
+      rc: "{{ librenms_galera_joiner_rebuild_status.rc | default(1) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_joiner_rebuild_status is defined
+    - not librenms_galera_joiner_rebuild_status.skipped | default(false)
 
 - name: Capture local Galera diagnostics when node is not ready
   shell: |-

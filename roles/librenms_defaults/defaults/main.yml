@@ -70,6 +70,9 @@ librenms_galera_recovery_tie_breaker: first
 librenms_galera_stop_timeout: 60
 librenms_galera_bootstrap_timeout: 180
 librenms_galera_force_kill_stale_mariadb: true
+librenms_galera_quiesce_librenms_services: true
+librenms_galera_clear_joiner_state: true
+librenms_galera_clear_joiner_cache: true
 
 librenms_redis_mode: local
 librenms_redis_username: ""
