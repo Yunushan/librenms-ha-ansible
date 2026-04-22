@@ -57,6 +57,7 @@ This repository gives you one Ansible project that can deploy:
 - standalone or cluster deployments from the same project
 - optional Galera and optional Redis Sentinel
 - optional VIP and load-balancer layer
+- optional HAProxy HTTPS listener with wildcard PEM or Let's Encrypt certificates
 - optional local SNMP agent management
 - support for SNMP **v1**, **v2c**, and **v3**
 - automatic self-monitoring for LibreNMS cluster nodes, with a one-variable opt out
@@ -289,6 +290,9 @@ Open the site and finish the first app bootstrap:
 http://librenms.example.com/install
 ```
 
+Use `https://librenms.example.com/install` when
+`librenms_haproxy_tls_enabled: true`.
+
 or on standalone:
 
 ```text
@@ -364,8 +368,8 @@ If a host has multiple roles, it needs the union of the rows that apply to those
 | Operators / browsers | AWX controller, ingress, or load balancer | TCP 80 / 443 / selected NodePort | When `awx_controller_enabled: true` | AWX web UI and API |
 | Managed hosts | OS mirrors, GitHub, Packagist, internal mirrors | TCP 80 / 443 | During bootstrap and updates | Package installs, LibreNMS git checkout, Composer dependencies |
 | Managed hosts | DNS / NTP infrastructure | UDP/TCP 53, UDP 123 | Strongly recommended | Name resolution and clock sync for repos, clustering, and TLS |
-| Users / browsers | VIP or web nodes | TCP 80 | Default deployment | LibreNMS Web UI through HAProxy or directly to nginx |
-| Users / browsers | Reverse proxy / VIP | TCP 443 | Only if you add TLS outside the default config | HTTPS is recommended, but this repo does not configure TLS listeners by default |
+| Users / browsers | VIP or web nodes | TCP 80 | Default deployment, or HTTP to HTTPS redirect when TLS is enabled | LibreNMS Web UI through HAProxy or directly to nginx |
+| Users / browsers | VIP | TCP 443 | When `librenms_haproxy_tls_enabled: true` | Native HAProxy HTTPS listener with wildcard PEM or Let's Encrypt certificate |
 | LB nodes | Web or full LibreNMS nodes | TCP 80 | When HAProxy fronts the Web UI | Proxy traffic and HTTP health checks |
 | LibreNMS app nodes | DB VIP, LB nodes, or DB nodes | TCP 3306 | Any non-local DB mode | LibreNMS application database access |
 | DB nodes | DB nodes | TCP 3306 | `librenms_db_mode: galera` | MariaDB client traffic and health checks inside the cluster |
@@ -386,7 +390,7 @@ If a host has multiple roles, it needs the union of the rows that apply to those
 - `librenms_db_bind_address` defaults to `0.0.0.0`, so restrict `3306/tcp` with host or network firewalls if you do not want broad exposure.
 - Keep Galera, Redis, GlusterFS, and VRRP limited to the cluster management subnet. None of those services should be exposed to general client networks.
 - Keepalived VRRP usually requires the `lb_nodes` to be on the same L2 segment or VLAN, with firewalls allowing protocol `112` and multicast to `224.0.0.18`.
-- This repo listens on `80/tcp` for the Web UI by default. If you need native `443/tcp`, add TLS termination in front of the VIP or extend the nginx / HAProxy templates.
+- This repo listens on `80/tcp` for the Web UI by default. Set `librenms_haproxy_tls_enabled: true` to terminate HTTPS on HAProxy at the VIP. In HA mode, expose node-local `80/tcp` only to the load-balancer or management subnet unless you intentionally allow direct node UI access.
 - When `librenms_manage_local_snmpd: true`, the nodes listen on `udp/161`. If you do not monitor the LibreNMS nodes themselves, you can keep that port restricted to your poller subnet.
 - GlusterFS uses management ports plus dynamic brick ports. The documented `49152-49251/tcp` range is the practical default to allow between Gluster peers and Gluster clients.
 
@@ -477,6 +481,74 @@ librenms_haproxy_timeout_server: 180s
 ```
 
 Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.
+
+### HTTPS / TLS
+
+By default the cluster listens on HTTP `80/tcp`. For production, enable TLS on
+HAProxy so public browser traffic uses the VIP on `443/tcp` while nginx keeps
+serving node-local backend traffic on `80/tcp`.
+
+For an existing wildcard certificate, provide a HAProxy PEM file containing the
+certificate chain followed by the private key:
+
+```yaml
+librenms_fqdn: librenms.example.com
+librenms_app_url: https://librenms.example.com
+librenms_haproxy_tls_enabled: true
+librenms_haproxy_http_redirect_to_https: true
+librenms_haproxy_tls_manage_cert: true
+librenms_haproxy_tls_pem_src: files/wildcard-example-com.pem
+```
+
+If the PEM is already present on every `lb_nodes` host, leave certificate
+management disabled and point HAProxy at the remote file:
+
+```yaml
+librenms_haproxy_tls_enabled: true
+librenms_haproxy_tls_manage_cert: false
+librenms_haproxy_tls_cert_path: /etc/haproxy/certs/librenms.pem
+```
+
+Let's Encrypt is optional. The role installs Certbot when requested, builds
+the HAProxy PEM from the issued `fullchain.pem` and `privkey.pem`, and installs
+a renewal deploy hook that rebuilds the PEM and reloads HAProxy after renewal.
+Supply the authenticator that matches your environment.
+
+For a normal HTTP-01 certificate in a lab, standalone mode can work, but it
+needs temporary access to port `80/tcp` on the LB node:
+
+```yaml
+librenms_haproxy_tls_enabled: true
+librenms_letsencrypt_enabled: true
+librenms_letsencrypt_email: noc@example.com
+librenms_letsencrypt_domains:
+  - librenms.example.com
+librenms_letsencrypt_certbot_extra_args:
+  - --standalone
+```
+
+For production and all wildcard certificates, prefer DNS-01. Install the
+provider plugin and pass the provider-specific Certbot arguments:
+
+```yaml
+librenms_haproxy_tls_enabled: true
+librenms_letsencrypt_enabled: true
+librenms_letsencrypt_email: noc@example.com
+librenms_letsencrypt_domains:
+  - "*.example.com"
+  - example.com
+librenms_letsencrypt_live_name: example.com
+librenms_letsencrypt_packages:
+  - certbot
+  - python3-certbot-dns-cloudflare
+librenms_letsencrypt_certbot_extra_args:
+  - --dns-cloudflare
+  - --dns-cloudflare-credentials
+  - /root/.secrets/cloudflare.ini
+```
+
+Keep DNS API credential files readable only by root, and prefer Ansible Vault
+for any secret values managed from the controller.
 
 ### Web health probes
 

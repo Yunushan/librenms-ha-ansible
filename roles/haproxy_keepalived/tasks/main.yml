@@ -33,6 +33,213 @@
     reload: true
   when: librenms_vip_enabled | bool
 
+- name: Validate HAProxy TLS certificate settings
+  assert:
+    that:
+      - librenms_haproxy_tls_enabled | bool
+      - librenms_haproxy_tls_cert_path | length > 0
+      - not (librenms_haproxy_tls_manage_cert | bool and librenms_letsencrypt_enabled | bool)
+      - >-
+        librenms_letsencrypt_enabled | bool
+        or not librenms_haproxy_tls_manage_cert | bool
+        or librenms_haproxy_tls_pem_src | length > 0
+        or librenms_haproxy_tls_pem_content | length > 0
+      - >-
+        not librenms_haproxy_tls_manage_cert | bool
+        or librenms_haproxy_tls_pem_src | length == 0
+        or librenms_haproxy_tls_pem_content | length == 0
+      - >-
+        not librenms_letsencrypt_enabled | bool
+        or librenms_letsencrypt_email | length > 0
+      - >-
+        not librenms_letsencrypt_enabled | bool
+        or (librenms_letsencrypt_domains | reject('equalto', '') | list | length) > 0
+      - >-
+        not librenms_letsencrypt_enabled | bool
+        or (librenms_letsencrypt_certbot_extra_args | length) > 0
+    fail_msg: >-
+      Enable librenms_haproxy_tls_enabled for TLS. Then either provide an existing
+      HAProxy PEM at librenms_haproxy_tls_cert_path, set librenms_haproxy_tls_manage_cert
+      with one of librenms_haproxy_tls_pem_src or librenms_haproxy_tls_pem_content,
+      or enable librenms_letsencrypt_enabled with email, domains, and certbot
+      authenticator args.
+  when: librenms_haproxy_tls_enabled | bool or librenms_letsencrypt_enabled | bool
+
+- name: Ensure HAProxy TLS certificate directory exists
+  file:
+    path: "{{ librenms_haproxy_tls_cert_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  when: librenms_haproxy_tls_enabled | bool
+
+- name: Install Certbot packages when Let's Encrypt is enabled
+  package:
+    name: "{{ librenms_letsencrypt_packages }}"
+    state: present
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+    - librenms_letsencrypt_install_certbot | bool
+
+- name: Ensure Let's Encrypt deploy hook directory exists
+  file:
+    path: "{{ librenms_letsencrypt_deploy_hook_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+    - librenms_letsencrypt_manage_deploy_hook | bool
+
+- name: Install Let's Encrypt HAProxy PEM deploy hook
+  copy:
+    dest: "{{ librenms_letsencrypt_deploy_hook_path }}"
+    content: |
+      #!/bin/sh
+      set -eu
+      umask 077
+      cat '{{ librenms_letsencrypt_fullchain_path }}' '{{ librenms_letsencrypt_key_path }}' > '{{ librenms_haproxy_tls_cert_path }}.tmp'
+      chown root:root '{{ librenms_haproxy_tls_cert_path }}.tmp'
+      chmod 0600 '{{ librenms_haproxy_tls_cert_path }}.tmp'
+      mv '{{ librenms_haproxy_tls_cert_path }}.tmp' '{{ librenms_haproxy_tls_cert_path }}'
+      systemctl reload '{{ librenms_haproxy_service_name }}' || systemctl restart '{{ librenms_haproxy_service_name }}'
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+    - librenms_letsencrypt_manage_deploy_hook | bool
+
+- name: Initialize Let's Encrypt Certbot command arguments
+  set_fact:
+    librenms_letsencrypt_certbot_argv:
+      - certbot
+      - certonly
+      - --non-interactive
+      - --agree-tos
+      - --email
+      - "{{ librenms_letsencrypt_email }}"
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+
+- name: Add Let's Encrypt Certbot extra arguments
+  set_fact:
+    librenms_letsencrypt_certbot_argv: >-
+      {{ librenms_letsencrypt_certbot_argv + librenms_letsencrypt_certbot_extra_args }}
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+
+- name: Add Let's Encrypt certificate domains
+  set_fact:
+    librenms_letsencrypt_certbot_argv: "{{ librenms_letsencrypt_certbot_argv + ['-d=' ~ item] }}"
+  loop: "{{ librenms_letsencrypt_domains }}"
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+
+- name: Request or renew Let's Encrypt certificate
+  command:
+    argv: "{{ librenms_letsencrypt_certbot_argv }}"
+  register: librenms_letsencrypt_certbot
+  changed_when: >-
+    'Certificate not yet due for renewal'
+    not in (librenms_letsencrypt_certbot.stdout ~ librenms_letsencrypt_certbot.stderr)
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+
+- name: Read Let's Encrypt full chain
+  slurp:
+    src: "{{ librenms_letsencrypt_fullchain_path }}"
+  register: librenms_letsencrypt_fullchain
+  no_log: true
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+
+- name: Read Let's Encrypt private key
+  slurp:
+    src: "{{ librenms_letsencrypt_key_path }}"
+  register: librenms_letsencrypt_private_key
+  no_log: true
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+
+- name: Build HAProxy PEM from Let's Encrypt certificate
+  copy:
+    dest: "{{ librenms_haproxy_tls_cert_path }}"
+    content: |
+      {{ librenms_letsencrypt_fullchain.content | b64decode }}
+      {{ librenms_letsencrypt_private_key.content | b64decode }}
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart HAProxy
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_letsencrypt_enabled | bool
+
+- name: Install HAProxy TLS PEM from controller file
+  copy:
+    src: "{{ librenms_haproxy_tls_pem_src }}"
+    dest: "{{ librenms_haproxy_tls_cert_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart HAProxy
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_haproxy_tls_manage_cert | bool
+    - not librenms_letsencrypt_enabled | bool
+    - librenms_haproxy_tls_pem_src | length > 0
+
+- name: Install HAProxy TLS PEM from variable content
+  copy:
+    dest: "{{ librenms_haproxy_tls_cert_path }}"
+    content: "{{ librenms_haproxy_tls_pem_content }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart HAProxy
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_haproxy_tls_manage_cert | bool
+    - not librenms_letsencrypt_enabled | bool
+    - librenms_haproxy_tls_pem_content | length > 0
+
+- name: Check unmanaged HAProxy TLS PEM exists
+  stat:
+    path: "{{ librenms_haproxy_tls_cert_path }}"
+  register: librenms_haproxy_tls_cert_stat
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - not librenms_haproxy_tls_manage_cert | bool
+    - not librenms_letsencrypt_enabled | bool
+
+- name: Validate unmanaged HAProxy TLS PEM exists
+  assert:
+    that:
+      - librenms_haproxy_tls_cert_stat.stat.exists | bool
+    fail_msg: >-
+      HAProxy TLS is enabled but {{ librenms_haproxy_tls_cert_path }} is missing on
+      {{ inventory_hostname }}. Copy a fullchain+private-key PEM there, or set
+      librenms_haproxy_tls_manage_cert/librenms_letsencrypt_enabled.
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - not librenms_haproxy_tls_manage_cert | bool
+    - not librenms_letsencrypt_enabled | bool
+
 - name: Deploy HAProxy config
   template:
     src: haproxy.cfg.j2
@@ -333,13 +540,25 @@
 
 - name: Verify LibreNMS PHP-FPM ping through the VIP
   uri:
-    url: "http://{{ librenms_vip_ip }}{{ librenms_php_fpm_ping_path }}"
+    url: >-
+      {{
+        'https' if librenms_haproxy_tls_enabled | bool else 'http'
+      }}://{{ librenms_vip_ip }}{{
+        ':' ~ librenms_haproxy_https_port
+        if librenms_haproxy_tls_enabled | bool and librenms_haproxy_https_port | int != 443
+        else (
+          ':' ~ librenms_haproxy_web_port
+          if not librenms_haproxy_tls_enabled | bool and librenms_haproxy_web_port | int != 80
+          else ''
+        )
+      }}{{ librenms_php_fpm_ping_path }}
     headers:
       Host: "{{ librenms_haproxy_web_check_host_effective }}"
     method: GET
     return_content: true
     status_code: 200
     timeout: 10
+    validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
   register: librenms_vip_php_fpm_ping
   failed_when: false
   retries: 6
@@ -380,13 +599,25 @@
   block:
     - name: Probe LibreNMS VIP application endpoint
       uri:
-        url: "http://{{ librenms_vip_ip }}{{ librenms_app_probe_path }}"
+        url: >-
+          {{
+            'https' if librenms_haproxy_tls_enabled | bool else 'http'
+          }}://{{ librenms_vip_ip }}{{
+            ':' ~ librenms_haproxy_https_port
+            if librenms_haproxy_tls_enabled | bool and librenms_haproxy_https_port | int != 443
+            else (
+              ':' ~ librenms_haproxy_web_port
+              if not librenms_haproxy_tls_enabled | bool and librenms_haproxy_web_port | int != 80
+              else ''
+            )
+          }}{{ librenms_app_probe_path }}
         headers:
           Host: "{{ librenms_haproxy_web_check_host_effective }}"
         method: GET
         return_content: false
         status_code: "{{ librenms_app_probe_success_statuses }}"
         timeout: "{{ librenms_app_probe_timeout | int }}"
+        validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
       register: librenms_vip_app_probe
       changed_when: false
       retries: "{{ (librenms_app_probe_retries | int) + 1 }}"

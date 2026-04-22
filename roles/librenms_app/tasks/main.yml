@@ -7,7 +7,11 @@
         if librenms_app_url | length > 0
         else
         (
-          'http://' ~ (
+          (
+            'https'
+            if librenms_haproxy_tls_enabled | bool
+            else 'http'
+          ) ~ '://' ~ (
             librenms_fqdn
             if librenms_fqdn | length > 0 and librenms_fqdn != librenms_default_fqdn_placeholder
             else (

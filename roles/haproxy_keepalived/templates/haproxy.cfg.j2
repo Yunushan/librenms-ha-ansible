@@ -8,6 +8,12 @@
 %}
 {% set librenms_hc_uri = librenms_haproxy_web_check_path %}
 {% set librenms_hc_host = librenms_haproxy_web_check_host_effective %}
+{% set librenms_haproxy_bind_address =
+  (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else '0.0.0.0')
+%}
+{% set librenms_haproxy_tls_bind =
+  librenms_haproxy_bind_address ~ ':' ~ librenms_haproxy_https_port
+%}
 
 global
     log /dev/log local0
@@ -21,13 +27,28 @@ defaults
     timeout client {{ librenms_haproxy_timeout_client }}
     timeout server {{ librenms_haproxy_timeout_server }}
 
-frontend librenms_web
-    bind {{ (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else '0.0.0.0') }}:{{ librenms_haproxy_web_port }}
+frontend librenms_web_http
+    bind {{ librenms_haproxy_bind_address }}:{{ librenms_haproxy_web_port }}
     mode http
     option httplog
     option forwardfor
+{% if librenms_haproxy_tls_enabled | bool and librenms_haproxy_http_redirect_to_https | bool %}
+    http-request redirect scheme https code 301
+{% else %}
     http-request set-header X-Forwarded-Proto http
     default_backend librenms_web_nodes
+{% endif %}
+
+{% if librenms_haproxy_tls_enabled | bool %}
+frontend librenms_web_https
+    bind {{ librenms_haproxy_tls_bind }} ssl crt {{ librenms_haproxy_tls_cert_path }} {{ librenms_haproxy_tls_bind_options }}
+    mode http
+    option httplog
+    option forwardfor
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header X-Forwarded-Ssl on
+    default_backend librenms_web_nodes
+{% endif %}
 
 backend librenms_web_nodes
     mode http
@@ -44,7 +65,7 @@ backend librenms_web_nodes
 
 {% if librenms_db_mode == 'galera' %}
 frontend librenms_db
-    bind {{ (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else '0.0.0.0') }}:{{ librenms_haproxy_db_port }}
+    bind {{ librenms_haproxy_bind_address }}:{{ librenms_haproxy_db_port }}
     mode tcp
     default_backend galera_nodes
 

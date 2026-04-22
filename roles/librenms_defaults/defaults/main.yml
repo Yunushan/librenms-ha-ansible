@@ -113,6 +113,28 @@ librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
 librenms_keepalived_vrid: 51
 librenms_keepalived_priority: 100
 librenms_haproxy_web_port: 80
+librenms_haproxy_https_port: 443
+librenms_haproxy_tls_enabled: false
+librenms_haproxy_http_redirect_to_https: "{{ librenms_haproxy_tls_enabled | bool }}"
+librenms_haproxy_tls_cert_dir: /etc/haproxy/certs
+librenms_haproxy_tls_cert_path: "{{ librenms_haproxy_tls_cert_dir }}/librenms.pem"
+librenms_haproxy_tls_manage_cert: false
+librenms_haproxy_tls_pem_src: ""
+librenms_haproxy_tls_pem_content: ""
+librenms_haproxy_tls_bind_options: alpn h2,http/1.1
+librenms_letsencrypt_enabled: false
+librenms_letsencrypt_install_certbot: true
+librenms_letsencrypt_packages:
+  - certbot
+librenms_letsencrypt_email: ""
+librenms_letsencrypt_domains:
+  - "{{ librenms_fqdn }}"
+librenms_letsencrypt_live_name: "{{ librenms_fqdn }}"
+librenms_letsencrypt_fullchain_path: "/etc/letsencrypt/live/{{ librenms_letsencrypt_live_name }}/fullchain.pem"
+librenms_letsencrypt_key_path: "/etc/letsencrypt/live/{{ librenms_letsencrypt_live_name }}/privkey.pem"
+librenms_letsencrypt_certbot_extra_args: []
+librenms_letsencrypt_manage_deploy_hook: true
+librenms_letsencrypt_deploy_hook_path: /etc/letsencrypt/renewal-hooks/deploy/librenms-haproxy-pem.sh
 librenms_haproxy_db_port: 3306
 librenms_haproxy_web_check_host: ""
 librenms_nginx_health_check_path: /healthz
@@ -139,6 +161,7 @@ librenms_app_probe_timeout: 3
 librenms_app_probe_fail_deployment: false
 librenms_vip_app_probe_enabled: true
 librenms_vip_app_probe_fail_deployment: true
+librenms_vip_app_probe_validate_certs: false
 librenms_nginx_fastcgi_connect_timeout: 30s
 librenms_nginx_fastcgi_send_timeout: 180s
 librenms_nginx_fastcgi_read_timeout: 180s
