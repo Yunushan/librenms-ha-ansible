@@ -89,7 +89,7 @@
           if librenms_db_mode == 'local'
           else
           (
-            '127.0.0.1'
+            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
             if (
               librenms_db_mode == 'galera'
               and librenms_runtime_db_prefer_local_galera | bool
@@ -1187,6 +1187,29 @@
     - Restart PHP-FPM
     - Restart LibreNMS dispatcher
     - Restart LibreNMS scheduler timer
+
+- name: Wait for final LibreNMS runtime database endpoint
+  wait_for:
+    host: "{{ librenms_db_host_effective }}"
+    port: "{{ librenms_db_port }}"
+    timeout: 60
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Verify final LibreNMS runtime database login
+  community.mysql.mysql_query:
+    login_host: "{{ librenms_db_host_effective }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - "SELECT 1 AS ok"
+  register: librenms_runtime_db_login_check
+  changed_when: false
+  no_log: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
 
 - name: Flush web service handlers before final LibreNMS validation
   meta: flush_handlers
