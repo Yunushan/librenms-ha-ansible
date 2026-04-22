@@ -49,10 +49,14 @@ librenms_mariadb_log_warnings: 1
 librenms_db_user_host: "%"
 librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname]) | first) }}"
 librenms_runtime_db_prefer_local_galera: true
+librenms_runtime_db_wait_timeout: 120
+librenms_runtime_db_wait_retries: 3
+librenms_runtime_db_wait_delay: 5
 
 librenms_galera_cluster_name: librenms_cluster
 librenms_galera_sst_method: rsync
 librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapped
+librenms_galera_wait_timeout: 120
 
 librenms_redis_mode: local
 librenms_redis_username: ""

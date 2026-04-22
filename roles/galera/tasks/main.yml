@@ -274,14 +274,14 @@
 - name: Wait for local MariaDB socket on Galera nodes
   wait_for:
     path: "{{ librenms_mariadb_socket }}"
-    timeout: 60
+    timeout: "{{ librenms_galera_wait_timeout | int }}"
   when: librenms_db_mode == 'galera'
 
 - name: Wait for Galera node TCP listener
   wait_for:
     host: "{{ ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)) }}"
     port: "{{ librenms_db_port }}"
-    timeout: 60
+    timeout: "{{ librenms_galera_wait_timeout | int }}"
   when: librenms_db_mode == 'galera'
 
 - name: Verify local Galera node is ready

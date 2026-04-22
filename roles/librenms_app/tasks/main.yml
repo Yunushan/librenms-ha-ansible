@@ -1388,12 +1388,98 @@
     - Restart LibreNMS scheduler timer
 
 - name: Wait for final LibreNMS runtime database endpoint
-  wait_for:
-    host: "{{ librenms_db_host_effective }}"
-    port: "{{ librenms_db_port }}"
-    timeout: 60
   when:
     - librenms_apply_post_bootstrap_config | bool
+  block:
+    - name: Wait for final LibreNMS runtime database TCP endpoint
+      wait_for:
+        host: "{{ librenms_db_host_effective }}"
+        port: "{{ librenms_db_port }}"
+        timeout: "{{ librenms_runtime_db_wait_timeout | int }}"
+      register: librenms_runtime_db_wait
+      retries: "{{ librenms_runtime_db_wait_retries | int }}"
+      delay: "{{ librenms_runtime_db_wait_delay | int }}"
+      until: librenms_runtime_db_wait is succeeded
+  rescue:
+    - name: Capture MariaDB service status after runtime DB wait failure
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_mariadb_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_runtime_db_mariadb_status
+      changed_when: false
+      failed_when: false
+      when:
+        - librenms_db_mode in ['local', 'galera']
+        - ansible_service_mgr == 'systemd'
+
+    - name: Capture MariaDB journal after runtime DB wait failure
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_mariadb_service_name }}"
+          - -n
+          - "120"
+          - --no-pager
+      register: librenms_runtime_db_mariadb_journal
+      changed_when: false
+      failed_when: false
+      when:
+        - librenms_db_mode in ['local', 'galera']
+        - ansible_service_mgr == 'systemd'
+
+    - name: Capture TCP listeners after runtime DB wait failure
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: librenms_runtime_db_tcp_listeners
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Galera status after runtime DB wait failure
+      command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - "--socket={{ librenms_mariadb_socket }}"
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_connected','wsrep_local_state_comment');
+      register: librenms_runtime_db_galera_status
+      changed_when: false
+      failed_when: false
+      when:
+        - librenms_db_mode == 'galera'
+
+    - name: Fail with LibreNMS runtime database diagnostics
+      fail:
+        msg: |-
+          LibreNMS runtime database endpoint did not become reachable on {{ inventory_hostname }}.
+
+          endpoint:
+          {{ librenms_db_host_effective }}:{{ librenms_db_port }}
+
+          MariaDB systemctl status:
+          {{ librenms_runtime_db_mariadb_status.stdout | default('') }}
+          {{ librenms_runtime_db_mariadb_status.stderr | default('') }}
+
+          MariaDB journal:
+          {{ librenms_runtime_db_mariadb_journal.stdout | default('') }}
+          {{ librenms_runtime_db_mariadb_journal.stderr | default('') }}
+
+          TCP listeners:
+          {{ librenms_runtime_db_tcp_listeners.stdout | default('') }}
+          {{ librenms_runtime_db_tcp_listeners.stderr | default('') }}
+
+          Galera status:
+          {{ librenms_runtime_db_galera_status.stdout | default('') }}
+          {{ librenms_runtime_db_galera_status.stderr | default('') }}
 
 - name: Verify final LibreNMS runtime database login
   community.mysql.mysql_query:
