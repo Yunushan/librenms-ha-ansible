@@ -24,6 +24,8 @@ librenms_bootstrap_completed_effective: "{{ librenms_bootstrap_completed | bool 
 librenms_apply_post_bootstrap_config: "{{ librenms_bootstrap_completed_effective | bool }}"
 
 librenms_manage_validation_schema_fixes: true
+librenms_manage_web_validation_json_filter: true
+librenms_web_validation_json_filter_path: /etc/librenms/web-validation-json-filter.php
 librenms_manage_bash_completion: true
 librenms_manage_logrotate: true
 librenms_bash_completion_dir: /etc/bash_completion.d

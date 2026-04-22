@@ -533,6 +533,29 @@
   when:
     - item | length > 0
 
+- name: Ensure LibreNMS PHP-FPM support directory exists
+  file:
+    path: "{{ librenms_web_validation_json_filter_path | dirname }}"
+    state: directory
+    owner: root
+    group: "{{ librenms_group }}"
+    mode: "0750"
+  when:
+    - librenms_manage_php_fpm | bool
+    - librenms_manage_web_validation_json_filter | bool
+
+- name: Deploy LibreNMS web validation JSON output filter
+  template:
+    src: web-validation-json-filter.php.j2
+    dest: "{{ librenms_web_validation_json_filter_path }}"
+    owner: root
+    group: "{{ librenms_group }}"
+    mode: "0640"
+  when:
+    - librenms_manage_php_fpm | bool
+    - librenms_manage_web_validation_json_filter | bool
+  notify: Restart PHP-FPM
+
 - name: Deploy LibreNMS PHP-FPM pool
   template:
     src: php-fpm-librenms.conf.j2

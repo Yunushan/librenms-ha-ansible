@@ -1,0 +1,21 @@
+<?php
+
+if (PHP_SAPI !== 'fpm-fcgi') {
+    return;
+}
+
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+
+if (! preg_match('#/(?:index\.php/)?validate/results(?:/|$)#', $path)) {
+    return;
+}
+
+ob_start(static function (string $buffer): string {
+    $jsonStart = strpos($buffer, '[{"group"');
+
+    if ($jsonStart === false) {
+        return $buffer;
+    }
+
+    return substr($buffer, $jsonStart);
+});

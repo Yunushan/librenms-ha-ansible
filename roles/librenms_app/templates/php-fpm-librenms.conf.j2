@@ -18,3 +18,6 @@ pm.max_spare_servers = 6
 catch_workers_output = yes
 php_admin_value[error_log] = {{ librenms_install_dir }}/logs/php-fpm-error.log
 php_admin_flag[log_errors] = on
+{% if librenms_manage_web_validation_json_filter | bool %}
+php_admin_value[auto_prepend_file] = {{ librenms_web_validation_json_filter_path }}
+{% endif %}
