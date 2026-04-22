@@ -1,0 +1,10 @@
+[Unit]
+Description=LibreNMS daily maintenance
+
+[Timer]
+OnCalendar={{ librenms_daily_timer_on_calendar }}
+RandomizedDelaySec={{ librenms_daily_timer_randomized_delay }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

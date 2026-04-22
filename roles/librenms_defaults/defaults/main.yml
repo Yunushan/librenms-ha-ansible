@@ -1,6 +1,14 @@
 ---
 librenms_repo_url: https://github.com/librenms/librenms.git
 librenms_version: latest-stable
+librenms_manage_updates: true
+librenms_update_channel: release
+librenms_update_enabled: false
+librenms_manage_daily_maintenance: true
+librenms_daily_timer_on_calendar: "*-*-* 00:19:00"
+librenms_daily_timer_randomized_delay: 45min
+librenms_daily_run_once_after_deploy: true
+librenms_daily_maintenance_bootstrap_marker: /var/lib/librenms-ha-ansible/daily_maintenance_bootstrapped
 
 librenms_mode: standalone
 librenms_install_profile: full

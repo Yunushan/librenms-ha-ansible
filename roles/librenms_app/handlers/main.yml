@@ -55,3 +55,13 @@
     - librenms_manage_scheduler | bool
     - ansible_service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
+
+- name: Restart LibreNMS daily maintenance timer
+  service:
+    name: librenms-daily.timer
+    state: restarted
+    enabled: true
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool

@@ -989,6 +989,30 @@
     - librenms_manage_scheduler | bool
     - ansible_service_mgr == 'systemd'
 
+- name: Deploy daily maintenance service file
+  template:
+    src: librenms-daily.service.j2
+    dest: /etc/systemd/system/librenms-daily.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart LibreNMS daily maintenance timer
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy daily maintenance timer file
+  template:
+    src: librenms-daily.timer.j2
+    dest: /etc/systemd/system/librenms-daily.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart LibreNMS daily maintenance timer
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - ansible_service_mgr == 'systemd'
+
 - name: Deploy LibreNMS dispatcher service file
   copy:
     remote_src: true
@@ -1013,6 +1037,15 @@
     enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
   when:
     - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Enable and start daily maintenance timer
+  service:
+    name: librenms-daily.timer
+    state: "{{ 'started' if librenms_bootstrap_completed_effective | bool else 'stopped' }}"
+    enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
+  when:
+    - librenms_manage_daily_maintenance | bool
     - ansible_service_mgr == 'systemd'
 
 - name: Enable and start dispatcher service
@@ -1306,6 +1339,109 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Set LibreNMS update channel after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - update_channel
+      - "{{ librenms_update_channel }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_manage_updates | bool
+    - librenms_update_channel | length > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Set LibreNMS automatic update policy after bootstrap
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - update
+      - "{{ librenms_update_enabled | bool | ternary('true', 'false') }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_manage_updates | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Check LibreNMS daily maintenance bootstrap marker
+  stat:
+    path: "{{ librenms_daily_maintenance_bootstrap_marker }}"
+  register: librenms_daily_maintenance_bootstrap_marker_stat
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - librenms_daily_run_once_after_deploy | bool
+    - librenms_apply_post_bootstrap_config | bool
+    - ansible_service_mgr == 'systemd'
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Run LibreNMS daily maintenance once after update policy is configured
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - librenms_daily_run_once_after_deploy | bool
+    - librenms_apply_post_bootstrap_config | bool
+    - ansible_service_mgr == 'systemd'
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+    - not (librenms_daily_maintenance_bootstrap_marker_stat.stat.exists | default(false))
+  block:
+    - name: Trigger LibreNMS daily maintenance service once
+      systemd:
+        name: librenms-daily.service
+        state: started
+      register: librenms_daily_maintenance_bootstrap_run
+      changed_when: false
+
+    - name: Mark LibreNMS daily maintenance bootstrap run complete
+      file:
+        path: "{{ librenms_daily_maintenance_bootstrap_marker }}"
+        state: touch
+        owner: root
+        group: root
+        mode: "0644"
+
+  rescue:
+    - name: Capture LibreNMS daily maintenance status after failed bootstrap run
+      command:
+        argv:
+          - systemctl
+          - status
+          - librenms-daily.service
+          - --no-pager
+          - -l
+      register: librenms_daily_maintenance_bootstrap_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture LibreNMS daily maintenance journal after failed bootstrap run
+      command:
+        argv:
+          - journalctl
+          - -u
+          - librenms-daily.service
+          - -n
+          - "120"
+          - --no-pager
+      register: librenms_daily_maintenance_bootstrap_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with LibreNMS daily maintenance bootstrap diagnostics
+      fail:
+        msg: |-
+          LibreNMS daily maintenance failed on {{ inventory_hostname }}.
+
+          systemctl status:
+          {{ librenms_daily_maintenance_bootstrap_status.stdout | default('') }}
+          {{ librenms_daily_maintenance_bootstrap_status.stderr | default('') }}
+
+          journal:
+          {{ librenms_daily_maintenance_bootstrap_journal.stdout | default('') }}
+          {{ librenms_daily_maintenance_bootstrap_journal.stderr | default('') }}
 
 - name: Detect local rrdtool version
   command:

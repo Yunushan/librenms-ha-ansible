@@ -426,11 +426,19 @@ librenms_install_profile: full      # full | web | poller
 
 ```yaml
 librenms_version: latest-stable     # latest stable tag; use master only for dev testing
+librenms_update_channel: release    # LibreNMS update channel managed in the DB
+librenms_update_enabled: false      # keep code updates controlled by Ansible
 ```
 
 `latest-stable` resolves the newest numeric release tag, such as `26.4.0`, from the
 LibreNMS GitHub tags page during deployment. For repeatable production rebuilds,
 pin this to an explicit released tag instead of tracking `master`.
+
+The role also sets LibreNMS' own `update_channel` to `release` and keeps
+`daily.sh` running with a systemd timer. This preserves LibreNMS' normal daily
+cleanup and update bookkeeping without tracking the development branch. Automatic
+code updates are disabled by default; upgrade intentionally by changing
+`librenms_version` and rerunning the playbook.
 
 ### Database mode
 

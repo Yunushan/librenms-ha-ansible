@@ -1,0 +1,13 @@
+[Unit]
+Description=LibreNMS daily maintenance
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ librenms_user }}
+Group={{ librenms_group }}
+WorkingDirectory={{ librenms_install_dir }}
+Environment=HOME={{ librenms_install_dir }}
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash {{ librenms_install_dir }}/daily.sh
