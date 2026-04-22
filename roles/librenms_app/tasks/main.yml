@@ -119,6 +119,41 @@
         )
       }}
 
+- name: Probe Galera nodes for an install-time database endpoint
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
+  loop: "{{ librenms_active_db_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_install_db_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_db_host | length == 0
+
+- name: Determine live Galera install-time database host
+  set_fact:
+    librenms_galera_install_db_host: >-
+      {{
+        (
+          librenms_galera_install_db_probe.results | default([])
+          | selectattr('stdout', 'search', 'wsrep_cluster_status\\s+Primary')
+          | selectattr('stdout', 'search', 'wsrep_ready\\s+ON')
+          | map(attribute='item')
+          | list
+          | first
+        )
+        | default(librenms_db_bootstrap_host, true)
+      }}
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_db_host | length == 0
+
 - name: Determine effective install-time DB host
   set_fact:
     librenms_db_host_install_effective: >-
@@ -131,7 +166,7 @@
           if librenms_db_mode == 'local'
           else
           (
-            hostvars[librenms_db_bootstrap_host].ansible_host | default(librenms_db_bootstrap_host)
+            hostvars[librenms_galera_install_db_host].ansible_host | default(librenms_galera_install_db_host)
             if librenms_db_mode == 'galera'
             else librenms_db_host_effective
           )
@@ -686,6 +721,69 @@
     mode: "0640"
   vars:
     librenms_env_db_host_effective: "{{ librenms_db_host_install_effective }}"
+
+- name: Wait for LibreNMS install-time database endpoint
+  when:
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+  block:
+    - name: Wait for install-time database TCP endpoint
+      wait_for:
+        host: "{{ librenms_db_host_install_effective }}"
+        port: "{{ librenms_db_port }}"
+        timeout: "{{ librenms_runtime_db_wait_timeout | int }}"
+      register: librenms_install_db_wait
+      retries: "{{ librenms_runtime_db_wait_retries | int }}"
+      delay: "{{ librenms_runtime_db_wait_delay | int }}"
+      until: librenms_install_db_wait is succeeded
+
+    - name: Verify install-time database login
+      community.mysql.mysql_query:
+        login_host: "{{ librenms_db_host_install_effective }}"
+        login_port: "{{ librenms_db_port }}"
+        login_user: "{{ librenms_db_user }}"
+        login_password: "{{ librenms_db_password }}"
+        login_db: "{{ librenms_db_name }}"
+        query:
+          - "SELECT 1 AS ok"
+      register: librenms_install_db_login_check
+      changed_when: false
+      no_log: true
+  rescue:
+    - name: Capture install-time Galera node status
+      shell: |-
+        set -o pipefail
+        {
+          echo "--- {{ item }} systemctl ---"
+          systemctl status "{{ librenms_mariadb_service_name }}" --no-pager -l || true
+          echo "--- {{ item }} listeners ---"
+          ss -ltnp || true
+          echo "--- {{ item }} wsrep ---"
+          mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+            "SHOW GLOBAL STATUS WHERE Variable_name LIKE 'wsrep_%';" || true
+          echo "--- {{ item }} journal ---"
+          journalctl -u "{{ librenms_mariadb_service_name }}" -n 80 --no-pager || true
+        }
+      args:
+        executable: /bin/bash
+      loop: "{{ librenms_active_db_nodes }}"
+      delegate_to: "{{ item }}"
+      register: librenms_install_db_galera_diagnostics
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with LibreNMS install-time database diagnostics
+      fail:
+        msg: |-
+          LibreNMS install-time database endpoint is not reachable before migrations.
+
+          endpoint:
+          {{ librenms_db_host_install_effective }}:{{ librenms_db_port }}
+
+          Galera install DB probe:
+          {{ librenms_galera_install_db_probe.results | default([]) }}
+
+          Diagnostics:
+          {{ librenms_install_db_galera_diagnostics.results | default([]) }}
 
 - name: Run LibreNMS database migrations on primary node
   command:
