@@ -154,10 +154,10 @@
         'redis://'
         ~ (hostvars[host].ansible_host | default(host))
         ~ ':26379?password='
-        ~ librenms_redis_password
+        ~ (librenms_redis_sentinel_password | urlencode)
         ~ (
-          '&username=' ~ librenms_redis_username
-          if librenms_redis_username | length > 0
+          '&username=' ~ (librenms_redis_sentinel_username | urlencode)
+          if librenms_redis_sentinel_username | length > 0
           else ''
         )
       ] -%}
@@ -1147,6 +1147,17 @@
     - librenms_mode != 'standalone'
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
+- name: Deploy final LibreNMS runtime environment file
+  template:
+    src: librenms.env.j2
+    dest: "{{ librenms_install_dir }}/.env"
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0640"
+  notify:
+    - Clear LibreNMS bootstrap cache
+    - Restart PHP-FPM
+
 - name: Flush web service handlers before final LibreNMS validation
   meta: flush_handlers
   when:
@@ -1520,14 +1531,3 @@
     - not librenms_app_probe_fail_deployment | bool
     - librenms_web_probe is defined
     - (librenms_web_probe.rc | default(0)) != 0
-
-- name: Deploy final LibreNMS runtime environment file
-  template:
-    src: librenms.env.j2
-    dest: "{{ librenms_install_dir }}/.env"
-    owner: "{{ librenms_user }}"
-    group: "{{ librenms_group }}"
-    mode: "0640"
-  notify:
-    - Clear LibreNMS bootstrap cache
-    - Restart PHP-FPM

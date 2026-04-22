@@ -324,3 +324,257 @@
 
           routes:
           {{ librenms_keepalived_routes.stdout | default('') }}
+
+- name: Apply load balancer handler changes before VIP probes
+  meta: flush_handlers
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_vip_app_probe_enabled | bool
+
+- name: Verify LibreNMS PHP-FPM ping through the VIP
+  shell: |
+    curl -fsS \
+      --connect-timeout 3 \
+      --max-time 10 \
+      --header "Host: {{ librenms_haproxy_web_check_host_effective }}" \
+      "http://{{ librenms_vip_ip }}{{ librenms_php_fpm_ping_path }}"
+  args:
+    executable: /bin/bash
+  register: librenms_vip_php_fpm_ping
+  changed_when: false
+  retries: 6
+  delay: 5
+  until:
+    - librenms_vip_php_fpm_ping.rc == 0
+    - "'pong' in (librenms_vip_php_fpm_ping.stdout | default(''))"
+  run_once: true
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_vip_app_probe_enabled | bool
+
+- name: Determine primary web node for VIP probe diagnostics
+  vars:
+    librenms_vip_probe_primary_web_candidate: >-
+      {{ groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first }}
+  set_fact:
+    librenms_vip_probe_primary_web: "{{ librenms_vip_probe_primary_web_candidate }}"
+    librenms_vip_probe_php_fpm_service: >-
+      {{
+        hostvars[librenms_vip_probe_primary_web_candidate].librenms_php_fpm_service_effective
+        | default(
+          librenms_php_fpm_service_name
+          if (librenms_php_fpm_service_name | default('') | length > 0)
+          else 'php-fpm'
+        )
+      }}
+  run_once: true
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_vip_app_probe_enabled | bool
+
+- name: Verify LibreNMS application through the VIP
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_vip_app_probe_enabled | bool
+  run_once: true
+  block:
+    - name: Probe LibreNMS VIP application endpoint
+      shell: |
+        probe_url="http://{{ librenms_vip_ip }}{{ librenms_app_probe_path }}"
+        probe_host={{ librenms_haproxy_web_check_host_effective | quote }}
+        attempts={{ (librenms_app_probe_retries | int) + 1 }}
+        delay={{ librenms_app_probe_delay | int }}
+        max_time={{ librenms_app_probe_timeout | int }}
+        last_status=000
+
+        for attempt in $(seq 1 "${attempts}"); do
+          last_status=$(curl -s -o /dev/null -w '%{http_code}' \
+            --connect-timeout 3 \
+            --max-time "${max_time}" \
+            --header "Host: ${probe_host}" \
+            "${probe_url}" || true)
+
+          case "${last_status}" in
+            200|301|302|303|307|308)
+              echo "${last_status}"
+              exit 0
+              ;;
+          esac
+
+          if [ "${attempt}" -lt "${attempts}" ]; then
+            sleep "${delay}"
+          fi
+        done
+
+        echo "${last_status}"
+        exit 1
+      args:
+        executable: /bin/bash
+      register: librenms_vip_app_probe
+      changed_when: false
+      failed_when: >-
+        librenms_vip_app_probe_fail_deployment | bool
+        and librenms_vip_app_probe.rc != 0
+  rescue:
+    - name: Capture HAProxy status after failed VIP application probe
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_haproxy_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_vip_probe_haproxy_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture HAProxy journal after failed VIP application probe
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_haproxy_service_name }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_vip_probe_haproxy_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture VIP owner network state after failed VIP application probe
+      command:
+        argv:
+          - ip
+          - -brief
+          - addr
+      register: librenms_vip_probe_ip_addr
+      changed_when: false
+      failed_when: false
+
+    - name: Capture listening TCP sockets after failed VIP application probe
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: librenms_vip_probe_sockets
+      changed_when: false
+      failed_when: false
+
+    - name: Capture primary web PHP-FPM status after failed VIP application probe
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_vip_probe_php_fpm_service }}"
+          - --no-pager
+          - -l
+      register: librenms_vip_probe_php_fpm_status
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ librenms_vip_probe_primary_web }}"
+
+    - name: Capture primary web nginx status after failed VIP application probe
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_nginx_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_vip_probe_nginx_status
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ librenms_vip_probe_primary_web }}"
+
+    - name: Capture primary web LibreNMS environment summary after failed VIP application probe
+      shell: |
+        awk -F= '
+          BEGIN {
+            keys["APP_URL"]
+            keys["APP_TRUSTED_PROXIES"]
+            keys["DB_HOST"]
+            keys["DB_PORT"]
+            keys["DB_DATABASE"]
+            keys["DB_USERNAME"]
+            keys["REDIS_SENTINEL_HOSTS"]
+            keys["REDIS_SENTINEL_SERVICE"]
+            keys["REDIS_SENTINEL"]
+            keys["REDIS_TIMEOUT"]
+            keys["REDIS_DB"]
+            keys["REDIS_CACHE_DB"]
+            keys["REDIS_SESSION_DB"]
+            keys["CACHE_DRIVER"]
+            keys["QUEUE_CONNECTION"]
+            keys["SESSION_DRIVER"]
+            keys["SESSION_CONNECTION"]
+          }
+          $1 in keys {
+            print
+          }
+        ' {{ librenms_install_dir }}/.env \
+        | sed -E 's/(password=)[^,&]*/\1REDACTED/g'
+      args:
+        executable: /bin/bash
+      register: librenms_vip_probe_env_summary
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ librenms_vip_probe_primary_web }}"
+
+    - name: Capture primary web LibreNMS application log after failed VIP application probe
+      command:
+        argv:
+          - tail
+          - -n
+          - "120"
+          - "{{ librenms_install_dir }}/logs/librenms.log"
+      register: librenms_vip_probe_application_log
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ librenms_vip_probe_primary_web }}"
+
+    - name: Fail with LibreNMS VIP application probe diagnostics
+      fail:
+        msg: |-
+          LibreNMS VIP application endpoint did not become healthy.
+
+          VIP probe:
+          rc={{ librenms_vip_app_probe.rc | default('n/a') }}
+          status={{ librenms_vip_app_probe.stdout | default('n/a') }}
+          stderr={{ librenms_vip_app_probe.stderr | default('') }}
+
+          HAProxy status:
+          {{ librenms_vip_probe_haproxy_status.stdout | default('') }}
+
+          HAProxy journal:
+          {{ librenms_vip_probe_haproxy_journal.stdout | default('') }}
+
+          VIP node addresses:
+          {{ librenms_vip_probe_ip_addr.stdout | default('') }}
+
+          listening sockets:
+          {{ librenms_vip_probe_sockets.stdout | default('') }}
+
+          primary web PHP-FPM status:
+          {{ librenms_vip_probe_php_fpm_status.stdout | default('') }}
+
+          primary web nginx status:
+          {{ librenms_vip_probe_nginx_status.stdout | default('') }}
+
+          primary web LibreNMS environment summary:
+          {{ librenms_vip_probe_env_summary.stdout | default('') }}
+
+          primary web LibreNMS application log:
+          {{ librenms_vip_probe_application_log.stdout | default('') }}
+
+- name: Report non-blocking LibreNMS VIP application probe result
+  debug:
+    msg: >-
+      LibreNMS VIP application endpoint probe returned HTTP status
+      {{ librenms_vip_app_probe.stdout | default('000') }}.
+      Deployment continues because librenms_vip_app_probe_fail_deployment is false.
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_vip_app_probe_enabled | bool
+    - not librenms_vip_app_probe_fail_deployment | bool
+    - librenms_vip_app_probe is defined
+    - (librenms_vip_app_probe.rc | default(0)) != 0

@@ -107,6 +107,8 @@ librenms_app_probe_retries: 3
 librenms_app_probe_delay: 3
 librenms_app_probe_timeout: 3
 librenms_app_probe_fail_deployment: false
+librenms_vip_app_probe_enabled: true
+librenms_vip_app_probe_fail_deployment: true
 librenms_nginx_fastcgi_connect_timeout: 30s
 librenms_nginx_fastcgi_send_timeout: 180s
 librenms_nginx_fastcgi_read_timeout: 180s

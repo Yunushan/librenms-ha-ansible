@@ -477,13 +477,21 @@ librenms_app_probe_retries: 3
 librenms_app_probe_delay: 3
 librenms_app_probe_timeout: 3
 librenms_app_probe_fail_deployment: false
+librenms_vip_app_probe_enabled: true
+librenms_vip_app_probe_fail_deployment: true
 ```
 
 The blocking health check is the PHP-FPM-backed nginx ping endpoint. The full
 LibreNMS page probe is non-blocking by default because it can depend on DB,
 Redis, VIP, or browser-facing routing that may still be converging. Set
 `librenms_app_probe_fail_deployment: true` only when you want the playbook to
-fail if the full page does not return HTTP 2xx/3xx.
+fail if the node-local full page does not return HTTP 2xx/3xx.
+
+For HA deployments, the load-balancer role also probes the full application
+through the VIP after HAProxy and Keepalived are running. That VIP probe is
+strict by default so a deployment does not finish green while browsers receive
+`504 Gateway Time-out`. Set `librenms_vip_app_probe_fail_deployment: false` only
+if you want to collect the warning and continue.
 
 ### SNMP
 
