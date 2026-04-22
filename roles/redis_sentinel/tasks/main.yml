@@ -91,6 +91,52 @@
   meta: flush_handlers
   when: librenms_redis_mode == 'sentinel'
 
+- name: Query local Redis replication state
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 6379 INFO replication
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_replication_state
+  changed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_redis_sentinel_enforce_configured_master | bool
+
+- name: Promote configured Redis master when needed
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 6379 REPLICAOF NO ONE
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_promote_configured_master
+  changed_when: (librenms_redis_promote_configured_master.stdout | default('') | trim) == 'OK'
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_redis_sentinel_enforce_configured_master | bool
+    - inventory_hostname == librenms_redis_master_host
+    - (librenms_redis_replication_state.stdout | default('')) is not search('role:master')
+
+- name: Point Redis replicas at the configured master
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 6379
+    REPLICAOF {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) | quote }} 6379
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_follow_configured_master
+  changed_when: (librenms_redis_follow_configured_master.stdout | default('') | trim) == 'OK'
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_redis_sentinel_enforce_configured_master | bool
+    - inventory_hostname != librenms_redis_master_host
+    - >-
+      (librenms_redis_replication_state.stdout | default('')) is not search('role:slave')
+      or
+      (librenms_redis_replication_state.stdout | default('')) is not search(
+        'master_host:' ~ (hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host))
+      )
+
 - name: Deploy Redis Sentinel config
   template:
     src: sentinel.conf.j2
@@ -197,6 +243,23 @@
 - name: Apply Redis Sentinel config changes before validation
   meta: flush_handlers
   when: librenms_redis_mode == 'sentinel'
+
+- name: Reset Redis Sentinel state for the managed service
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 26379
+    {% if librenms_redis_sentinel_username | length > 0 %}
+    --user {{ librenms_redis_sentinel_username | quote }}
+    {% endif %}
+    SENTINEL reset {{ librenms_redis_sentinel_service | quote }}
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+  register: librenms_redis_sentinel_reset
+  changed_when: (librenms_redis_sentinel_reset.stdout | default('0') | int) > 0
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_redis_sentinel_enforce_configured_master | bool
 
 - name: Query Redis Sentinel for the current master endpoint
   no_log: true

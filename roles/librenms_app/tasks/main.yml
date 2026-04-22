@@ -1300,6 +1300,73 @@
     - librenms_manage_php_fpm | bool
     - librenms_apply_post_bootstrap_config | bool
 
+- name: Verify LibreNMS Laravel cache accepts writes
+  command:
+    argv:
+      - php
+      - -r
+      - |-
+        require __DIR__ . '/vendor/autoload.php';
+        $app = require __DIR__ . '/bootstrap/app.php';
+        $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+        $key = 'librenms_ansible_cache_write_check_' . gethostname();
+        Illuminate\Support\Facades\Cache::put($key, 'ok', 60);
+        if (Illuminate\Support\Facades\Cache::get($key) !== 'ok') {
+            fwrite(STDERR, 'LibreNMS cache write readback failed.' . PHP_EOL);
+            exit(1);
+        }
+        echo 'ok' . PHP_EOL;
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_laravel_cache_write_check
+  changed_when: false
+  retries: "{{ librenms_redis_sentinel_consensus_retries | int if librenms_redis_mode == 'sentinel' else 3 }}"
+  delay: "{{ librenms_redis_sentinel_consensus_delay | int if librenms_redis_mode == 'sentinel' else 3 }}"
+  until: librenms_laravel_cache_write_check.rc == 0
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Seed LibreNMS scheduler health marker after cache validation
+  command:
+    argv:
+      - php
+      - -r
+      - |-
+        require __DIR__ . '/vendor/autoload.php';
+        $app = require __DIR__ . '/bootstrap/app.php';
+        $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+        Illuminate\Support\Facades\Cache::put('scheduler_working', now(), now()->addMinutes(6));
+        echo 'ok' . PHP_EOL;
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_scheduler_health_marker
+  changed_when: false
+  when:
+    - librenms_manage_scheduler | bool
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Queue dispatcher restart after final cache validation
+  debug:
+    msg: Restarting LibreNMS dispatcher after final Laravel cache validation.
+  changed_when: true
+  notify: Restart LibreNMS dispatcher
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Flush dispatcher restart after final cache validation
+  meta: flush_handlers
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+
 - name: Recover PHP-FPM endpoint before final LibreNMS web probe
   when:
     - librenms_manage_nginx | bool

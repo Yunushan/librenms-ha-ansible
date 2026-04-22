@@ -65,6 +65,7 @@ librenms_redis_cache_db: 1
 librenms_redis_session_db: 0
 librenms_redis_timeout: 60
 librenms_redis_quorum: 2
+librenms_redis_sentinel_enforce_configured_master: true
 librenms_redis_sentinel_consensus_retries: 12
 librenms_redis_sentinel_consensus_delay: 5
 
