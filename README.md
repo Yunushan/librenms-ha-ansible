@@ -463,6 +463,8 @@ librenms_vip_enabled: true
 librenms_vip_ip: 10.10.10.10
 librenms_vip_cidr: 24
 librenms_vip_interface: ""        # empty = use the default IPv4 route interface
+librenms_haproxy_web_check_path: /php-fpm-ping
+librenms_haproxy_timeout_server: 180s
 ```
 
 Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.

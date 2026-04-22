@@ -28,6 +28,9 @@ server {
     location = {{ librenms_php_fpm_ping_path }} {
         access_log off;
         include fastcgi.conf;
+        fastcgi_connect_timeout {{ librenms_nginx_fastcgi_connect_timeout }};
+        fastcgi_send_timeout {{ librenms_nginx_fastcgi_send_timeout }};
+        fastcgi_read_timeout {{ librenms_nginx_fastcgi_read_timeout }};
         fastcgi_pass unix:{{ librenms_php_fpm_socket }};
     }
 
@@ -38,6 +41,9 @@ server {
     location ~ [^/]\.php(/|$) {
         fastcgi_pass unix:{{ librenms_php_fpm_socket }};
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_connect_timeout {{ librenms_nginx_fastcgi_connect_timeout }};
+        fastcgi_send_timeout {{ librenms_nginx_fastcgi_send_timeout }};
+        fastcgi_read_timeout {{ librenms_nginx_fastcgi_read_timeout }};
         include fastcgi.conf;
     }
 

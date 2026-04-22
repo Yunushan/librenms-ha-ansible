@@ -17,9 +17,9 @@ global
 
 defaults
     log global
-    timeout connect 5s
-    timeout client 60s
-    timeout server 60s
+    timeout connect {{ librenms_haproxy_timeout_connect }}
+    timeout client {{ librenms_haproxy_timeout_client }}
+    timeout server {{ librenms_haproxy_timeout_server }}
 
 frontend librenms_web
     bind {{ (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else '0.0.0.0') }}:{{ librenms_haproxy_web_port }}
