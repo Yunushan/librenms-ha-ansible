@@ -631,7 +631,7 @@
   when:
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
-- name: Read LibreNMS schema defaults from database
+- name: Read LibreNMS schema column definitions from database
   community.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
     login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
@@ -642,18 +642,22 @@
     query:
       - "SET TIME_ZONE='+00:00'"
       - >-
-        SELECT COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), '')
-        AS column_default FROM INFORMATION_SCHEMA.COLUMNS
+        SELECT LOWER(DATA_TYPE) AS data_type, UPPER(IS_NULLABLE) AS is_nullable,
+        COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), COLUMN_DEFAULT, '')
+        AS column_default
+        FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
         AND TABLE_NAME = 'notifications'
         AND COLUMN_NAME = 'datetime'
       - >-
-        SELECT COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), '')
-        AS column_default FROM INFORMATION_SCHEMA.COLUMNS
+        SELECT LOWER(DATA_TYPE) AS data_type, UPPER(IS_NULLABLE) AS is_nullable,
+        COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), COLUMN_DEFAULT, '')
+        AS column_default
+        FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
         AND TABLE_NAME = 'users'
         AND COLUMN_NAME = 'created_at'
-  register: librenms_schema_defaults
+  register: librenms_schema_columns
   become: true
   changed_when: false
   no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
@@ -677,7 +681,10 @@
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
-    - (librenms_schema_defaults.query_result[1][0].column_default | default('')) != '1970-01-02 00:00:00'
+    - >-
+      (librenms_schema_columns.query_result[1][0].data_type | default('') | lower) != 'timestamp'
+      or (librenms_schema_columns.query_result[1][0].is_nullable | default('') | upper) != 'NO'
+      or (librenms_schema_columns.query_result[1][0].column_default | default('')) != '1970-01-02 00:00:00'
 
 - name: Normalize LibreNMS users.created_at schema default
   community.mysql.mysql_query:
@@ -695,7 +702,10 @@
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
-    - (librenms_schema_defaults.query_result[2][0].column_default | default('')) != '1970-01-02 00:00:01'
+    - >-
+      (librenms_schema_columns.query_result[2][0].data_type | default('') | lower) != 'timestamp'
+      or (librenms_schema_columns.query_result[2][0].is_nullable | default('') | upper) != 'NO'
+      or (librenms_schema_columns.query_result[2][0].column_default | default('')) != '1970-01-02 00:00:01'
 
 - name: Check if the initial LibreNMS admin user already exists
   community.mysql.mysql_query:
@@ -1166,6 +1176,8 @@
   notify:
     - Clear LibreNMS bootstrap cache
     - Restart PHP-FPM
+    - Restart LibreNMS dispatcher
+    - Restart LibreNMS scheduler timer
 
 - name: Flush web service handlers before final LibreNMS validation
   meta: flush_handlers
@@ -1173,6 +1185,47 @@
     - librenms_manage_nginx | bool
     - librenms_manage_php_fpm | bool
     - librenms_apply_post_bootstrap_config | bool
+
+- name: Ensure scheduler timer is active after final runtime configuration
+  service:
+    name: librenms-scheduler.timer
+    state: started
+    enabled: true
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Trigger scheduler once after final runtime configuration
+  systemd:
+    name: librenms-scheduler.service
+    state: started
+  register: librenms_scheduler_trigger
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Queue dispatcher restart after final runtime configuration
+  debug:
+    msg: Restarting LibreNMS dispatcher after Redis Sentinel/runtime convergence.
+  changed_when: true
+  notify: Restart LibreNMS dispatcher
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+    - librenms_redis_mode == 'sentinel'
+
+- name: Flush dispatcher restart after final runtime configuration
+  meta: flush_handlers
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+    - librenms_redis_mode == 'sentinel'
 
 - name: Discover Laravel bootstrap cache files before final LibreNMS validation
   find:

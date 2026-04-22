@@ -36,3 +36,22 @@
   service:
     name: "{{ librenms_rrdcached_service_name }}"
     state: restarted
+
+- name: Restart LibreNMS dispatcher
+  service:
+    name: librenms.service
+    state: restarted
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Restart LibreNMS scheduler timer
+  service:
+    name: librenms-scheduler.timer
+    state: restarted
+    enabled: true
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
