@@ -86,6 +86,108 @@
       }}
   when: librenms_db_mode == 'galera'
 
+- name: Recover Galera positions when no node is marked safe to bootstrap
+  shell: |-
+    set -o pipefail
+    galera_recovery 2>&1 | awk '
+      /Recovered position/ {
+        pos=$NF
+        gsub(/[;,]/, "", pos)
+      }
+      END {
+        if (pos == "") {
+          exit 1
+        }
+        split(pos, parts, ":")
+        printf "uuid=%s seqno=%s\n", parts[1], parts[2]
+      }'
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_active_db_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recovered_state
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+
+- name: Build Galera recovered position list
+  set_fact:
+    librenms_galera_recovered_positions: >-
+      {{
+        (librenms_galera_recovered_positions | default([]))
+        + [
+          {
+            'host': item.item,
+            'uuid': item.stdout | regex_replace('^.*uuid=([^\\s]+).*$', '\\1'),
+            'seqno': item.stdout | regex_replace('^.*seqno=(-?\\d+).*$', '\\1') | int
+          }
+        ]
+      }}
+  loop: "{{ librenms_galera_recovered_state.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+    - item.rc == 0
+    - item.stdout is search('uuid=')
+    - item.stdout is search('seqno=')
+
+- name: Determine highest Galera recovered seqno
+  set_fact:
+    librenms_galera_max_recovered_seqno: >-
+      {{
+        librenms_galera_recovered_positions
+        | map(attribute='seqno')
+        | max
+      }}
+  when:
+    - librenms_db_mode == 'galera'
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - (librenms_galera_recovered_positions | default([]) | length) > 0
+
+- name: Determine Galera recovered bootstrap candidates
+  set_fact:
+    librenms_galera_recovered_bootstrap_candidates: >-
+      {{
+        librenms_galera_recovered_positions | default([])
+        | selectattr('seqno', 'equalto', librenms_galera_max_recovered_seqno | int)
+        | list
+      }}
+  when:
+    - librenms_db_mode == 'galera'
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_max_recovered_seqno is defined
+
+- name: Fail when Galera bootstrap host cannot be selected safely
+  fail:
+    msg: |-
+      No live Galera primary component was found and no node has safe_to_bootstrap: 1.
+      Automatic recovery could not select exactly one safe bootstrap host from galera_recovery.
+
+      Recovered positions:
+      {{ librenms_galera_recovered_positions | default([]) }}
+
+      Stop MariaDB on all DB nodes, run galera_recovery on each node, choose the
+      node with the highest seqno, set safe_to_bootstrap: 1 on only that node,
+      then rerun the playbook.
+  when:
+    - librenms_db_mode == 'galera'
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+    - >-
+      (
+        (librenms_galera_max_recovered_seqno | default(-1) | int) < 0
+        or (librenms_galera_recovered_bootstrap_candidates | default([]) | length) != 1
+      )
+
 - name: Determine effective Galera bootstrap host
   set_fact:
     librenms_galera_bootstrap_effective_host: >-
@@ -95,7 +197,28 @@
           not librenms_galera_cluster_has_live_member | bool
           and (librenms_galera_safe_bootstrap_hosts | length) > 0
         )
-        else librenms_db_bootstrap_host
+        else
+        (
+          librenms_galera_recovered_bootstrap_candidates[0].host
+          if (
+            not librenms_galera_cluster_has_live_member | bool
+            and (librenms_galera_safe_bootstrap_hosts | length) == 0
+            and (librenms_galera_recovered_bootstrap_candidates | default([]) | length) == 1
+            and (librenms_galera_max_recovered_seqno | default(-1) | int) >= 0
+          )
+          else librenms_db_bootstrap_host
+        )
+      }}
+  when: librenms_db_mode == 'galera'
+
+- name: Determine whether Galera bootstrap host came from recovery
+  set_fact:
+    librenms_galera_bootstrap_selected_from_recovery: >-
+      {{
+        not librenms_galera_cluster_has_live_member | bool
+        and (librenms_galera_safe_bootstrap_hosts | length) == 0
+        and (librenms_galera_recovered_bootstrap_candidates | default([]) | length) == 1
+        and librenms_galera_bootstrap_effective_host == librenms_galera_recovered_bootstrap_candidates[0].host
       }}
   when: librenms_db_mode == 'galera'
 
@@ -107,7 +230,19 @@
   when:
     - librenms_db_mode == 'galera'
     - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) > 0
     - librenms_galera_bootstrap_effective_host != librenms_db_bootstrap_host
+    - inventory_hostname == (librenms_active_db_nodes | first)
+
+- name: Report Galera bootstrap host selected from recovered seqno
+  debug:
+    msg: >-
+      Galera will bootstrap from {{ librenms_galera_bootstrap_effective_host }}
+      because galera_recovery reported the highest recovered seqno
+      ({{ librenms_galera_max_recovered_seqno }}).
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_bootstrap_selected_from_recovery | default(false)
     - inventory_hostname == (librenms_active_db_nodes | first)
 
 - name: Stop MariaDB before Galera bootstrap on non-bootstrap database nodes
@@ -132,6 +267,17 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
+
+- name: Mark recovered Galera bootstrap host safe to bootstrap
+  replace:
+    path: /var/lib/mysql/grastate.dat
+    regexp: '^safe_to_bootstrap:.*$'
+    replace: 'safe_to_bootstrap: 1'
+  delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - librenms_galera_bootstrap_selected_from_recovery | default(false)
 
 - name: Bootstrap Galera cluster on the effective bootstrap host
   when:
