@@ -67,6 +67,9 @@ librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapp
 librenms_galera_wait_timeout: 120
 librenms_galera_auto_recover_unsafe_bootstrap: true
 librenms_galera_recovery_tie_breaker: first
+librenms_galera_stop_timeout: 60
+librenms_galera_bootstrap_timeout: 180
+librenms_galera_force_kill_stale_mariadb: true
 
 librenms_redis_mode: local
 librenms_redis_username: ""

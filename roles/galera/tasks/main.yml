@@ -309,6 +309,123 @@
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
 
+- name: Wait for MariaDB processes to stop before Galera bootstrap
+  shell: |-
+    seconds=0
+    while pgrep -x mariadbd >/dev/null; do
+      if [ "${seconds}" -ge "{{ librenms_galera_stop_timeout | int }}" ]; then
+        exit 0
+      fi
+      seconds=$((seconds + 1))
+      sleep 1
+    done
+
+    exit 1
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_active_db_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_stop_process_check
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+
+- name: Force kill stale MariaDB processes before Galera bootstrap
+  command:
+    argv:
+      - pkill
+      - -KILL
+      - -x
+      - mariadbd
+  loop: >-
+    {{
+      librenms_galera_stop_process_check.results | default([])
+      | selectattr('rc', 'equalto', 0)
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  register: librenms_galera_force_kill_mariadb
+  changed_when: librenms_galera_force_kill_mariadb.rc == 0
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - librenms_galera_force_kill_stale_mariadb | bool
+
+- name: Reset MariaDB unit state after force kill
+  command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_mariadb_service_name }}"
+  loop: >-
+    {{
+      librenms_galera_force_kill_mariadb.results | default([])
+      | selectattr('rc', 'equalto', 0)
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - librenms_galera_force_kill_stale_mariadb | bool
+
+- name: Confirm MariaDB processes are stopped before Galera bootstrap
+  shell: |-
+    seconds=0
+    while pgrep -x mariadbd >/dev/null; do
+      if [ "${seconds}" -ge 10 ]; then
+        exit 0
+      fi
+      seconds=$((seconds + 1))
+      sleep 1
+    done
+
+    exit 1
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_active_db_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_final_stop_process_check
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+
+- name: Fail when MariaDB remains stuck before Galera bootstrap
+  fail:
+    msg: |-
+      MariaDB did not stop cleanly before Galera bootstrap.
+
+      Process checks:
+      {{ librenms_galera_final_stop_process_check.results | default([]) }}
+
+      Refusing to run galera_new_cluster while a stale mariadbd process is still
+      running. Stop the stuck MariaDB process on the listed node, then rerun the
+      playbook.
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - >-
+      (
+        librenms_galera_final_stop_process_check.results | default([])
+        | selectattr('rc', 'equalto', 0)
+        | list
+        | length
+      ) > 0
+
 - name: Mark recovered Galera bootstrap host safe to bootstrap
   replace:
     path: /var/lib/mysql/grastate.dat
@@ -332,6 +449,8 @@
           - galera_new_cluster
       delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
       register: librenms_galera_bootstrap_command
+      async: "{{ librenms_galera_bootstrap_timeout | int }}"
+      poll: 5
   rescue:
     - name: Capture MariaDB status after failed Galera bootstrap
       command:
