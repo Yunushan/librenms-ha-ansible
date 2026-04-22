@@ -473,9 +473,15 @@ Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC
 librenms_app_probe_path: /
 librenms_app_probe_retries: 3
 librenms_app_probe_delay: 3
+librenms_app_probe_timeout: 3
+librenms_app_probe_fail_deployment: false
 ```
 
-Increase the retries or delay only if your LibreNMS web nodes routinely need more warm-up time after PHP-FPM or nginx restarts.
+The blocking health check is the PHP-FPM-backed nginx ping endpoint. The full
+LibreNMS page probe is non-blocking by default because it can depend on DB,
+Redis, VIP, or browser-facing routing that may still be converging. Set
+`librenms_app_probe_fail_deployment: true` only when you want the playbook to
+fail if the full page does not return HTTP 2xx/3xx.
 
 ### SNMP
 

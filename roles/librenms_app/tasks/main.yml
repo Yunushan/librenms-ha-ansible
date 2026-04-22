@@ -1271,14 +1271,19 @@
       shell: |
         probe_url={{ librenms_web_probe_url | quote }}
         probe_host={{ librenms_haproxy_web_check_host_effective | quote }}
-        attempts={{ (librenms_app_probe_retries | int) + 1 }}
+        attempts={{
+          ((librenms_app_probe_retries | int) + 1)
+          if librenms_app_probe_fail_deployment | bool
+          else 1
+        }}
         delay={{ librenms_app_probe_delay | int }}
+        max_time={{ librenms_app_probe_timeout | int }}
         last_status=000
 
         for attempt in $(seq 1 "${attempts}"); do
           last_status=$(curl -s -o /dev/null -w '%{http_code}' \
             --connect-timeout 3 \
-            --max-time 10 \
+            --max-time "${max_time}" \
             --header "Host: ${probe_host}" \
             "${probe_url}" || true)
 
@@ -1300,6 +1305,9 @@
         executable: /bin/bash
       register: librenms_web_probe
       changed_when: false
+      failed_when: >-
+        librenms_app_probe_fail_deployment | bool
+        and librenms_web_probe.rc != 0
   rescue:
     - name: Restart PHP-FPM after failed LibreNMS web probe
       service:
@@ -1328,12 +1336,13 @@
         probe_host={{ librenms_haproxy_web_check_host_effective | quote }}
         attempts={{ (librenms_app_probe_retries | int) + 1 }}
         delay={{ librenms_app_probe_delay | int }}
+        max_time={{ librenms_app_probe_timeout | int }}
         last_status=000
 
         for attempt in $(seq 1 "${attempts}"); do
           last_status=$(curl -s -o /dev/null -w '%{http_code}' \
             --connect-timeout 3 \
-            --max-time 10 \
+            --max-time "${max_time}" \
             --header "Host: ${probe_host}" \
             "${probe_url}" || true)
 
@@ -1496,6 +1505,21 @@
           librenms application log:
           {{ librenms_application_log.stdout | default('') }}
       when: (librenms_web_probe_retry.rc | default(1)) != 0
+
+- name: Report non-blocking LibreNMS application endpoint probe result
+  debug:
+    msg: >-
+      LibreNMS application endpoint probe returned HTTP status
+      {{ librenms_web_probe.stdout | default('000') }} on {{ inventory_hostname }}.
+      Deployment continues because PHP-FPM/nginx health checks already passed.
+      Enable librenms_app_probe_fail_deployment to make this probe strict.
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+    - not librenms_app_probe_fail_deployment | bool
+    - librenms_web_probe is defined
+    - (librenms_web_probe.rc | default(0)) != 0
 
 - name: Deploy final LibreNMS runtime environment file
   template:
