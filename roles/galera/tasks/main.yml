@@ -852,6 +852,73 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
 
+- name: Restart local Galera node after failed primary join
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - >-
+      not (
+        (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+        and (librenms_galera_local_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+      )
+  block:
+    - name: Restart MariaDB after failed Galera primary join
+      service:
+        name: "{{ librenms_mariadb_service_name }}"
+        state: restarted
+      register: librenms_galera_local_restart
+      failed_when: false
+
+    - name: Wait for MariaDB socket after local Galera restart
+      wait_for:
+        path: "{{ librenms_mariadb_socket }}"
+        timeout: "{{ librenms_galera_wait_timeout | int }}"
+      register: librenms_galera_local_restart_socket
+      failed_when: false
+
+    - name: Wait for restarted local Galera node to join the primary component
+      shell: |-
+        set -o pipefail
+
+        attempts=$(( {{ librenms_galera_wait_timeout | int }} / 5 ))
+        if [ "${attempts}" -lt 1 ]; then
+          attempts=1
+        fi
+
+        status=''
+        for attempt in $(seq 1 "${attempts}"); do
+          status=$(mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+            "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" 2>&1 || true)
+
+          printf '%s\n' "${status}"
+
+          if printf '%s\n' "${status}" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \
+            && printf '%s\n' "${status}" | grep -Eq 'wsrep_ready[[:space:]]+ON'; then
+            exit 0
+          fi
+
+          if [ "${attempt}" -lt "${attempts}" ]; then
+            sleep 5
+          fi
+        done
+
+        exit 1
+      args:
+        executable: /bin/bash
+      register: librenms_galera_local_recovery_status
+      changed_when: false
+      failed_when: false
+
+- name: Use local Galera status after restart attempt
+  set_fact:
+    librenms_galera_local_status:
+      stdout: "{{ librenms_galera_local_recovery_status.stdout | default('') }}"
+      stderr: "{{ librenms_galera_local_recovery_status.stderr | default('') }}"
+      rc: "{{ librenms_galera_local_recovery_status.rc | default(1) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_recovery_status is defined
+
 - name: Capture local Galera diagnostics when node is not ready
   shell: |-
     set -o pipefail
@@ -892,6 +959,12 @@
       Last status output:
       {{ librenms_galera_local_status.stdout | default('') }}
       {{ librenms_galera_local_status.stderr | default('') }}
+
+      Restart attempt:
+      {{ librenms_galera_local_restart | default({}) }}
+
+      Socket wait after restart:
+      {{ librenms_galera_local_restart_socket | default({}) }}
 
       Diagnostics:
       {{ librenms_galera_local_diagnostics.stdout | default('') }}
