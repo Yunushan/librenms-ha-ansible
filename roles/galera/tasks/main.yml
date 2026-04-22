@@ -594,10 +594,52 @@
         | default(librenms_galera_bootstrap_effective_host)
       }}
     port: "{{ librenms_db_port }}"
-    timeout: 120
+    timeout: "{{ librenms_galera_wait_timeout | int }}"
+  register: librenms_galera_bootstrap_tcp_wait
+  failed_when: false
   when:
     - librenms_db_mode == 'galera'
-    - inventory_hostname != librenms_galera_bootstrap_effective_host
+    - inventory_hostname == (librenms_active_db_nodes | first)
+
+- name: Capture bootstrap host listener diagnostics
+  shell: |-
+    set -o pipefail
+    {
+      echo "--- systemctl ---"
+      systemctl status "{{ librenms_mariadb_service_name }}" --no-pager -l || true
+      echo "--- listeners ---"
+      ss -ltnp || true
+      echo "--- wsrep ---"
+      mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+        "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" || true
+      echo "--- journal ---"
+      journalctl -u "{{ librenms_mariadb_service_name }}" -n 80 --no-pager || true
+    }
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+  register: librenms_galera_bootstrap_listener_diagnostics
+  changed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - librenms_galera_bootstrap_tcp_wait.msg | default('') is search('Timeout')
+
+- name: Fail when the Galera bootstrap host does not accept TCP connections
+  fail:
+    msg: |-
+      Galera bootstrap host {{ librenms_galera_bootstrap_effective_host }} did
+      not accept TCP connections on port {{ librenms_db_port }}.
+
+      wait_for:
+      {{ librenms_galera_bootstrap_tcp_wait }}
+
+      diagnostics from {{ librenms_galera_bootstrap_effective_host }}:
+      {{ librenms_galera_bootstrap_listener_diagnostics.stdout | default('') }}
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - librenms_galera_bootstrap_tcp_wait.msg | default('') is search('Timeout')
 
 - name: Check local Galera readiness before service convergence
   command:
