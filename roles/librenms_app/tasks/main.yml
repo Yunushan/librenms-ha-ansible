@@ -1573,6 +1573,11 @@
     - librenms_bootstrap_completed_effective | bool
 
 - name: Run LibreNMS scheduler service once after cache validation
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
   block:
     - name: Trigger LibreNMS scheduler service
       systemd:
@@ -1617,11 +1622,6 @@
 
           journal:
           {{ librenms_scheduler_service_journal.stdout | default('') }}
-  when:
-    - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
-    - librenms_apply_post_bootstrap_config | bool
-    - librenms_bootstrap_completed_effective | bool
 
 - name: Seed LibreNMS scheduler health marker after cache validation
   command:
