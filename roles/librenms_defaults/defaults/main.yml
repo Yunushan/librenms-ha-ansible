@@ -43,6 +43,7 @@ librenms_db_name: librenms
 librenms_db_user: librenms
 librenms_db_password: CHANGE_ME_DB_PASSWORD
 librenms_db_bind_address: 0.0.0.0
+librenms_mariadb_log_warnings: 1
 librenms_db_user_host: "%"
 librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname]) | first) }}"
 librenms_runtime_db_prefer_local_galera: true
@@ -148,6 +149,9 @@ librenms_net_snmp_config_binary: /usr/bin/net-snmp-config
 librenms_manage_dispatcher: true
 librenms_manage_scheduler: true
 librenms_manage_rrdcached: "{{ librenms_mode != 'standalone' }}"
+librenms_dispatcher_registration_retries: 20
+librenms_dispatcher_registration_delay: 3
+librenms_dispatcher_registration_window: 300
 librenms_rrdcached_bind_port: 42217
 librenms_rrdcached_endpoint: ""
 librenms_rrdcached_socket: /run/rrdcached.sock

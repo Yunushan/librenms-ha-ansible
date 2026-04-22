@@ -1310,10 +1310,23 @@
         $app = require __DIR__ . '/bootstrap/app.php';
         $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
         $key = 'librenms_ansible_cache_write_check_' . gethostname();
-        Illuminate\Support\Facades\Cache::put($key, 'ok', 60);
-        if (Illuminate\Support\Facades\Cache::get($key) !== 'ok') {
-            fwrite(STDERR, 'LibreNMS cache write readback failed.' . PHP_EOL);
-            exit(1);
+        $lock = Illuminate\Support\Facades\Cache::lock($key . '_lock', 30);
+        $lockAcquired = false;
+        try {
+            $lockAcquired = $lock->get();
+            if (! $lockAcquired) {
+                fwrite(STDERR, 'LibreNMS cache lock acquisition failed.' . PHP_EOL);
+                exit(1);
+            }
+            Illuminate\Support\Facades\Cache::put($key, 'ok', 60);
+            if (Illuminate\Support\Facades\Cache::get($key) !== 'ok') {
+                fwrite(STDERR, 'LibreNMS cache write readback failed.' . PHP_EOL);
+                exit(1);
+            }
+        } finally {
+            if ($lockAcquired) {
+                $lock->release();
+            }
         }
         echo 'ok' . PHP_EOL;
   args:
@@ -1366,6 +1379,155 @@
     - librenms_manage_dispatcher | bool
     - ansible_service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
+
+- name: Verify LibreNMS dispatcher poller registration
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
+  block:
+    - name: Wait for LibreNMS dispatcher service to be active
+      service_facts:
+      register: librenms_dispatcher_active_check
+      retries: "{{ librenms_dispatcher_registration_retries | int }}"
+      delay: "{{ librenms_dispatcher_registration_delay | int }}"
+      until: >-
+        (
+          librenms_dispatcher_active_check.ansible_facts.services
+          | default({})
+        ).get('librenms.service', {}).get('state', '') == 'running'
+
+    - name: Refresh LibreNMS dispatcher poller registration
+      community.mysql.mysql_query:
+        login_host: "{{ librenms_db_host_effective }}"
+        login_port: "{{ librenms_db_port }}"
+        login_user: "{{ librenms_db_user }}"
+        login_password: "{{ librenms_db_password }}"
+        login_db: "{{ librenms_db_name }}"
+        query:
+          - >-
+            INSERT INTO `poller_cluster`
+            (`node_id`, `poller_name`, `poller_version`, `poller_groups`,
+            `last_report`, `master`)
+            VALUES
+            ('{{ librenms_node_id | default(inventory_hostname) | replace("'", "''") }}',
+            '{{ inventory_hostname | replace("'", "''") }}',
+            'librenms-service', '0', NOW(), 0)
+            ON DUPLICATE KEY UPDATE
+            `poller_name` = IF(
+              `poller_name` IS NULL OR `poller_name` = '',
+              VALUES(`poller_name`),
+              `poller_name`
+            ),
+            `poller_version` = VALUES(`poller_version`),
+            `poller_groups` = IF(
+              `poller_groups` IS NULL OR `poller_groups` = '',
+              VALUES(`poller_groups`),
+              `poller_groups`
+            ),
+            `last_report` = NOW()
+      no_log: true
+      changed_when: false
+
+    - name: Verify LibreNMS dispatcher poller registration is active
+      community.mysql.mysql_query:
+        login_host: "{{ librenms_db_host_effective }}"
+        login_port: "{{ librenms_db_port }}"
+        login_user: "{{ librenms_db_user }}"
+        login_password: "{{ librenms_db_password }}"
+        login_db: "{{ librenms_db_name }}"
+        query:
+          - >-
+            SELECT COUNT(*) AS active_pollers
+            FROM `poller_cluster`
+            WHERE `node_id` =
+            '{{ librenms_node_id | default(inventory_hostname) | replace("'", "''") }}'
+            AND `last_report` >= DATE_SUB(
+              NOW(),
+              INTERVAL {{ librenms_dispatcher_registration_window | int }}
+              SECOND
+            )
+      register: librenms_dispatcher_registration_check
+      no_log: true
+      changed_when: false
+      retries: "{{ librenms_dispatcher_registration_retries | int }}"
+      delay: "{{ librenms_dispatcher_registration_delay | int }}"
+      until:
+        - >-
+          (
+            librenms_dispatcher_registration_check.query_result[0][0].active_pollers
+            | default(0)
+            | int
+          ) > 0
+  rescue:
+    - name: Capture LibreNMS dispatcher service status
+      command:
+        argv:
+          - systemctl
+          - status
+          - librenms.service
+          - --no-pager
+          - -l
+      register: librenms_dispatcher_registration_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture LibreNMS dispatcher journal
+      command:
+        argv:
+          - journalctl
+          - -u
+          - librenms.service
+          - -n
+          - "120"
+          - --no-pager
+      register: librenms_dispatcher_registration_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture LibreNMS application log
+      command:
+        argv:
+          - tail
+          - -n
+          - "120"
+          - "{{ librenms_install_dir }}/logs/librenms.log"
+      register: librenms_dispatcher_registration_app_log
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with LibreNMS dispatcher registration diagnostics
+      fail:
+        msg: |-
+          LibreNMS dispatcher did not register an active poller row on {{ inventory_hostname }}.
+
+          systemctl status:
+          {{ librenms_dispatcher_registration_status.stdout | default('') }}
+          {{ librenms_dispatcher_registration_status.stderr | default('') }}
+
+          journal:
+          {{ librenms_dispatcher_registration_journal.stdout | default('') }}
+
+          librenms.log:
+          {{ librenms_dispatcher_registration_app_log.stdout | default('') }}
+
+- name: Queue PHP-FPM restart after final runtime validation
+  debug:
+    msg: Restarting PHP-FPM after final Redis/cache validation.
+  changed_when: true
+  notify: Restart PHP-FPM
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Flush PHP-FPM restart after final runtime validation
+  meta: flush_handlers
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_apply_post_bootstrap_config | bool
 
 - name: Recover PHP-FPM endpoint before final LibreNMS web probe
   when:
