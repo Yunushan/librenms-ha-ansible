@@ -379,6 +379,25 @@
     - not librenms_galera_cluster_has_live_member | bool
     - librenms_galera_force_kill_stale_mariadb | bool
 
+- name: Clear stuck MariaDB systemd jobs before Galera bootstrap # noqa: command-instead-of-module
+  shell: |-
+    set -euo pipefail
+    timeout 20 systemctl stop "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+    systemctl kill --kill-who=all --signal=KILL "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+    pkill -KILL -x mariadbd >/dev/null 2>&1 || true
+    systemctl reset-failed "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_active_db_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_clear_stuck_jobs
+  changed_when: librenms_galera_clear_stuck_jobs.rc == 0
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - librenms_galera_force_kill_stale_mariadb | bool
+
 - name: Confirm MariaDB processes are stopped before Galera bootstrap
   shell: |-
     seconds=0
@@ -443,14 +462,50 @@
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
   block:
-    - name: Run Galera bootstrap command
-      command:
-        argv:
-          - galera_new_cluster
+    - name: Run Galera bootstrap command # noqa: command-instead-of-module
+      shell: |-
+        set -euo pipefail
+
+        cleanup() {
+          systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
+        }
+        trap cleanup EXIT
+
+        systemctl reset-failed "{{ librenms_mariadb_service_name }}"
+        systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
+        systemctl set-environment MYSQLD_OPTS='--wsrep-cluster-address=gcomm://'
+        systemctl set-environment _WSREP_NEW_CLUSTER='--wsrep-new-cluster'
+        systemctl start "{{ librenms_mariadb_service_name }}"
+      args:
+        executable: /bin/bash
       delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
       register: librenms_galera_bootstrap_command
+      changed_when: librenms_galera_bootstrap_command.rc == 0
       async: "{{ librenms_galera_bootstrap_timeout | int }}"
       poll: 5
+
+    - name: Wait for MariaDB socket on the Galera bootstrap host
+      wait_for:
+        path: "{{ librenms_mariadb_socket }}"
+        timeout: "{{ librenms_galera_wait_timeout | int }}"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+
+    - name: Verify Galera bootstrap host formed a primary component
+      command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - "--socket={{ librenms_mariadb_socket }}"
+          - -Nse
+          - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+      register: librenms_galera_bootstrap_status_check
+      changed_when: false
+      retries: 24
+      delay: 5
+      until:
+        - librenms_galera_bootstrap_status_check.stdout is search('wsrep_cluster_status\\s+Primary')
+        - librenms_galera_bootstrap_status_check.stdout is search('wsrep_ready\\s+ON')
   rescue:
     - name: Capture MariaDB status after failed Galera bootstrap
       command:
