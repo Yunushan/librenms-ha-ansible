@@ -494,6 +494,17 @@ strict by default so a deployment does not finish green while browsers receive
 `504 Gateway Time-out`. Set `librenms_vip_app_probe_fail_deployment: false` only
 if you want to collect the warning and continue.
 
+In HA mode, use the VIP or a DNS name pointing at the VIP as the normal Web UI
+entrypoint. Direct node-IP access is useful for backend health checks and
+operator debugging, but it does not match LibreNMS `base_url` and can make the
+Web Server validation fail. By default, node-local nginx redirects unmatched
+hostnames such as `http://<node-ip>/` to `librenms_app_url_effective`. Disable
+that redirect only when you intentionally want direct node-IP UI access:
+
+```yaml
+librenms_nginx_redirect_unmatched_hosts: false
+```
+
 ### SNMP
 
 ```yaml

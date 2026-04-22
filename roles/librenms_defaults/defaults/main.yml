@@ -106,6 +106,7 @@ librenms_haproxy_web_check_host: ""
 librenms_nginx_health_check_path: /healthz
 librenms_php_fpm_ping_path: /php-fpm-ping
 librenms_haproxy_web_check_path: "{{ librenms_php_fpm_ping_path }}"
+librenms_nginx_redirect_unmatched_hosts: "{{ librenms_vip_enabled | bool }}"
 librenms_haproxy_db_mysql_check_enabled: true
 librenms_haproxy_db_health_user: haproxy_check
 librenms_haproxy_db_health_user_host: "%"

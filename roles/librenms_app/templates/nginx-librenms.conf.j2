@@ -1,14 +1,32 @@
+{% set librenms_nginx_listen =
+  (
+    (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':80'
+  )
+  if inventory_hostname in (
+    groups.get('lb_nodes', [])
+    | difference(groups.get('decommission_nodes', []))
+  )
+  else '80'
+%}
+{% if librenms_nginx_redirect_unmatched_hosts | bool %}
 server {
-    listen {{
-      (
-        (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':80'
-      )
-      if inventory_hostname in (
-        groups.get('lb_nodes', [])
-        | difference(groups.get('decommission_nodes', []))
-      )
-      else '80'
-    }};
+    listen {{ librenms_nginx_listen }} default_server;
+    server_name _;
+
+    location = {{ librenms_nginx_health_check_path }} {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 301 {{ librenms_app_url_effective | regex_replace('/$', '') }}$request_uri;
+    }
+}
+
+{% endif %}
+server {
+    listen {{ librenms_nginx_listen }};
     server_name {{ librenms_nginx_server_names_effective | default('_') }};
     root {{ librenms_install_dir }}/html;
     index index.php;
