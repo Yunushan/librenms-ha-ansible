@@ -918,6 +918,7 @@
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_local_recovery_status is defined
+    - not librenms_galera_local_recovery_status.skipped | default(false)
 
 - name: Capture local Galera diagnostics when node is not ready
   shell: |-
