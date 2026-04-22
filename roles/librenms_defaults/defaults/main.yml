@@ -103,6 +103,13 @@ librenms_haproxy_timeout_connect: 5s
 librenms_haproxy_timeout_client: 180s
 librenms_haproxy_timeout_server: 180s
 librenms_app_probe_path: /
+librenms_app_probe_success_statuses:
+  - 200
+  - 301
+  - 302
+  - 303
+  - 307
+  - 308
 librenms_app_probe_retries: 3
 librenms_app_probe_delay: 3
 librenms_app_probe_timeout: 3
