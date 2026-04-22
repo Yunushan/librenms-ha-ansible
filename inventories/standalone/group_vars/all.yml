@@ -22,6 +22,8 @@ librenms_vip_enabled: false
 
 librenms_bootstrap_completed: false
 librenms_manage_local_snmpd: true
+# Auto-add hosts in librenms_nodes as monitored LibreNMS devices after bootstrap.
+librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 
 # Optional AWX controller deployment. See docs/awx-controller.md.
 awx_controller_enabled: false

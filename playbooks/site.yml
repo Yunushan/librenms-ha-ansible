@@ -34,6 +34,14 @@
     - role: glusterfs_rrd
       when: librenms_rrd_mode == 'glusterfs'
 
+- name: Configure local SNMP agents
+  hosts: librenms_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: snmpd
+      when: librenms_manage_local_snmpd | bool
+
 - name: Configure LibreNMS application nodes
   hosts: librenms_nodes
   become: true
@@ -41,8 +49,6 @@
   serial: 1
   roles:
     - role: librenms_app
-    - role: snmpd
-      when: librenms_manage_local_snmpd | bool
 
 - name: Configure load balancer and VIP hosts
   hosts: lb_nodes

@@ -1104,6 +1104,182 @@
     - item.username not in (librenms_snmp_v3_current.stdout | default(''))
   loop: "{{ librenms_snmp_v3_users }}"
 
+- name: Determine effective SNMP version for cluster device seeding
+  set_fact:
+    librenms_seed_cluster_device_snmp_version_effective: >-
+      {{
+        (
+          'v3'
+          if (
+            'v3' in librenms_snmp_versions_enabled
+            and (librenms_snmp_v3_users | length) > 0
+          )
+          else (
+            'v2c'
+            if 'v2c' in librenms_snmp_versions_enabled
+            else (
+              'v1'
+              if 'v1' in librenms_snmp_versions_enabled
+              else ''
+            )
+          )
+        )
+        if (librenms_seed_cluster_device_snmp_version | lower) == 'auto'
+        else (librenms_seed_cluster_device_snmp_version | lower)
+      }}
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_seed_cluster_devices | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Validate SNMP credentials for cluster device seeding
+  assert:
+    that:
+      - librenms_seed_cluster_device_snmp_version_effective in ['v1', 'v2c', 'v3']
+      - >-
+        librenms_seed_cluster_device_snmp_version_effective != 'v3'
+        or (librenms_snmp_v3_users | length) > 0
+      - >-
+        librenms_seed_cluster_device_snmp_version_effective != 'v3'
+        or ((librenms_snmp_v3_users | first).username | default('') | length) > 0
+      - >-
+        librenms_seed_cluster_device_snmp_version_effective != 'v3'
+        or ((librenms_snmp_v3_users | first).auth_password | default('') | length) > 0
+      - >-
+        librenms_seed_cluster_device_snmp_version_effective == 'v3'
+        or (librenms_snmp_v2c_community | length) > 0
+    fail_msg: >-
+      Cluster device seeding is enabled, but no usable SNMP credentials are
+      configured. Set librenms_seed_cluster_devices: false to disable automatic
+      node seeding, or configure SNMPv2c/SNMPv3 credentials.
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_seed_cluster_devices | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Check existing LibreNMS cluster node devices
+  community.mysql.mysql_query:
+    login_host: "{{ librenms_db_host_effective }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - >-
+        SELECT COUNT(*) AS device_count
+        FROM `devices`
+        WHERE `hostname` = '{{ seed_device_address_sql }}'
+        OR `display` = '{{ seed_device_display_sql }}'
+  vars:
+    seed_device_address_sql: >-
+      {{
+        (
+          hostvars[item].librenms_seed_device_address
+          | default(hostvars[item].ansible_host | default(item))
+        )
+        | replace("'", "''")
+      }}
+    seed_device_display_sql: >-
+      {{
+        (
+          hostvars[item].librenms_seed_device_display
+          | default(hostvars[item].librenms_node_id | default(item))
+        )
+        | replace("'", "''")
+      }}
+  loop: "{{ librenms_seed_cluster_device_hosts }}"
+  loop_control:
+    label: "{{ item }}"
+  register: librenms_seed_cluster_device_checks
+  changed_when: false
+  no_log: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_seed_cluster_devices | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Add LibreNMS cluster nodes as monitored devices
+  command:
+    argv: "{{ seed_device_add_argv }}"
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  vars:
+    seed_device_host: "{{ item.item }}"
+    seed_device_address: >-
+      {{
+        hostvars[seed_device_host].librenms_seed_device_address
+        | default(hostvars[seed_device_host].ansible_host | default(seed_device_host))
+      }}
+    seed_device_display: >-
+      {{
+        hostvars[seed_device_host].librenms_seed_device_display
+        | default(hostvars[seed_device_host].librenms_node_id | default(seed_device_host))
+      }}
+    seed_snmp_v3_user: "{{ librenms_snmp_v3_users | first | default({}) }}"
+    seed_device_base_argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - device:add
+      - "{{ seed_device_address }}"
+      - "--display-name={{ seed_device_display }}"
+      - "--transport={{ librenms_seed_cluster_device_transport }}"
+      - "--port={{ librenms_seed_cluster_device_port }}"
+    seed_device_snmp_argv: >-
+      {{
+        [
+          '--v3',
+          '--security-name=' ~ seed_snmp_v3_user.username,
+          '--auth-password=' ~ seed_snmp_v3_user.auth_password,
+          '--auth-protocol=' ~ (seed_snmp_v3_user.auth_protocol | default('SHA'))
+        ]
+        +
+        (
+          [
+            '--privacy-password=' ~ seed_snmp_v3_user.priv_password,
+            '--privacy-protocol=' ~ (seed_snmp_v3_user.priv_protocol | default('AES'))
+          ]
+          if (seed_snmp_v3_user.priv_password | default('') | length) > 0
+          else []
+        )
+        if librenms_seed_cluster_device_snmp_version_effective == 'v3'
+        else
+        [
+          (
+            '--v1'
+            if librenms_seed_cluster_device_snmp_version_effective == 'v1'
+            else '--v2c'
+          ),
+          '--community=' ~ librenms_snmp_v2c_community
+        ]
+      }}
+    seed_device_poller_group_argv: >-
+      {{
+        ['--poller-group=' ~ (librenms_seed_cluster_device_poller_group | string)]
+        if (librenms_seed_cluster_device_poller_group | string | length) > 0
+        else []
+      }}
+    seed_device_add_argv: >-
+      {{
+        seed_device_base_argv
+        + seed_device_snmp_argv
+        + seed_device_poller_group_argv
+      }}
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_seed_cluster_device_add
+  changed_when: true
+  retries: 3
+  delay: 10
+  until: librenms_seed_cluster_device_add.rc == 0
+  loop: "{{ librenms_seed_cluster_device_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ seed_device_display }} ({{ seed_device_address }})"
+  no_log: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_seed_cluster_devices | bool
+    - (item.query_result[0][0].device_count | default(0) | int) == 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
 - name: Enable distributed poller after bootstrap
   command:
     argv:

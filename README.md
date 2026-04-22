@@ -59,6 +59,7 @@ This repository gives you one Ansible project that can deploy:
 - optional VIP and load-balancer layer
 - optional local SNMP agent management
 - support for SNMP **v1**, **v2c**, and **v3**
+- automatic self-monitoring for LibreNMS cluster nodes, with a one-variable opt out
 - optional experimental Dockerized HA example bundle for operators who prefer containerized service layers
 - optional AWX controller deployment for teams that want GUI-driven operations
 - workflows for **adding** and **removing** LibreNMS nodes
@@ -510,6 +511,31 @@ librenms_snmp_v3_users:
     priv_protocol: AES
     priv_password: CHANGE_ME_PRIV
     access: ro
+```
+
+### Cluster self-monitoring
+
+When local `snmpd` management is enabled, the playbook automatically adds the
+active `librenms_nodes` as monitored LibreNMS devices after bootstrap. It uses
+each node's `ansible_host` as the device address and `librenms_node_id` as the
+display name.
+
+Disable that default behavior with:
+
+```yaml
+librenms_seed_cluster_devices: false
+```
+
+For the sample inventories, that switch lives in
+`inventories/ha/group_vars/all.yml` and
+`inventories/standalone/group_vars/all.yml`.
+
+Per-host overrides are also available when inventory naming and SNMP reachability
+need to differ:
+
+```yaml
+librenms_seed_device_address: 10.10.10.11
+librenms_seed_device_display: lnms1
 ```
 
 ---
