@@ -654,25 +654,113 @@
   changed_when: false
   when: librenms_db_mode == 'galera'
 
-- name: Ensure MariaDB service is enabled and started on Galera nodes
-  service:
-    name: "{{ librenms_mariadb_service_name }}"
-    state: >-
-      {{
-        'restarted'
-        if (
-          (librenms_galera_config_deploy.changed | default(false))
-          or not (
-            (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
-            and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
-          )
-        )
-        else 'started'
-      }}
-    enabled: true
+- name: Converge MariaDB service on Galera nodes
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname != librenms_galera_bootstrap_effective_host or librenms_galera_cluster_has_live_member | bool
+  block:
+    - name: Reset failed MariaDB unit state before Galera service start
+      command:
+        argv:
+          - systemctl
+          - reset-failed
+          - "{{ librenms_mariadb_service_name }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure MariaDB service is enabled and started on Galera nodes
+      service:
+        name: "{{ librenms_mariadb_service_name }}"
+        state: >-
+          {{
+            'started'
+            if (
+              not librenms_galera_cluster_has_live_member | bool
+              or librenms_galera_cluster_bootstrapped_this_run | default(false)
+            )
+            else
+            (
+              'restarted'
+              if (
+                (librenms_galera_config_deploy.changed | default(false))
+                or not (
+                  (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+                  and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+                )
+              )
+              else 'started'
+            )
+          }}
+        enabled: true
+      register: librenms_galera_service_convergence
+      retries: 6
+      delay: 10
+      until: librenms_galera_service_convergence is succeeded
+  rescue:
+    - name: Capture MariaDB status after failed Galera service start
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_mariadb_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_galera_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture MariaDB journal after failed Galera service start
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_mariadb_service_name }}"
+          - -n
+          - "120"
+          - --no-pager
+      register: librenms_galera_service_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Galera config after failed service start
+      command:
+        argv:
+          - cat
+          - "{{ librenms_galera_conf_path }}"
+      register: librenms_galera_service_config
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Galera saved state after failed service start
+      command:
+        argv:
+          - cat
+          - /var/lib/mysql/grastate.dat
+      register: librenms_galera_service_grastate
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Galera service start diagnostics
+      fail:
+        msg: |-
+          Failed to start MariaDB on {{ inventory_hostname }} while joining the
+          Galera primary component.
+
+          Bootstrap host:
+          {{ librenms_galera_bootstrap_effective_host | default('unknown') }}
+
+          systemctl status:
+          {{ librenms_galera_service_status.stdout | default('') }}
+          {{ librenms_galera_service_status.stderr | default('') }}
+
+          journal:
+          {{ librenms_galera_service_journal.stdout | default('') }}
+
+          Galera config:
+          {{ librenms_galera_service_config.stdout | default('') }}
+
+          grastate.dat:
+          {{ librenms_galera_service_grastate.stdout | default('') }}
 
 - name: Wait for local MariaDB socket on Galera nodes
   wait_for:
