@@ -655,10 +655,20 @@
   changed_when: false
   when: librenms_db_mode == 'galera'
 
+- name: Determine whether local Galera service should be running
+  set_fact:
+    librenms_galera_local_service_expected: >-
+      {{
+        librenms_galera_cluster_has_live_member | bool
+        or inventory_hostname != librenms_galera_bootstrap_effective_host
+        or librenms_galera_cluster_bootstrapped_this_run | default(false)
+      }}
+  when: librenms_db_mode == 'galera'
+
 - name: Converge MariaDB service on Galera nodes
   when:
     - librenms_db_mode == 'galera'
-    - inventory_hostname != librenms_galera_bootstrap_effective_host or librenms_galera_cluster_has_live_member | bool
+    - librenms_galera_local_service_expected | bool
   block:
     - name: Reset failed MariaDB unit state before Galera service start
       command:
@@ -707,6 +717,11 @@
       retries: 6
       delay: 10
       until: librenms_galera_service_convergence is succeeded
+
+    - name: Wait for MariaDB socket after Galera service start
+      wait_for:
+        path: "{{ librenms_mariadb_socket }}"
+        timeout: "{{ librenms_galera_wait_timeout | int }}"
   rescue:
     - name: Capture MariaDB status after failed Galera service start
       command:
@@ -751,6 +766,22 @@
       changed_when: false
       failed_when: false
 
+    - name: Capture Galera runtime details after failed service start
+      shell: |-
+        set -o pipefail
+        {
+          echo "--- systemd environment ---"
+          systemctl show-environment | grep -E '^(MYSQLD_OPTS|_WSREP_)=' || true
+          echo "--- processes ---"
+          ps -eo pid,ppid,stat,cmd | grep -E '[m]ariadbd|[m]ysql' || true
+          echo "--- listeners ---"
+          ss -ltnp || true
+        }
+      args:
+        executable: /bin/bash
+      register: librenms_galera_service_runtime
+      changed_when: false
+
     - name: Fail with Galera service start diagnostics
       fail:
         msg: |-
@@ -773,52 +804,17 @@
           grastate.dat:
           {{ librenms_galera_service_grastate.stdout | default('') }}
 
-- name: Wait for local MariaDB socket on Galera nodes
-  when: librenms_db_mode == 'galera'
-  block:
-    - name: Wait for local MariaDB socket file
-      wait_for:
-        path: "{{ librenms_mariadb_socket }}"
-        timeout: "{{ librenms_galera_wait_timeout | int }}"
-  rescue:
-    - name: Capture MariaDB socket wait diagnostics
-      shell: |-
-        set -o pipefail
-        {
-          echo "--- systemctl ---"
-          systemctl status "{{ librenms_mariadb_service_name }}" --no-pager -l || true
-          echo "--- systemd environment ---"
-          systemctl show-environment | grep -E '^(MYSQLD_OPTS|_WSREP_)=' || true
-          echo "--- processes ---"
-          ps -eo pid,ppid,stat,cmd | grep -E '[m]ariadbd|[m]ysql' || true
-          echo "--- listeners ---"
-          ss -ltnp || true
-          echo "--- config ---"
-          cat "{{ librenms_galera_conf_path }}" || true
-          echo "--- grastate ---"
-          cat /var/lib/mysql/grastate.dat || true
-          echo "--- journal ---"
-          journalctl -u "{{ librenms_mariadb_service_name }}" -n 160 --no-pager || true
-        }
-      args:
-        executable: /bin/bash
-      register: librenms_galera_socket_wait_diagnostics
-      changed_when: false
-
-    - name: Fail with MariaDB socket wait diagnostics
-      fail:
-        msg: |-
-          MariaDB did not create {{ librenms_mariadb_socket }} on {{ inventory_hostname }}.
-
-          Diagnostics:
-          {{ librenms_galera_socket_wait_diagnostics.stdout | default('') }}
+          runtime details:
+          {{ librenms_galera_service_runtime.stdout | default('') }}
 
 - name: Wait for Galera node TCP listener
   wait_for:
     host: "{{ ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)) }}"
     port: "{{ librenms_db_port }}"
     timeout: "{{ librenms_galera_wait_timeout | int }}"
-  when: librenms_db_mode == 'galera'
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
 
 - name: Wait for local Galera node to join the primary component
   shell: |-
@@ -852,7 +848,9 @@
   register: librenms_galera_local_status
   changed_when: false
   failed_when: false
-  when: librenms_db_mode == 'galera'
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
 
 - name: Capture local Galera diagnostics when node is not ready
   shell: |-
@@ -878,6 +876,7 @@
   changed_when: false
   when:
     - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
     - >-
       not (
         (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
@@ -898,6 +897,7 @@
       {{ librenms_galera_local_diagnostics.stdout | default('') }}
   when:
     - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
     - >-
       not (
         (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
@@ -915,6 +915,7 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == librenms_galera_bootstrap_effective_host
+    - librenms_galera_local_service_expected | bool
 
 - name: Create LibreNMS database user in Galera mode
   community.mysql.mysql_user:
@@ -929,6 +930,7 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == librenms_galera_bootstrap_effective_host
+    - librenms_galera_local_service_expected | bool
 
 - name: Create HAProxy Galera health-check user
   no_log: true
@@ -944,3 +946,4 @@
     - librenms_db_mode == 'galera'
     - librenms_haproxy_db_mysql_check_enabled | bool
     - inventory_hostname == librenms_galera_bootstrap_effective_host
+    - librenms_galera_local_service_expected | bool
