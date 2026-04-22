@@ -966,48 +966,28 @@
           {{ librenms_php_fpm_socket_config_test.stderr | default('') }}
 
 - name: Deploy scheduler service file
-  copy:
-    remote_src: true
-    src: "{{ librenms_install_dir }}/dist/librenms-scheduler.service"
+  template:
+    src: librenms-scheduler.service.j2
     dest: /etc/systemd/system/librenms-scheduler.service
     owner: root
     group: root
     mode: "0644"
+  notify: Restart LibreNMS scheduler timer
   when:
     - librenms_manage_scheduler | bool
     - ansible_service_mgr == 'systemd'
 
 - name: Deploy scheduler timer file
-  copy:
-    remote_src: true
-    src: "{{ librenms_install_dir }}/dist/librenms-scheduler.timer"
+  template:
+    src: librenms-scheduler.timer.j2
     dest: /etc/systemd/system/librenms-scheduler.timer
     owner: root
     group: root
     mode: "0644"
+  notify: Restart LibreNMS scheduler timer
   when:
     - librenms_manage_scheduler | bool
     - ansible_service_mgr == 'systemd'
-
-- name: Adjust scheduler service install path
-  replace:
-    path: /etc/systemd/system/librenms-scheduler.service
-    regexp: /opt/librenms
-    replace: "{{ librenms_install_dir }}"
-  when:
-    - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
-    - librenms_install_dir != '/opt/librenms'
-
-- name: Adjust scheduler timer install path
-  replace:
-    path: /etc/systemd/system/librenms-scheduler.timer
-    regexp: /opt/librenms
-    replace: "{{ librenms_install_dir }}"
-  when:
-    - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
-    - librenms_install_dir != '/opt/librenms'
 
 - name: Deploy LibreNMS dispatcher service file
   copy:

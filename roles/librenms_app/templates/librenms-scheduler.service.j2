@@ -1,0 +1,13 @@
+[Unit]
+Description=LibreNMS Scheduler
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ librenms_user }}
+Group={{ librenms_group }}
+WorkingDirectory={{ librenms_install_dir }}
+Environment=HOME={{ librenms_install_dir }}
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env php {{ librenms_install_dir }}/artisan schedule:run --no-ansi --no-interaction
