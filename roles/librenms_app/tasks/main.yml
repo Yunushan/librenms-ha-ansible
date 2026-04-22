@@ -989,6 +989,26 @@
     - librenms_manage_scheduler | bool
     - ansible_service_mgr == 'systemd'
 
+- name: Adjust scheduler service install path
+  replace:
+    path: /etc/systemd/system/librenms-scheduler.service
+    regexp: /opt/librenms
+    replace: "{{ librenms_install_dir }}"
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_install_dir != '/opt/librenms'
+
+- name: Adjust scheduler timer install path
+  replace:
+    path: /etc/systemd/system/librenms-scheduler.timer
+    regexp: /opt/librenms
+    replace: "{{ librenms_install_dir }}"
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_install_dir != '/opt/librenms'
+
 - name: Deploy LibreNMS dispatcher service file
   copy:
     remote_src: true
@@ -1540,6 +1560,69 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
 
+- name: Ensure scheduler timer is active after cache validation
+  systemd:
+    name: librenms-scheduler.timer
+    daemon_reload: true
+    state: started
+    enabled: true
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Run LibreNMS scheduler service once after cache validation
+  block:
+    - name: Trigger LibreNMS scheduler service
+      systemd:
+        name: librenms-scheduler.service
+        state: started
+      register: librenms_scheduler_service_run
+      changed_when: false
+
+  rescue:
+    - name: Capture scheduler service status after failed run
+      command:
+        argv:
+          - systemctl
+          - status
+          - librenms-scheduler.service
+          - --no-pager
+      register: librenms_scheduler_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture scheduler service journal after failed run
+      command:
+        argv:
+          - journalctl
+          - -u
+          - librenms-scheduler.service
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_scheduler_service_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with scheduler service diagnostics
+      fail:
+        msg: |-
+          LibreNMS scheduler service failed on {{ inventory_hostname }}.
+
+          systemctl status:
+          {{ librenms_scheduler_service_status.stdout | default('') }}
+          {{ librenms_scheduler_service_status.stderr | default('') }}
+
+          journal:
+          {{ librenms_scheduler_service_journal.stdout | default('') }}
+  when:
+    - librenms_manage_scheduler | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
+
 - name: Seed LibreNMS scheduler health marker after cache validation
   command:
     argv:
@@ -1557,6 +1640,34 @@
   become_user: "{{ librenms_user }}"
   register: librenms_scheduler_health_marker
   changed_when: false
+  when:
+    - librenms_manage_scheduler | bool
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Verify LibreNMS scheduler health marker is visible
+  command:
+    argv:
+      - php
+      - -r
+      - |-
+        require __DIR__ . '/vendor/autoload.php';
+        $app = require __DIR__ . '/bootstrap/app.php';
+        $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+        if (! Illuminate\Support\Facades\Cache::has('scheduler_working')) {
+            fwrite(STDERR, 'LibreNMS scheduler health marker is missing.' . PHP_EOL);
+            exit(1);
+        }
+        echo 'ok' . PHP_EOL;
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_scheduler_health_marker_check
+  changed_when: false
+  retries: 3
+  delay: 2
+  until: librenms_scheduler_health_marker_check.rc == 0
   when:
     - librenms_manage_scheduler | bool
     - librenms_apply_post_bootstrap_config | bool
