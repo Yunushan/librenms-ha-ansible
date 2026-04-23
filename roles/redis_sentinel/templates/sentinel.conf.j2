@@ -12,6 +12,8 @@ pidfile /run/redis/redis-sentinel.pid
 logfile ""
 {% endif %}
 dir {{ librenms_redis_data_dir }}
+sentinel announce-ip {{ redis_node_address }}
+sentinel announce-port 26379
 
 sentinel monitor {{ librenms_redis_sentinel_service }} {{ redis_master_address }} 6379 {{ librenms_redis_quorum }}
 sentinel auth-pass {{ librenms_redis_sentinel_service }} {{ librenms_redis_password | to_json }}

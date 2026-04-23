@@ -102,6 +102,11 @@
             raise RuntimeError("Redis queue write check failed.")
         if master.lpop(queue_key) != value:
             raise RuntimeError("Redis queue readback failed.")
+        if master.blpop(
+            queue_key,
+            timeout=int(os.environ["LIBRENMS_HEALTHCHECK_BLOCKING_TIMEOUT"]),
+        ) is not None:
+            raise RuntimeError("Redis blocking queue check returned unexpected data.")
 
         master.delete(queue_key)
         master.delete(health_key)
@@ -124,9 +129,11 @@
     LIBRENMS_REDIS_USERNAME: "{{ librenms_redis_username }}"
     LIBRENMS_REDIS_PASSWORD: "{{ librenms_redis_password }}"
     LIBRENMS_REDIS_DB: "{{ librenms_redis_db }}"
-    LIBRENMS_REDIS_TIMEOUT: "{{ librenms_redis_runtime_healthcheck_timeout }}"
+    LIBRENMS_REDIS_TIMEOUT: "{{ librenms_redis_timeout_effective }}"
     LIBRENMS_NODE_ID: "{{ librenms_node_id | default(inventory_hostname) }}"
     LIBRENMS_HEALTHCHECK_TTL: "{{ librenms_redis_runtime_healthcheck_key_ttl }}"
+    LIBRENMS_HEALTHCHECK_BLOCKING_TIMEOUT: >-
+      {{ librenms_redis_runtime_healthcheck_blocking_timeout }}
   register: librenms_redis_runtime_healthcheck
   retries: "{{ librenms_redis_runtime_healthcheck_retries | int }}"
   delay: "{{ librenms_redis_runtime_healthcheck_delay | int }}"
