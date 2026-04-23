@@ -616,14 +616,31 @@
   when:
     - not (librenms_rrd_mode == 'glusterfs' and item == (librenms_install_dir ~ '/rrd'))
 
+- name: Discover stale LibreNMS bootstrap cache files before Composer
+  find:
+    paths: "{{ librenms_install_dir }}/bootstrap/cache"
+    file_type: file
+    excludes: ".gitignore"
+  register: librenms_pre_composer_bootstrap_cache_files
+
+- name: Remove stale LibreNMS bootstrap cache files before Composer
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_pre_composer_bootstrap_cache_files.files | default([]) }}"
+
 - name: Install LibreNMS PHP dependencies
   command:
     argv:
       - ./scripts/composer_wrapper.php
       - install
       - --no-dev
+      - --no-interaction
   args:
     chdir: "{{ librenms_install_dir }}"
+  environment:
+    COMPOSER_PROCESS_TIMEOUT: "{{ librenms_composer_process_timeout | string }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
   become: true
   become_user: "{{ librenms_user }}"
   register: librenms_composer

@@ -18,6 +18,7 @@ librenms_user: librenms
 librenms_group: librenms
 librenms_shell: /bin/bash
 librenms_ansible_remote_tmp: "{{ librenms_install_dir }}/.ansible/tmp"
+librenms_composer_process_timeout: 1800
 librenms_fqdn: librenms.example.com
 librenms_default_fqdn_placeholder: librenms.example.com
 librenms_app_url: ""
