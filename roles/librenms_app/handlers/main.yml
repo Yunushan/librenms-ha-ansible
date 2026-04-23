@@ -37,10 +37,34 @@
     name: "{{ librenms_rrdcached_service_name }}"
     state: restarted
 
-- name: Restart LibreNMS dispatcher
-  service:
-    name: librenms.service
-    state: restarted
+- name: Restart LibreNMS dispatcher service
+  command:
+    argv:
+      - systemctl
+      - restart
+      - librenms.service
+  register: librenms_dispatcher_restart
+  retries: 5
+  delay: 3
+  until: librenms_dispatcher_restart.rc == 0
+  listen: Restart LibreNMS dispatcher
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+
+- name: Wait for LibreNMS dispatcher service after restart
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms.service
+  register: librenms_dispatcher_restart_active
+  changed_when: false
+  retries: 10
+  delay: 3
+  until: librenms_dispatcher_restart_active.stdout == 'active'
+  listen: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
     - ansible_service_mgr == 'systemd'
