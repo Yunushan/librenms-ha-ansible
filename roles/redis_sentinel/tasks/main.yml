@@ -7,11 +7,11 @@
 
 - name: Ensure Redis config parent directory exists when needed
   file:
-    path: "{{ librenms_redis_conf_path | dirname }}"
+    path: "{{ librenms_redis_conf_path_effective | dirname }}"
     state: directory
-    owner: root
-    group: root
-    mode: "0755"
+    owner: "{{ librenms_redis_runtime_user if librenms_redis_mode == 'sentinel' else 'root' }}"
+    group: "{{ librenms_redis_runtime_group if librenms_redis_mode == 'sentinel' else 'root' }}"
+    mode: "{{ '0750' if librenms_redis_mode == 'sentinel' else '0755' }}"
 
 - name: Ensure custom config directory exists
   file:
@@ -55,12 +55,51 @@
 - name: Deploy Redis server config
   template:
     src: redis.conf.j2
-    dest: "{{ librenms_redis_conf_path }}"
+    dest: "{{ librenms_redis_conf_path_effective }}"
+    owner: "{{ librenms_redis_runtime_user if librenms_redis_mode == 'sentinel' else 'root' }}"
+    group: "{{ librenms_redis_runtime_group if librenms_redis_mode == 'sentinel' else 'root' }}"
+    mode: "{{ '0640' if librenms_redis_mode == 'sentinel' else '0644' }}"
+  notify: Restart Redis
+  when: librenms_redis_mode in ['local', 'sentinel']
+
+- name: Ensure Redis server systemd override directory exists
+  file:
+    path: "{{ librenms_redis_systemd_override_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy Redis server systemd override for Sentinel writable config
+  template:
+    src: librenms-redis-server-override.conf.j2
+    dest: "{{ librenms_redis_systemd_override_path }}"
     owner: root
     group: root
     mode: "0644"
   notify: Restart Redis
-  when: librenms_redis_mode in ['local', 'sentinel']
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Remove Redis server systemd override when Sentinel mode is disabled
+  file:
+    path: "{{ librenms_redis_systemd_override_path }}"
+    state: absent
+  notify: Restart Redis
+  when:
+    - librenms_redis_mode != 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Reload systemd after Redis server unit changes
+  systemd:
+    daemon_reload: true
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_service_mgr == 'systemd'
 
 - name: Enable and start Redis server
   when: librenms_redis_mode in ['local', 'sentinel']
@@ -145,6 +184,22 @@
       (librenms_redis_replication_state.stdout | default('')) is not search(
         'master_host:' ~ (hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host))
       )
+
+- name: Verify Redis server can persist replication configuration changes
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 6379 CONFIG REWRITE
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_config_rewrite
+  changed_when: false
+  failed_when: false
+  retries: "{{ librenms_redis_config_rewrite_retries | int }}"
+  delay: "{{ librenms_redis_config_rewrite_delay | int }}"
+  until:
+    - librenms_redis_config_rewrite.rc == 0
+    - (librenms_redis_config_rewrite.stdout | default('') | trim) == 'OK'
+  when: librenms_redis_mode == 'sentinel'
 
 - name: Deploy Redis Sentinel config
   template:

@@ -10,7 +10,7 @@ supervised systemd
 pidfile /run/redis/redis-server.pid
 logfile ""
 {% endif %}
-dir /var/lib/redis
+dir {{ librenms_redis_data_dir }}
 dbfilename dump.rdb
 appendonly no
 requirepass {{ librenms_redis_password | to_json }}

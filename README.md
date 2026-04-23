@@ -517,6 +517,15 @@ because cache, lock, and session writes are waiting on Redis failover. These
 defaults favor faster lab and LAN cluster recovery while still being adjustable
 for slower networks.
 
+On systemd hosts, the role runs Sentinel as `librenms-redis-sentinel.service`
+and disables the distro-native `redis-sentinel.service`. Check the managed unit
+when testing failover:
+
+```bash
+systemctl status librenms-redis-sentinel
+REDISCLI_AUTH='<sentinel password>' redis-cli -h 127.0.0.1 -p 26379 SENTINEL get-master-addr-by-name mymaster
+```
+
 ### HTTPS / TLS
 
 By default the cluster listens on HTTP `80/tcp`. For production, enable TLS on
