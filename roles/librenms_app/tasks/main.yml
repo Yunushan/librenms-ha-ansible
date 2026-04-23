@@ -1383,7 +1383,6 @@
         SELECT COUNT(*) AS device_count
         FROM `devices`
         WHERE `hostname` = '{{ seed_device_address_sql }}'
-        OR `display` = '{{ seed_device_display_sql }}'
   vars:
     seed_device_address_sql: >-
       {{
@@ -1393,23 +1392,54 @@
         )
         | replace("'", "''")
       }}
-    seed_device_display_sql: >-
-      {{
-        (
-          hostvars[item].librenms_seed_device_display
-          | default(hostvars[item].librenms_node_id | default(item))
-        )
-        | replace("'", "''")
-      }}
   loop: "{{ librenms_seed_cluster_device_hosts }}"
   loop_control:
     label: "{{ item }}"
   register: librenms_seed_cluster_device_checks
   changed_when: false
+  failed_when: false
   no_log: true
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_seed_cluster_devices | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Collect failed LibreNMS cluster node device lookups
+  set_fact:
+    librenms_seed_cluster_device_lookup_failed_hosts: >-
+      {{
+        librenms_seed_cluster_device_checks.results | default([])
+        | rejectattr('query_result', 'defined')
+        | map(attribute='item')
+        | list
+      }}
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_seed_cluster_devices | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Warn when LibreNMS cluster node device lookup fails
+  debug:
+    msg: >-
+      Skipping automatic LibreNMS device seeding for hosts whose device lookup
+      failed: {{ librenms_seed_cluster_device_lookup_failed_hosts | join(', ') }}.
+      Set librenms_seed_cluster_devices_required: true to make this fatal.
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_seed_cluster_devices | bool
+    - (librenms_seed_cluster_device_lookup_failed_hosts | default([]) | length) > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Fail when required LibreNMS cluster node device lookup fails
+  fail:
+    msg: >-
+      Automatic LibreNMS device seeding lookup failed for:
+      {{ librenms_seed_cluster_device_lookup_failed_hosts | join(', ') }}.
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_seed_cluster_devices | bool
+    - librenms_seed_cluster_devices_required | bool
+    - (librenms_seed_cluster_device_lookup_failed_hosts | default([]) | length) > 0
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Add LibreNMS cluster nodes as monitored devices
@@ -1491,6 +1521,7 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_seed_cluster_devices | bool
+    - item.query_result is defined
     - (item.query_result[0][0].device_count | default(0) | int) == 0
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 

@@ -211,6 +211,7 @@ librenms_snmp_syscontact: noc@example.com
 librenms_snmp_agent_address: "udp:161,udp6:[::1]:161"
 librenms_net_snmp_config_binary: /usr/bin/net-snmp-config
 librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
+librenms_seed_cluster_devices_required: false
 librenms_seed_cluster_device_hosts: >-
   {{
     groups.get('librenms_nodes', [])
