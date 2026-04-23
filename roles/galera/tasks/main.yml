@@ -929,14 +929,50 @@
           runtime details:
           {{ librenms_galera_service_runtime.stdout | default('') }}
 
-- name: Wait for Galera node TCP listener
-  wait_for:
-    host: "{{ ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)) }}"
-    port: "{{ librenms_db_port }}"
-    timeout: "{{ librenms_galera_wait_timeout | int }}"
+- name: Determine local Galera HAProxy backend TCP endpoint
+  set_fact:
+    librenms_galera_backend_tcp_host: >-
+      {{
+        ansible_host
+        | default(ansible_default_ipv4.address | default(inventory_hostname))
+      }}
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
+
+- name: Wait for Galera node TCP listener
+  wait_for:
+    host: "{{ librenms_galera_backend_tcp_host }}"
+    port: "{{ librenms_db_port }}"
+    timeout: "{{ librenms_galera_wait_timeout | int }}"
+  register: librenms_galera_backend_tcp_initial
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+
+- name: Restart local Galera node when backend TCP listener is unavailable
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: restarted
+  register: librenms_galera_backend_tcp_restart
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - (librenms_galera_backend_tcp_initial.state | default('')) != 'started'
+
+- name: Wait for Galera node TCP listener after backend restart
+  wait_for:
+    host: "{{ librenms_galera_backend_tcp_host }}"
+    port: "{{ librenms_db_port }}"
+    timeout: "{{ librenms_galera_wait_timeout | int }}"
+  register: librenms_galera_backend_tcp_recovery
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - (librenms_galera_backend_tcp_initial.state | default('')) != 'started'
 
 - name: Wait for local Galera node to join the primary component
   shell: |-
@@ -1250,6 +1286,79 @@
         (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
         and (librenms_galera_local_status.stdout | default('')) is search('wsrep_ready\\s+ON')
       )
+
+- name: Verify local Galera HAProxy backend TCP listener after convergence
+  wait_for:
+    host: "{{ librenms_galera_backend_tcp_host }}"
+    port: "{{ librenms_db_port }}"
+    timeout: "{{ librenms_galera_wait_timeout | int }}"
+  register: librenms_galera_backend_tcp_final
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - >-
+      (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+      and (librenms_galera_local_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+
+- name: Capture Galera backend listener diagnostics when unavailable
+  shell: |-
+    set -o pipefail
+    {
+      echo "--- expected HAProxy backend endpoint ---"
+      echo "{{ librenms_galera_backend_tcp_host }}:{{ librenms_db_port }}"
+      echo "--- systemctl ---"
+      systemctl status "{{ librenms_mariadb_service_name }}" --no-pager -l || true
+      echo "--- listeners ---"
+      ss -ltnp || true
+      echo "--- wsrep ---"
+      mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+        "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" || true
+      echo "--- config ---"
+      cat "{{ librenms_galera_conf_path }}" || true
+      echo "--- journal ---"
+      journalctl -u "{{ librenms_mariadb_service_name }}" -n 120 --no-pager || true
+    }
+  args:
+    executable: /bin/bash
+  register: librenms_galera_backend_tcp_diagnostics
+  changed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - librenms_galera_backend_tcp_final is defined
+    - not librenms_galera_backend_tcp_final.skipped | default(false)
+    - (librenms_galera_backend_tcp_final.state | default('')) != 'started'
+
+- name: Fail when local Galera backend listener is unavailable
+  fail:
+    msg: |-
+      {{ inventory_hostname }} joined the Galera primary component, but it is
+      not accepting TCP connections on the backend endpoint used by HAProxy:
+      {{ librenms_galera_backend_tcp_host }}:{{ librenms_db_port }}.
+
+      HAProxy will mark this node DOWN until MariaDB listens on that address.
+
+      Initial listener wait:
+      {{ librenms_galera_backend_tcp_initial | default({}) }}
+
+      Restart attempt:
+      {{ librenms_galera_backend_tcp_restart | default({}) }}
+
+      Listener wait after restart:
+      {{ librenms_galera_backend_tcp_recovery | default({}) }}
+
+      Final listener wait:
+      {{ librenms_galera_backend_tcp_final | default({}) }}
+
+      Diagnostics:
+      {{ librenms_galera_backend_tcp_diagnostics.stdout | default('') }}
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - librenms_galera_backend_tcp_final is defined
+    - not librenms_galera_backend_tcp_final.skipped | default(false)
+    - (librenms_galera_backend_tcp_final.state | default('')) != 'started'
 
 - name: Create LibreNMS database in Galera mode
   community.mysql.mysql_db:
