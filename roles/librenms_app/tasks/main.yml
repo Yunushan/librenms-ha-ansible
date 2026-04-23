@@ -201,6 +201,18 @@
         )
       }}
 
+- name: Normalize effective runtime DB host for Galera
+  set_fact:
+    librenms_db_host_effective: >-
+      {{
+        librenms_vip_ip
+        if librenms_vip_enabled and librenms_vip_ip | length > 0
+        else librenms_db_host_install_effective
+      }}
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_db_host | length == 0
+
 - name: Determine effective Redis host
   set_fact:
     librenms_redis_host_effective: >-
