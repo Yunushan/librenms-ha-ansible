@@ -2290,90 +2290,8 @@
     - librenms_apply_post_bootstrap_config | bool
     - librenms_bootstrap_completed_effective | bool
   block:
-    - name: Wait for LibreNMS dispatcher service to be active
-      service_facts:
-      register: librenms_dispatcher_active_check
-      retries: "{{ librenms_dispatcher_registration_retries | int }}"
-      delay: "{{ librenms_dispatcher_registration_delay | int }}"
-      until: >-
-        (
-          librenms_dispatcher_active_check.ansible_facts.services
-          | default({})
-        ).get('librenms.service', {}).get('state', '') == 'running'
-
-    - name: Determine expected LibreNMS dispatcher nodes
-      set_fact:
-        librenms_dispatcher_registration_nodes_effective: >-
-          {{ librenms_dispatcher_registration_nodes }}
-
-    - name: Refresh LibreNMS dispatcher poller registrations
-      community.mysql.mysql_query:
-        login_host: "{{ librenms_db_host_effective }}"
-        login_port: "{{ librenms_db_port }}"
-        login_user: "{{ librenms_db_user }}"
-        login_password: "{{ librenms_db_password }}"
-        login_db: "{{ librenms_db_name }}"
-        query:
-          - >-
-            INSERT INTO `poller_cluster`
-            (`node_id`, `poller_name`, `poller_version`, `poller_groups`,
-            `last_report`, `master`, `poller_frequency`)
-            VALUES
-            ('{{ hostvars[item].librenms_node_id | default(item) | replace("'", "''") }}',
-            '{{ item | replace("'", "''") }}',
-            'librenms-service', '0', NOW(), 0,
-            {{ librenms_dispatcher_poller_frequency | int }})
-            ON DUPLICATE KEY UPDATE
-            `poller_name` = IF(
-              `poller_name` IS NULL OR `poller_name` = '',
-              VALUES(`poller_name`),
-              `poller_name`
-            ),
-            `poller_version` = VALUES(`poller_version`),
-            `poller_groups` = IF(
-              `poller_groups` IS NULL OR `poller_groups` = '',
-              VALUES(`poller_groups`),
-              `poller_groups`
-            ),
-            `poller_frequency` = VALUES(`poller_frequency`),
-            `last_report` = NOW()
-      no_log: true
-      changed_when: false
-      loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
-
-    - name: Verify LibreNMS dispatcher poller registrations are active
-      community.mysql.mysql_query:
-        login_host: "{{ librenms_db_host_effective }}"
-        login_port: "{{ librenms_db_port }}"
-        login_user: "{{ librenms_db_user }}"
-        login_password: "{{ librenms_db_password }}"
-        login_db: "{{ librenms_db_name }}"
-        query:
-          - >-
-            SELECT COUNT(*) AS active_pollers
-            FROM `poller_cluster`
-            WHERE `node_id` =
-            '{{ hostvars[item].librenms_node_id | default(item) | replace("'", "''") }}'
-            AND `last_report` >= DATE_SUB(
-              NOW(),
-              INTERVAL COALESCE(
-                `poller_frequency`,
-                {{ librenms_dispatcher_poller_frequency | int }}
-              ) SECOND
-            )
-      register: librenms_dispatcher_registration_check
-      no_log: true
-      changed_when: false
-      retries: "{{ librenms_dispatcher_registration_retries | int }}"
-      delay: "{{ librenms_dispatcher_registration_delay | int }}"
-      until:
-        - >-
-          (
-            librenms_dispatcher_registration_check.query_result[0][0].active_pollers
-            | default(0)
-            | int
-          ) > 0
-      loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
+    - name: Converge local LibreNMS dispatcher registration state
+      include_tasks: dispatcher_registration.yml
   rescue:
     - name: Capture LibreNMS dispatcher service status
       command:
@@ -2736,3 +2654,14 @@
     - >-
       (librenms_web_probe.status | default(0) | int)
       not in librenms_app_probe_success_statuses
+
+- name: Reconcile final LibreNMS dispatcher validation state after serial app convergence
+  include_tasks: dispatcher_registration.yml
+  vars:
+    librenms_dispatcher_registration_nodes_input: "{{ librenms_dispatcher_registration_nodes }}"
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
+    - inventory_hostname == (ansible_play_hosts_all | last)
