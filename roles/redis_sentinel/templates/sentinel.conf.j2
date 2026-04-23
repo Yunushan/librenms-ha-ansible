@@ -11,7 +11,7 @@ supervised systemd
 pidfile /run/redis/redis-sentinel.pid
 logfile ""
 {% endif %}
-dir /var/lib/redis
+dir {{ librenms_redis_data_dir }}
 
 sentinel monitor {{ librenms_redis_sentinel_service }} {{ redis_master_address }} 6379 {{ librenms_redis_quorum }}
 sentinel auth-pass {{ librenms_redis_sentinel_service }} {{ librenms_redis_password | to_json }}

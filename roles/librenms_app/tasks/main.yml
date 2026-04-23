@@ -2339,7 +2339,7 @@
         argv:
           - systemctl
           - status
-          - librenms-redis-sentinel
+          - "{{ librenms_redis_sentinel_service_name_effective }}"
           - --no-pager
           - -l
       register: librenms_redis_runtime_local_sentinel_status

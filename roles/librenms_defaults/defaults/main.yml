@@ -78,6 +78,9 @@ librenms_galera_clear_joiner_state: true
 librenms_galera_clear_joiner_cache: true
 
 librenms_redis_mode: local
+librenms_redis_runtime_user: redis
+librenms_redis_runtime_group: redis
+librenms_redis_data_dir: /var/lib/redis
 librenms_redis_username: ""
 librenms_redis_password: CHANGE_ME_REDIS_PASSWORD
 librenms_redis_sentinel_password: CHANGE_ME_SENTINEL_PASSWORD
@@ -103,6 +106,22 @@ librenms_redis_sentinel_parallel_syncs: 1
 librenms_redis_sentinel_enforce_configured_master: true
 librenms_redis_sentinel_consensus_retries: 12
 librenms_redis_sentinel_consensus_delay: 5
+librenms_redis_sentinel_custom_service_name: librenms-redis-sentinel
+librenms_redis_sentinel_custom_conf_path: "{{ librenms_redis_data_dir }}/librenms-sentinel.conf"
+librenms_redis_sentinel_service_name_effective: >-
+  {{
+    librenms_redis_sentinel_custom_service_name
+    if ansible_service_mgr == 'systemd'
+    else librenms_redis_sentinel_native_service_name
+  }}
+librenms_redis_sentinel_conf_path_effective: >-
+  {{
+    librenms_redis_sentinel_custom_conf_path
+    if ansible_service_mgr == 'systemd'
+    else librenms_redis_sentinel_conf_path
+  }}
+librenms_redis_sentinel_flushconfig_retries: 6
+librenms_redis_sentinel_flushconfig_delay: 5
 
 librenms_rrd_mode: local
 librenms_gluster_bootstrap_host: "{{ (groups.get('gluster_nodes', [inventory_hostname]) | first) }}"

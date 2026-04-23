@@ -1,11 +1,17 @@
 [Unit]
 Description=LibreNMS Redis Sentinel
-After=network.target {{ librenms_redis_service_name }}.service
+After=network-online.target {{ librenms_redis_service_name }}.service
+Wants=network-online.target
 Requires={{ librenms_redis_service_name }}.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/redis-server {{ librenms_redis_sentinel_conf_path }} --sentinel
+User={{ librenms_redis_runtime_user }}
+Group={{ librenms_redis_runtime_group }}
+WorkingDirectory={{ librenms_redis_data_dir }}
+RuntimeDirectory=redis
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/redis-server {{ librenms_redis_sentinel_conf_path_effective }} --sentinel
 Restart=always
 RestartSec=3
 

@@ -46,12 +46,7 @@
 
 - name: Stop Redis Sentinel
   service:
-    name: >-
-      {{
-        'librenms-redis-sentinel'
-        if ansible_service_mgr == 'systemd' and ansible_os_family != 'Debian'
-        else librenms_redis_sentinel_native_service_name
-      }}
+    name: "{{ librenms_redis_sentinel_service_name_effective }}"
     state: stopped
     enabled: false
   failed_when: false
