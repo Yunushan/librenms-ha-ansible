@@ -131,4 +131,3 @@
   retries: "{{ librenms_redis_runtime_healthcheck_retries | int }}"
   delay: "{{ librenms_redis_runtime_healthcheck_delay | int }}"
   until: librenms_redis_runtime_healthcheck.rc == 0
-
