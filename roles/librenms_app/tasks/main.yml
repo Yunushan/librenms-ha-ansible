@@ -2329,6 +2329,24 @@
       changed_when: false
       failed_when: false
 
+    - name: Capture LibreNMS dispatcher table state
+      community.mysql.mysql_query:
+        login_host: "{{ librenms_db_host_effective }}"
+        login_port: "{{ librenms_db_port }}"
+        login_user: "{{ librenms_db_user }}"
+        login_password: "{{ librenms_db_password }}"
+        login_db: "{{ librenms_db_name }}"
+        query:
+          - >-
+            SELECT `id`, `node_id`, `poller_name`, `poller_version`,
+            `poller_groups`, `last_report`, `master`, `poller_frequency`
+            FROM `poller_cluster`
+            ORDER BY `node_id`
+      register: librenms_dispatcher_registration_table_state
+      changed_when: false
+      failed_when: false
+      no_log: true
+
     - name: Fail with LibreNMS dispatcher registration diagnostics
       fail:
         msg: |-
@@ -2343,6 +2361,9 @@
 
           librenms.log:
           {{ librenms_dispatcher_registration_app_log.stdout | default('') }}
+
+          poller_cluster:
+          {{ librenms_dispatcher_registration_table_state.query_result | default([]) }}
 
 - name: Queue PHP-FPM restart after final runtime validation
   debug:
