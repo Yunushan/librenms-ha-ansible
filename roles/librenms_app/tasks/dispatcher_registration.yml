@@ -18,13 +18,29 @@
         | default(librenms_dispatcher_registration_nodes)
       }}
 
+- name: Initialize expected LibreNMS dispatcher node SQL entries
+  set_fact:
+    librenms_dispatcher_registration_node_ids_sql_entries: []
+
+- name: Collect expected LibreNMS dispatcher node SQL entries
+  set_fact:
+    librenms_dispatcher_registration_node_ids_sql_entries: >-
+      {{
+        librenms_dispatcher_registration_node_ids_sql_entries
+        + [
+            "'" ~ (
+              hostvars[item].librenms_node_id
+              | default(item)
+              | replace("'", "''")
+            ) ~ "'"
+          ]
+      }}
+  loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
+
 - name: Build expected LibreNMS dispatcher node SQL list
   set_fact:
     librenms_dispatcher_registration_node_ids_sql: >-
-      {% for host in librenms_dispatcher_registration_nodes_effective -%}
-      '{{ hostvars[host].librenms_node_id | default(host) | replace("'", "''") }}'
-      {%- if not loop.last %}, {% endif %}
-      {%- endfor %}
+      {{ librenms_dispatcher_registration_node_ids_sql_entries | join(', ') }}
 
 - name: Prune unmanaged LibreNMS dispatcher stats rows
   community.mysql.mysql_query:
