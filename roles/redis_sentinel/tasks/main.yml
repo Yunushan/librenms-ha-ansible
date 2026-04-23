@@ -392,11 +392,22 @@
       librenms_redis_sentinel_master_port_effective }} on {{ inventory_hostname }}.
   when: librenms_redis_mode == 'sentinel'
 
-- name: Query all Redis Sentinels for a shared master endpoint
+- name: Determine Redis Sentinel consensus query nodes
+  set_fact:
+    librenms_redis_sentinel_consensus_query_nodes: >-
+      {{
+        librenms_active_redis_nodes
+        | intersect(ansible_play_hosts)
+      }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+
+- name: Query reachable Redis Sentinels for a shared master endpoint
   no_log: true
   command: >-
     redis-cli
-    -h {{ hostvars[item].ansible_host | default(item) | quote }}
+    -h 127.0.0.1
     -p 26379
     --connect-timeout {{ librenms_redis_sentinel_timeout | quote }}
     {% if librenms_redis_sentinel_username | length > 0 %}
@@ -405,7 +416,9 @@
     SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }}
   environment:
     REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
-  loop: "{{ librenms_active_redis_nodes }}"
+  loop: "{{ librenms_redis_sentinel_consensus_query_nodes }}"
+  delegate_to: "{{ item }}"
+  ignore_unreachable: true
   register: librenms_redis_sentinel_consensus_queries
   changed_when: false
   failed_when: false
@@ -416,6 +429,7 @@
 - name: Initialize Redis Sentinel consensus reports
   set_fact:
     librenms_redis_sentinel_consensus_master_reports: []
+    librenms_redis_sentinel_consensus_query_failures: []
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
@@ -434,6 +448,31 @@
     - item.rc == 0
     - (item.stdout_lines | default([]) | length) >= 2
 
+- name: Collect Redis Sentinel consensus query failures
+  set_fact:
+    librenms_redis_sentinel_consensus_query_failures: >-
+      {{
+        librenms_redis_sentinel_consensus_query_failures
+        + [
+          {
+            'host': item.item | default('unknown'),
+            'rc': item.rc | default('unreachable'),
+            'stdout': item.stdout | default(''),
+            'stderr': item.stderr | default(''),
+            'msg': item.msg | default('')
+          }
+        ]
+      }}
+  loop: "{{ librenms_redis_sentinel_consensus_queries.results | default([]) }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - >-
+      (
+        (item.rc | default(1)) != 0
+        or (item.stdout_lines | default([]) | length) < 2
+      )
+
 - name: Determine Redis Sentinel consensus master
   set_fact:
     librenms_redis_sentinel_consensus_masters: >-
@@ -451,7 +490,7 @@
     that:
       - >-
         (librenms_redis_sentinel_consensus_master_reports | length)
-        >= ([librenms_redis_quorum | int, librenms_active_redis_nodes | length] | min)
+        >= (librenms_redis_quorum | int)
       - librenms_redis_sentinel_consensus_masters | length == 1
       - librenms_redis_sentinel_consensus_masters | first | length > 0
       - "':' in (librenms_redis_sentinel_consensus_masters | first)"
@@ -460,6 +499,10 @@
       {{ librenms_redis_sentinel_service }}, or too few Sentinels were
       reachable for quorum. Reported masters:
       {{ librenms_redis_sentinel_consensus_master_reports | default([]) | join(', ') }}.
+      Query nodes:
+      {{ librenms_redis_sentinel_consensus_query_nodes | default([]) | join(', ') }}.
+      Query failures:
+      {{ librenms_redis_sentinel_consensus_query_failures | default([]) }}.
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
