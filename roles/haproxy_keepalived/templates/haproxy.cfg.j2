@@ -121,7 +121,8 @@ backend librenms_rrdcached_nodes
   hostvars[host].librenms_rrdcached_network_bind_address
   | default(hostvars[host].ansible_host | default(host))
 %}
-    server {{ host }} {{ rrdcached_host }}:{{ librenms_rrdcached_bind_port }} check{% if not loop.first %} backup{% endif %}
+{% set rrdcached_server_options = 'check' ~ (' backup' if not loop.first else '') %}
+    server {{ host }} {{ rrdcached_host }}:{{ librenms_rrdcached_bind_port }} {{ rrdcached_server_options }}
 {% endfor %}
 {% endif %}
 
