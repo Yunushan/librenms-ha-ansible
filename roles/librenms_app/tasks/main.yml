@@ -201,13 +201,6 @@
         )
       }}
 
-- name: Normalize effective runtime DB host for Galera
-  set_fact:
-    librenms_db_host_effective: "{{ librenms_db_host_install_effective }}"
-  when:
-    - librenms_db_mode == 'galera'
-    - librenms_db_host | length == 0
-
 - name: Determine effective Redis host
   set_fact:
     librenms_redis_host_effective: >-
@@ -231,8 +224,27 @@
   no_log: true
   set_fact:
     librenms_redis_sentinel_hosts_effective: >-
+      {%- set sentinel_nodes =
+        (
+          [inventory_hostname]
+          if inventory_hostname in librenms_active_redis_nodes
+          else []
+        )
+        + (
+          librenms_active_redis_nodes
+          | difference([inventory_hostname, librenms_redis_master_host])
+        )
+        + (
+          [librenms_redis_master_host]
+          if (
+            librenms_redis_master_host in librenms_active_redis_nodes
+            and librenms_redis_master_host != inventory_hostname
+          )
+          else []
+        )
+      -%}
       {%- set ns = namespace(urls=[]) -%}
-      {%- for host in librenms_active_redis_nodes -%}
+      {%- for host in sentinel_nodes -%}
       {%- set ns.urls = ns.urls + [
         'redis://'
         ~ (hostvars[host].ansible_host | default(host))
@@ -250,7 +262,26 @@
 - name: Determine effective Redis Sentinel poller list
   set_fact:
     librenms_redis_sentinel_effective: >-
-      {%- for host in librenms_active_redis_nodes -%}
+      {%- set sentinel_nodes =
+        (
+          [inventory_hostname]
+          if inventory_hostname in librenms_active_redis_nodes
+          else []
+        )
+        + (
+          librenms_active_redis_nodes
+          | difference([inventory_hostname, librenms_redis_master_host])
+        )
+        + (
+          [librenms_redis_master_host]
+          if (
+            librenms_redis_master_host in librenms_active_redis_nodes
+            and librenms_redis_master_host != inventory_hostname
+          )
+          else []
+        )
+      -%}
+      {%- for host in sentinel_nodes -%}
       {{ hostvars[host].ansible_host | default(host) }}:26379{%- if not loop.last -%},{%- endif -%}
       {%- endfor -%}
 

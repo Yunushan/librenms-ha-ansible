@@ -398,6 +398,7 @@
     redis-cli
     -h {{ hostvars[item].ansible_host | default(item) | quote }}
     -p 26379
+    --connect-timeout {{ librenms_redis_sentinel_timeout | quote }}
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -408,22 +409,36 @@
   register: librenms_redis_sentinel_consensus_queries
   changed_when: false
   failed_when: false
-  retries: "{{ librenms_redis_sentinel_consensus_retries | int }}"
-  delay: "{{ librenms_redis_sentinel_consensus_delay | int }}"
-  until:
-    - librenms_redis_sentinel_consensus_queries.rc == 0
-    - (librenms_redis_sentinel_consensus_queries.stdout_lines | default([]) | length) >= 2
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
+
+- name: Initialize Redis Sentinel consensus reports
+  set_fact:
+    librenms_redis_sentinel_consensus_master_reports: []
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+
+- name: Collect reachable Redis Sentinel consensus reports
+  set_fact:
+    librenms_redis_sentinel_consensus_master_reports: >-
+      {{
+        librenms_redis_sentinel_consensus_master_reports
+        + [item.stdout_lines[0] ~ ':' ~ item.stdout_lines[1]]
+      }}
+  loop: "{{ librenms_redis_sentinel_consensus_queries.results | default([]) }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - item.rc == 0
+    - (item.stdout_lines | default([]) | length) >= 2
 
 - name: Determine Redis Sentinel consensus master
   set_fact:
     librenms_redis_sentinel_consensus_masters: >-
       {{
-        librenms_redis_sentinel_consensus_queries.results
-        | map(attribute='stdout_lines')
-        | map('join', ':')
+        librenms_redis_sentinel_consensus_master_reports
         | unique
         | list
       }}
@@ -434,13 +449,17 @@
 - name: Verify Redis Sentinels agree on one master
   assert:
     that:
+      - >-
+        (librenms_redis_sentinel_consensus_master_reports | length)
+        >= ([librenms_redis_quorum | int, librenms_active_redis_nodes | length] | min)
       - librenms_redis_sentinel_consensus_masters | length == 1
       - librenms_redis_sentinel_consensus_masters | first | length > 0
       - "':' in (librenms_redis_sentinel_consensus_masters | first)"
     fail_msg: >-
       Redis Sentinels do not agree on the current master for
-      {{ librenms_redis_sentinel_service }}. Reported masters:
-      {{ librenms_redis_sentinel_consensus_masters | default([]) | join(', ') }}.
+      {{ librenms_redis_sentinel_service }}, or too few Sentinels were
+      reachable for quorum. Reported masters:
+      {{ librenms_redis_sentinel_consensus_master_reports | default([]) | join(', ') }}.
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)

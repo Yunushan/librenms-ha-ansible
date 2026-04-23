@@ -13,20 +13,70 @@
     - librenms_manage_dispatcher | bool
     - ansible_service_mgr == 'systemd'
 
-- name: Verify configured Redis Sentinel TCP endpoints are reachable
+- name: Verify Redis Sentinel quorum TCP endpoints are reachable
+  command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json
+        import os
+        import socket
+
+        endpoints = []
+        for entry in os.environ["LIBRENMS_SENTINEL_ENDPOINTS"].split(","):
+            host, port = entry.rsplit(":", 1)
+            endpoints.append((host, int(port)))
+
+        if not endpoints:
+            raise RuntimeError("No Redis Sentinel endpoints are configured.")
+
+        connect_timeout = float(os.environ["LIBRENMS_CONNECT_TIMEOUT"])
+        quorum = int(os.environ["LIBRENMS_SENTINEL_QUORUM"])
+        required = min(max(quorum, 1), len(endpoints))
+        reachable = []
+        failures = {}
+
+        for host, port in endpoints:
+            endpoint = f"{host}:{port}"
+            try:
+                with socket.create_connection((host, port), timeout=connect_timeout):
+                    reachable.append(endpoint)
+            except OSError as exc:
+                failures[endpoint] = str(exc)
+
+        if len(reachable) < required:
+            raise RuntimeError(
+                "Redis Sentinel quorum is not reachable: "
+                + json.dumps(
+                    {
+                        "required": required,
+                        "reachable": reachable,
+                        "failures": failures,
+                    },
+                    sort_keys=True,
+                )
+            )
+
+        print(
+            json.dumps(
+                {
+                    "required": required,
+                    "reachable": reachable,
+                    "failures": failures,
+                },
+                sort_keys=True,
+            )
+        )
+  environment:
+    LIBRENMS_SENTINEL_ENDPOINTS: "{{ librenms_redis_sentinel_effective }}"
+    LIBRENMS_SENTINEL_QUORUM: "{{ librenms_redis_quorum }}"
+    LIBRENMS_CONNECT_TIMEOUT: "{{ librenms_redis_runtime_healthcheck_connect_timeout }}"
   register: librenms_redis_runtime_sentinel_tcp_check
   retries: "{{ librenms_redis_runtime_healthcheck_retries | int }}"
   delay: "{{ librenms_redis_runtime_healthcheck_delay | int }}"
-  wait_for:
-    host: "{{ hostvars[item].ansible_host | default(item) }}"
-    port: 26379
-    timeout: "{{ librenms_redis_runtime_healthcheck_timeout | int }}"
-    connect_timeout: "{{ librenms_redis_runtime_healthcheck_connect_timeout | int }}"
   changed_when: false
-  loop: "{{ librenms_active_redis_nodes }}"
-  loop_control:
-    label: "{{ hostvars[item].ansible_host | default(item) }}:26379"
-  until: librenms_redis_runtime_sentinel_tcp_check is succeeded
+  until: librenms_redis_runtime_sentinel_tcp_check.rc == 0
 
 - name: Verify LibreNMS Redis Sentinel runtime read and write path
   become: true

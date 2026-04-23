@@ -452,7 +452,14 @@ librenms_db_host: ""
 librenms_db_name: librenms
 librenms_db_user: librenms
 librenms_db_password: CHANGE_ME
+librenms_runtime_db_prefer_local_galera: false
 ```
+
+In Galera mode, leave `librenms_db_host` empty when you want LibreNMS to use the
+HAProxy/VIP database frontend at runtime. The playbook still uses a direct live
+Galera member for install-time migrations and setup tasks. Set
+`librenms_runtime_db_prefer_local_galera: true` only if each web node should
+depend on its own local MariaDB process.
 
 ### Redis mode
 
@@ -506,6 +513,7 @@ removed from rotation after roughly four seconds.
 
 ```yaml
 librenms_redis_timeout: 5
+librenms_redis_sentinel_timeout: 5
 librenms_redis_sentinel_down_after_milliseconds: 5000
 librenms_redis_sentinel_failover_timeout: 30000
 librenms_redis_sentinel_parallel_syncs: 1

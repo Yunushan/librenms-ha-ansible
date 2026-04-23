@@ -59,7 +59,7 @@ librenms_db_bind_address: 0.0.0.0
 librenms_mariadb_log_warnings: 1
 librenms_db_user_host: "%"
 librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname]) | first) }}"
-librenms_runtime_db_prefer_local_galera: true
+librenms_runtime_db_prefer_local_galera: false
 librenms_runtime_db_wait_timeout: 120
 librenms_runtime_db_wait_retries: 3
 librenms_runtime_db_wait_delay: 5
@@ -105,7 +105,7 @@ librenms_redis_db: 0
 librenms_redis_cache_db: 1
 librenms_redis_session_db: 0
 librenms_redis_timeout: 5
-librenms_redis_sentinel_timeout: 60
+librenms_redis_sentinel_timeout: 5
 librenms_redis_timeout_effective: >-
   {{
     librenms_redis_sentinel_timeout
