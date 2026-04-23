@@ -1,0 +1,11 @@
+[Unit]
+After=network-online.target {{ librenms_redis_service_name }}.service
+Wants=network-online.target
+Requires={{ librenms_redis_service_name }}.service
+
+[Service]
+ExecStart=
+ExecStart={{ librenms_redis_server_binary }} {{ librenms_redis_sentinel_conf_path_effective }} --sentinel
+WorkingDirectory={{ librenms_redis_data_dir }}
+Restart=always
+RestartSec=3

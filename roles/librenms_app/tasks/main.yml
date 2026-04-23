@@ -381,7 +381,7 @@
   set_fact:
     librenms_schema_fix_host_effective: >-
       {{
-        librenms_db_bootstrap_host
+        librenms_runtime_config_node_effective
         if librenms_db_mode in ['local', 'galera']
         else (
           groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
@@ -953,6 +953,24 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
 
+- name: Normalize LibreNMS schema column query results
+  set_fact:
+    librenms_notifications_datetime_schema: >-
+      {{
+        (librenms_schema_columns.query_result[-2] | default([]))
+        | first
+        | default({})
+      }}
+    librenms_users_created_at_schema: >-
+      {{
+        (librenms_schema_columns.query_result[-1] | default([]))
+        | first
+        | default({})
+      }}
+  when:
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
 - name: Normalize LibreNMS notifications.datetime schema default
   community.mysql.mysql_query:
     login_host: "{{ librenms_db_host_install_effective }}"
@@ -969,9 +987,9 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
     - >-
-      (librenms_schema_columns.query_result[-2][0].data_type | default('') | lower) != 'timestamp'
-      or (librenms_schema_columns.query_result[-2][0].is_nullable | default('') | upper) != 'NO'
-      or (librenms_schema_columns.query_result[-2][0].column_default | default('')) != '1970-01-02 00:00:00'
+      (librenms_notifications_datetime_schema.data_type | default('') | lower) != 'timestamp'
+      or (librenms_notifications_datetime_schema.is_nullable | default('') | upper) != 'NO'
+      or (librenms_notifications_datetime_schema.column_default | default('')) != '1970-01-02 00:00:00'
 
 - name: Normalize LibreNMS users.created_at schema default
   community.mysql.mysql_query:
@@ -989,9 +1007,9 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
     - >-
-      (librenms_schema_columns.query_result[-1][0].data_type | default('') | lower) != 'timestamp'
-      or (librenms_schema_columns.query_result[-1][0].is_nullable | default('') | upper) != 'NO'
-      or (librenms_schema_columns.query_result[-1][0].column_default | default('')) != '1970-01-02 00:00:01'
+      (librenms_users_created_at_schema.data_type | default('') | lower) != 'timestamp'
+      or (librenms_users_created_at_schema.is_nullable | default('') | upper) != 'NO'
+      or (librenms_users_created_at_schema.column_default | default('')) != '1970-01-02 00:00:01'
 
 - name: Check if the initial LibreNMS admin user already exists
   community.mysql.mysql_query:

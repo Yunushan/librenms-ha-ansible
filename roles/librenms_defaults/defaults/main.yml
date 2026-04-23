@@ -130,18 +130,17 @@ librenms_redis_config_rewrite_retries: 6
 librenms_redis_config_rewrite_delay: 5
 librenms_redis_sentinel_custom_service_name: librenms-redis-sentinel
 librenms_redis_sentinel_custom_conf_path: "{{ librenms_redis_data_dir }}/librenms-sentinel.conf"
-librenms_redis_sentinel_service_name_effective: >-
-  {{
-    librenms_redis_sentinel_custom_service_name
-    if ansible_service_mgr == 'systemd'
-    else librenms_redis_sentinel_native_service_name
-  }}
+librenms_redis_sentinel_service_name_effective: "{{ librenms_redis_sentinel_native_service_name }}"
 librenms_redis_sentinel_conf_path_effective: >-
   {{
     librenms_redis_sentinel_custom_conf_path
     if ansible_service_mgr == 'systemd'
     else librenms_redis_sentinel_conf_path
   }}
+librenms_redis_sentinel_systemd_override_dir: >-
+  /etc/systemd/system/{{ librenms_redis_sentinel_native_service_name }}.service.d
+librenms_redis_sentinel_systemd_override_path: >-
+  {{ librenms_redis_sentinel_systemd_override_dir }}/librenms-ha.conf
 librenms_redis_sentinel_flushconfig_retries: 6
 librenms_redis_sentinel_flushconfig_delay: 5
 

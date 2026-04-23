@@ -221,13 +221,42 @@
   notify: Restart Redis Sentinel
   when: librenms_redis_mode == 'sentinel'
 
-- name: Deploy systemd unit for Redis Sentinel
+- name: Ensure Redis Sentinel native systemd override directory exists
+  file:
+    path: "{{ librenms_redis_sentinel_systemd_override_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy Redis Sentinel native systemd override
   template:
-    src: librenms-redis-sentinel.service.j2
-    dest: /etc/systemd/system/librenms-redis-sentinel.service
+    src: librenms-redis-sentinel-override.conf.j2
+    dest: "{{ librenms_redis_sentinel_systemd_override_path }}"
     owner: root
     group: root
     mode: "0644"
+  notify: Restart Redis Sentinel
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Stop legacy LibreNMS Redis Sentinel custom service before native takeover
+  service:
+    name: "{{ librenms_redis_sentinel_custom_service_name }}"
+    state: stopped
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Remove legacy LibreNMS Redis Sentinel custom unit
+  file:
+    path: "/etc/systemd/system/{{ librenms_redis_sentinel_custom_service_name }}.service"
+    state: absent
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
@@ -239,9 +268,9 @@
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
 
-- name: Stop and disable Redis Sentinel native service when managed systemd unit is used
+- name: Stop and disable legacy LibreNMS Redis Sentinel custom service
   service:
-    name: "{{ librenms_redis_sentinel_native_service_name }}"
+    name: "{{ librenms_redis_sentinel_custom_service_name }}"
     state: stopped
     enabled: false
   failed_when: false

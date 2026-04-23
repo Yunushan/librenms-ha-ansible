@@ -529,12 +529,12 @@ for slower networks.
 LibreNMS when Sentinel mode is enabled. Keep it longer than blocking queue reads
 so dispatcher workers do not time out while waiting on an empty Redis queue.
 
-On systemd hosts, the role runs Sentinel as `librenms-redis-sentinel.service`
-and disables the distro-native `redis-sentinel.service`. Check the managed unit
-when testing failover:
+On systemd hosts, the role runs Sentinel through the distro-native
+`redis-sentinel.service` with a LibreNMS drop-in that points the unit at a
+writable Sentinel config. Check that unit when testing failover:
 
 ```bash
-systemctl status librenms-redis-sentinel
+systemctl status redis-sentinel
 REDISCLI_AUTH='<sentinel password>' redis-cli -h 127.0.0.1 -p 26379 SENTINEL get-master-addr-by-name mymaster
 ```
 
