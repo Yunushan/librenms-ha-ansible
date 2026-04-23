@@ -409,7 +409,6 @@
     redis-cli
     -h 127.0.0.1
     -p 26379
-    --connect-timeout {{ librenms_redis_sentinel_timeout | quote }}
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
