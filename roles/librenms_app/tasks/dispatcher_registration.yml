@@ -21,10 +21,10 @@
 - name: Build expected LibreNMS dispatcher node SQL list
   set_fact:
     librenms_dispatcher_registration_node_ids_sql: >-
-      {%- for host in librenms_dispatcher_registration_nodes_effective -%}
+      {% for host in librenms_dispatcher_registration_nodes_effective -%}
       '{{ hostvars[host].librenms_node_id | default(host) | replace("'", "''") }}'
-      {%- if not loop.last -%}, {% endif -%}
-      {%- endfor -%}
+      {%- if not loop.last %}, {% endif %}
+      {%- endfor %}
 
 - name: Prune unmanaged LibreNMS dispatcher stats rows
   community.mysql.mysql_query:
