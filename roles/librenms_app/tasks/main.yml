@@ -837,11 +837,10 @@
 
 - name: Read LibreNMS schema column definitions from database
   community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_user: "{{ 'root' if librenms_db_mode in ['local', 'galera'] else librenms_db_user }}"
-    login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
+    login_host: "{{ librenms_db_host_install_effective }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
@@ -864,24 +863,23 @@
   register: librenms_schema_columns
   become: true
   changed_when: false
-  no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
+  no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS notifications.datetime schema default
   community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_user: "{{ 'root' if librenms_db_mode in ['local', 'galera'] else librenms_db_user }}"
-    login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
+    login_host: "{{ librenms_db_host_install_effective }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
       - "ALTER TABLE `notifications` CHANGE `datetime` `datetime` timestamp NOT NULL DEFAULT '1970-01-02 00:00:00'"
   become: true
-  no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
+  no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
@@ -892,17 +890,16 @@
 
 - name: Normalize LibreNMS users.created_at schema default
   community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_port: "{{ librenms_db_port if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_user: "{{ 'root' if librenms_db_mode in ['local', 'galera'] else librenms_db_user }}"
-    login_password: "{{ librenms_db_password if librenms_db_mode not in ['local', 'galera'] else omit }}"
-    login_unix_socket: "{{ librenms_mariadb_socket if librenms_db_mode in ['local', 'galera'] else omit }}"
+    login_host: "{{ librenms_db_host_install_effective }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
     login_db: "{{ librenms_db_name }}"
     query:
       - "SET TIME_ZONE='+00:00'"
       - "ALTER TABLE `users` CHANGE `created_at` `created_at` timestamp NOT NULL DEFAULT '1970-01-02 00:00:01'"
   become: true
-  no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
+  no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
