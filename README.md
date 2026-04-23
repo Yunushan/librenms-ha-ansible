@@ -513,7 +513,7 @@ removed from rotation after roughly four seconds.
 
 ```yaml
 librenms_redis_timeout: 5
-librenms_redis_sentinel_timeout: 5
+librenms_redis_sentinel_timeout: 30
 librenms_redis_sentinel_down_after_milliseconds: 5000
 librenms_redis_sentinel_failover_timeout: 30000
 librenms_redis_sentinel_parallel_syncs: 1
@@ -524,6 +524,10 @@ failure and promote a replica. During that window, UI actions can feel slow
 because cache, lock, and session writes are waiting on Redis failover. These
 defaults favor faster lab and LAN cluster recovery while still being adjustable
 for slower networks.
+
+`librenms_redis_sentinel_timeout` is also the Redis socket timeout used by
+LibreNMS when Sentinel mode is enabled. Keep it longer than blocking queue reads
+so dispatcher workers do not time out while waiting on an empty Redis queue.
 
 On systemd hosts, the role runs Sentinel as `librenms-redis-sentinel.service`
 and disables the distro-native `redis-sentinel.service`. Check the managed unit
