@@ -90,6 +90,12 @@ librenms_redis_db: 0
 librenms_redis_cache_db: 1
 librenms_redis_session_db: 0
 librenms_redis_timeout: 5
+librenms_redis_runtime_healthcheck_enabled: "{{ librenms_redis_mode == 'sentinel' }}"
+librenms_redis_runtime_healthcheck_retries: 6
+librenms_redis_runtime_healthcheck_delay: 5
+librenms_redis_runtime_healthcheck_timeout: 5
+librenms_redis_runtime_healthcheck_connect_timeout: 3
+librenms_redis_runtime_healthcheck_key_ttl: 30
 librenms_redis_quorum: 2
 librenms_redis_sentinel_down_after_milliseconds: 5000
 librenms_redis_sentinel_failover_timeout: 30000

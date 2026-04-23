@@ -1,0 +1,134 @@
+---
+- name: Wait for LibreNMS dispatcher service before Redis runtime validation
+  register: librenms_redis_runtime_dispatcher_active_check
+  retries: "{{ librenms_redis_runtime_healthcheck_retries | int }}"
+  delay: "{{ librenms_redis_runtime_healthcheck_delay | int }}"
+  service_facts:
+  until: >-
+    (
+      librenms_redis_runtime_dispatcher_active_check.ansible_facts.services
+      | default({})
+    ).get('librenms.service', {}).get('state', '') == 'running'
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Verify configured Redis Sentinel TCP endpoints are reachable
+  register: librenms_redis_runtime_sentinel_tcp_check
+  retries: "{{ librenms_redis_runtime_healthcheck_retries | int }}"
+  delay: "{{ librenms_redis_runtime_healthcheck_delay | int }}"
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: 26379
+    timeout: "{{ librenms_redis_runtime_healthcheck_timeout | int }}"
+    connect_timeout: "{{ librenms_redis_runtime_healthcheck_connect_timeout | int }}"
+  changed_when: false
+  loop: "{{ librenms_active_redis_nodes }}"
+  loop_control:
+    label: "{{ hostvars[item].ansible_host | default(item) }}:26379"
+  until: librenms_redis_runtime_sentinel_tcp_check is succeeded
+
+- name: Verify LibreNMS Redis Sentinel runtime read and write path
+  become: true
+  become_user: "{{ librenms_user }}"
+  command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json
+        import os
+        import uuid
+        from redis.sentinel import Sentinel
+
+        sentinel_endpoints = []
+        for entry in os.environ["LIBRENMS_SENTINEL_ENDPOINTS"].split(","):
+            host, port = entry.split(":", 1)
+            sentinel_endpoints.append((host, int(port)))
+
+        timeout = float(os.environ["LIBRENMS_REDIS_TIMEOUT"])
+        sentinel_kwargs = {"socket_timeout": timeout}
+        sentinel_password = os.environ.get("LIBRENMS_SENTINEL_PASSWORD", "")
+        sentinel_username = os.environ.get("LIBRENMS_SENTINEL_USERNAME", "")
+        redis_password = os.environ.get("LIBRENMS_REDIS_PASSWORD", "")
+        redis_username = os.environ.get("LIBRENMS_REDIS_USERNAME", "")
+
+        if sentinel_password:
+            sentinel_kwargs["password"] = sentinel_password
+        if sentinel_username:
+            sentinel_kwargs["username"] = sentinel_username
+
+        sentinel = Sentinel(
+            sentinel_endpoints,
+            socket_timeout=timeout,
+            sentinel_kwargs=sentinel_kwargs,
+        )
+
+        service_name = os.environ["LIBRENMS_SENTINEL_SERVICE"]
+        node_id = os.environ["LIBRENMS_NODE_ID"]
+        redis_kwargs = {
+            "socket_timeout": timeout,
+            "db": int(os.environ["LIBRENMS_REDIS_DB"]),
+            "decode_responses": True,
+        }
+        if redis_password:
+            redis_kwargs["password"] = redis_password
+        if redis_username:
+            redis_kwargs["username"] = redis_username
+
+        master_host, master_port = sentinel.discover_master(service_name)
+        master = sentinel.master_for(service_name, **redis_kwargs)
+
+        health_key = (
+            "librenms:ansible:redis-runtime-health:"
+            f"{node_id}:{uuid.uuid4().hex}"
+        )
+        queue_key = f"{health_key}:queue"
+        value = uuid.uuid4().hex
+
+        if master.ping() is not True:
+            raise RuntimeError("Redis master ping failed.")
+
+        master.setex(
+            health_key,
+            int(os.environ["LIBRENMS_HEALTHCHECK_TTL"]),
+            value,
+        )
+        if master.get(health_key) != value:
+            raise RuntimeError("Redis key readback failed.")
+
+        master.delete(queue_key)
+        if master.rpush(queue_key, value) != 1:
+            raise RuntimeError("Redis queue write check failed.")
+        if master.lpop(queue_key) != value:
+            raise RuntimeError("Redis queue readback failed.")
+
+        master.delete(queue_key)
+        master.delete(health_key)
+
+        print(
+            json.dumps(
+                {
+                    "node_id": node_id,
+                    "master_host": master_host,
+                    "master_port": master_port,
+                }
+            )
+        )
+  changed_when: false
+  environment:
+    LIBRENMS_SENTINEL_ENDPOINTS: "{{ librenms_redis_sentinel_effective }}"
+    LIBRENMS_SENTINEL_SERVICE: "{{ librenms_redis_sentinel_service }}"
+    LIBRENMS_SENTINEL_USERNAME: "{{ librenms_redis_sentinel_username }}"
+    LIBRENMS_SENTINEL_PASSWORD: "{{ librenms_redis_sentinel_password }}"
+    LIBRENMS_REDIS_USERNAME: "{{ librenms_redis_username }}"
+    LIBRENMS_REDIS_PASSWORD: "{{ librenms_redis_password }}"
+    LIBRENMS_REDIS_DB: "{{ librenms_redis_db }}"
+    LIBRENMS_REDIS_TIMEOUT: "{{ librenms_redis_runtime_healthcheck_timeout }}"
+    LIBRENMS_NODE_ID: "{{ librenms_node_id | default(inventory_hostname) }}"
+    LIBRENMS_HEALTHCHECK_TTL: "{{ librenms_redis_runtime_healthcheck_key_ttl }}"
+  register: librenms_redis_runtime_healthcheck
+  retries: "{{ librenms_redis_runtime_healthcheck_retries | int }}"
+  delay: "{{ librenms_redis_runtime_healthcheck_delay | int }}"
+  until: librenms_redis_runtime_healthcheck.rc == 0
+

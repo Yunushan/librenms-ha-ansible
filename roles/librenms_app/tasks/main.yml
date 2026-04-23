@@ -2283,6 +2283,114 @@
     - ansible_service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
+- name: Verify final LibreNMS Redis Sentinel runtime health
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_bootstrap_completed_effective | bool
+    - librenms_redis_runtime_healthcheck_enabled | bool
+  block:
+    - name: Validate final LibreNMS Redis Sentinel runtime connectivity
+      include_tasks: redis_runtime_health.yml
+  rescue:
+    - name: Capture LibreNMS dispatcher service status after Redis runtime health failure
+      command:
+        argv:
+          - systemctl
+          - status
+          - librenms.service
+          - --no-pager
+          - -l
+      register: librenms_redis_runtime_dispatcher_status
+      changed_when: false
+      failed_when: false
+      when: ansible_service_mgr == 'systemd'
+
+    - name: Capture LibreNMS dispatcher journal after Redis runtime health failure
+      command:
+        argv:
+          - journalctl
+          - -u
+          - librenms.service
+          - -n
+          - "120"
+          - --no-pager
+      register: librenms_redis_runtime_dispatcher_journal
+      changed_when: false
+      failed_when: false
+      when: ansible_service_mgr == 'systemd'
+
+    - name: Capture local Redis service status after Redis runtime health failure
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_redis_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_redis_runtime_local_redis_status
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_service_mgr == 'systemd'
+        - inventory_hostname in librenms_active_redis_nodes
+
+    - name: Capture local Redis Sentinel service status after Redis runtime health failure
+      command:
+        argv:
+          - systemctl
+          - status
+          - librenms-redis-sentinel
+          - --no-pager
+          - -l
+      register: librenms_redis_runtime_local_sentinel_status
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_service_mgr == 'systemd'
+        - inventory_hostname in librenms_active_redis_nodes
+
+    - name: Capture listening TCP sockets after Redis runtime health failure
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: librenms_redis_runtime_tcp_listeners
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with LibreNMS Redis Sentinel runtime diagnostics
+      fail:
+        msg: |-
+          LibreNMS Redis Sentinel runtime health validation failed on {{ inventory_hostname }}.
+
+          Sentinel endpoints:
+          {{ librenms_redis_sentinel_effective }}
+
+          Health check result:
+          rc={{ librenms_redis_runtime_healthcheck.rc | default('unknown') }}
+          stdout={{ librenms_redis_runtime_healthcheck.stdout | default('') }}
+          stderr={{ librenms_redis_runtime_healthcheck.stderr | default('') }}
+
+          Dispatcher status:
+          {{ librenms_redis_runtime_dispatcher_status.stdout | default('') }}
+          {{ librenms_redis_runtime_dispatcher_status.stderr | default('') }}
+
+          Dispatcher journal:
+          {{ librenms_redis_runtime_dispatcher_journal.stdout | default('') }}
+          {{ librenms_redis_runtime_dispatcher_journal.stderr | default('') }}
+
+          Local Redis status:
+          {{ librenms_redis_runtime_local_redis_status.stdout | default('') }}
+          {{ librenms_redis_runtime_local_redis_status.stderr | default('') }}
+
+          Local Redis Sentinel status:
+          {{ librenms_redis_runtime_local_sentinel_status.stdout | default('') }}
+          {{ librenms_redis_runtime_local_sentinel_status.stderr | default('') }}
+
+          TCP listeners:
+          {{ librenms_redis_runtime_tcp_listeners.stdout | default('') }}
+          {{ librenms_redis_runtime_tcp_listeners.stderr | default('') }}
+
 - name: Verify LibreNMS dispatcher poller registration
   when:
     - librenms_manage_dispatcher | bool
