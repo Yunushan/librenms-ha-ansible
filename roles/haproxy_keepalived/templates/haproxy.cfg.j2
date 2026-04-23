@@ -118,7 +118,8 @@ backend librenms_rrdcached_nodes
     option tcp-check
 {% for host in librenms_haproxy_rrdcached_backend_nodes %}
 {% set rrdcached_host =
-  hostvars[host].librenms_rrdcached_network_bind_address
+  hostvars[host].librenms_rrdcached_network_bind_address_effective
+  | default(hostvars[host].librenms_rrdcached_network_bind_address)
   | default(hostvars[host].ansible_host | default(host))
 %}
 {% set rrdcached_server_options = 'check' ~ (' backup' if not loop.first else '') %}

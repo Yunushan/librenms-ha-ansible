@@ -274,6 +274,21 @@
         or inventory_hostname == librenms_primary_node_effective
       }}
 
+- name: Determine effective rrdcached network bind address
+  set_fact:
+    librenms_rrdcached_network_bind_address_effective: >-
+      {{
+        ansible_host
+        | default(ansible_default_ipv4.address | default(inventory_hostname))
+        if (
+          librenms_rrdcached_endpoint_strategy == 'vip_tcp'
+          and (
+            librenms_rrdcached_network_bind_address | string | trim
+          ) in ['', '0.0.0.0', '::', '*']
+        )
+        else librenms_rrdcached_network_bind_address
+      }}
+
 - name: Determine effective rrdcached TCP host
   set_fact:
     librenms_rrdcached_tcp_host_effective: >-
@@ -1043,6 +1058,68 @@
     enabled: true
   when:
     - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+
+- name: Check for wildcard rrdcached TCP listener in VIP mode
+  command:
+    argv:
+      - sh
+      - -lc
+      - >-
+        ss -H -ltn | awk -v port='{{ librenms_rrdcached_bind_port }}'
+        '$4 == "0.0.0.0:" port || $4 == "[::]:" port || $4 == "*:" port
+        { found=1 } END { exit(found ? 0 : 1) }'
+  register: librenms_rrdcached_wildcard_listener
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_haproxy_rrdcached_enabled | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+
+- name: Restart rrdcached when wildcard listener would block HAProxy VIP bind
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: restarted
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_haproxy_rrdcached_enabled | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+    - librenms_rrdcached_wildcard_listener.rc | default(1) == 0
+
+- name: Recheck wildcard rrdcached TCP listener after recovery
+  command:
+    argv:
+      - sh
+      - -lc
+      - >-
+        ss -H -ltn | awk -v port='{{ librenms_rrdcached_bind_port }}'
+        '$4 == "0.0.0.0:" port || $4 == "[::]:" port || $4 == "*:" port
+        { found=1 } END { exit(found ? 0 : 1) }'
+  register: librenms_rrdcached_wildcard_listener_recheck
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_haproxy_rrdcached_enabled | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+
+- name: Validate rrdcached is not wildcard-bound in VIP mode
+  assert:
+    that:
+      - librenms_rrdcached_wildcard_listener_recheck.rc | default(1) != 0
+    fail_msg: >-
+      rrdcached is still listening on a wildcard address for port
+      {{ librenms_rrdcached_bind_port }}. In VIP TCP mode it must bind only to
+      {{ librenms_rrdcached_network_bind_address_effective }} so HAProxy can bind
+      the VIP listener.
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_haproxy_rrdcached_enabled | bool
     - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
