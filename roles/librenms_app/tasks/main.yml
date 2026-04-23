@@ -632,10 +632,13 @@
 - name: Install LibreNMS PHP dependencies
   command:
     argv:
+      - timeout
+      - "{{ librenms_composer_install_timeout | int }}s"
       - ./scripts/composer_wrapper.php
       - install
       - --no-dev
       - --no-interaction
+      - --no-scripts
   args:
     chdir: "{{ librenms_install_dir }}"
   environment:
@@ -1943,6 +1946,24 @@
   when:
     - librenms_manage_nginx | bool
     - librenms_manage_php_fpm | bool
+    - librenms_apply_post_bootstrap_config | bool
+
+- name: Run Laravel package discovery after final runtime configuration
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_artisan_package_discover_timeout | int }}s"
+      - php
+      - artisan
+      - package:discover
+      - --no-ansi
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_package_discover
+  changed_when: false
+  when:
     - librenms_apply_post_bootstrap_config | bool
 
 - name: Verify LibreNMS Laravel cache accepts writes
