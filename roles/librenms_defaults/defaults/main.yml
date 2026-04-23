@@ -232,6 +232,7 @@ librenms_dispatcher_registration_retries: 20
 librenms_dispatcher_registration_delay: 3
 librenms_dispatcher_registration_window: 300
 librenms_rrdcached_bind_port: 42217
+librenms_rrdcached_daemon_path: /usr/bin/rrdcached
 librenms_rrdcached_endpoint: ""
 librenms_rrdcached_endpoint_strategy: >-
   {{
@@ -251,9 +252,19 @@ librenms_rrdcached_network_bind_address: >-
     | default(ansible_default_ipv4.address | default(inventory_hostname))
   }}
 librenms_rrdcached_socket: /run/rrdcached.sock
+librenms_rrdcached_socket_mode: "0660"
+librenms_rrdcached_pidfile: /run/rrdcached.pid
+librenms_rrdcached_write_timeout: 1800
+librenms_rrdcached_write_jitter: 1800
+librenms_rrdcached_write_threads: 4
 librenms_rrdcached_journal_path: /var/lib/rrdcached/journal
 librenms_rrdcached_default_config_path: /etc/default/rrdcached
 librenms_rrdcached_service_name: rrdcached
+librenms_manage_rrdcached_systemd_override: "{{ ansible_service_mgr == 'systemd' }}"
+librenms_rrdcached_systemd_override_dir: >-
+  /etc/systemd/system/{{ librenms_rrdcached_service_name }}.service.d
+librenms_rrdcached_systemd_override_path: >-
+  {{ librenms_rrdcached_systemd_override_dir }}/librenms-ha.conf
 librenms_rrdcached_base_path: >-
   {{
     librenms_gluster_mountpoint

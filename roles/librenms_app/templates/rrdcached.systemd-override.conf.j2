@@ -1,0 +1,24 @@
+[Service]
+Type=simple
+User=root
+Group=root
+PIDFile=
+ExecStart=
+ExecStart={{ librenms_rrdcached_daemon_path }} \
+  -g \
+  -w {{ librenms_rrdcached_write_timeout }} \
+  -z {{ librenms_rrdcached_write_jitter }} \
+  -t {{ librenms_rrdcached_write_threads }} \
+  -b {{ librenms_rrdcached_base_path }} \
+  -j {{ librenms_rrdcached_journal_path }} \
+  -p {{ librenms_rrdcached_pidfile }} \
+  -B \
+  -F \
+  -R \
+  -s {{ librenms_group }} \
+  -m {{ librenms_rrdcached_socket_mode }} \
+  -l unix:{{ librenms_rrdcached_socket }}{% if librenms_rrdcached_network_enabled | bool %} \
+  -L \
+  -l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}{% endif %} \
+  -U {{ librenms_user }} \
+  -G {{ librenms_group }}

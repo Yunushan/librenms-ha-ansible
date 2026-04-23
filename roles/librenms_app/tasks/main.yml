@@ -1045,11 +1045,50 @@
     owner: root
     group: root
     mode: "0644"
+  register: librenms_rrdcached_defaults_deploy
   notify: Restart rrdcached
   when:
     - librenms_manage_rrdcached | bool
     - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
+
+- name: Ensure rrdcached systemd override directory exists
+  file:
+    path: "{{ librenms_rrdcached_systemd_override_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_manage_rrdcached_systemd_override | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+
+- name: Deploy rrdcached systemd override
+  template:
+    src: rrdcached.systemd-override.conf.j2
+    dest: "{{ librenms_rrdcached_systemd_override_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: librenms_rrdcached_systemd_override_deploy
+  notify: Restart rrdcached
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_manage_rrdcached_systemd_override | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+
+- name: Reload systemd after rrdcached override change
+  systemd:
+    daemon_reload: true
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_manage_rrdcached_systemd_override | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+    - librenms_rrdcached_systemd_override_deploy.changed | default(false)
 
 - name: Enable and start rrdcached on eligible nodes
   service:
@@ -1060,6 +1099,18 @@
     - librenms_manage_rrdcached | bool
     - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
+
+- name: Restart rrdcached after managed config changes
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: restarted
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - librenms_rrdcached_runs_on_host | bool
+    - >-
+      (librenms_rrdcached_defaults_deploy.changed | default(false))
+      or (librenms_rrdcached_systemd_override_deploy.changed | default(false))
 
 - name: Check for wildcard rrdcached TCP listener in VIP mode
   command:
