@@ -232,6 +232,7 @@ librenms_manage_rrdcached: "{{ librenms_mode != 'standalone' }}"
 librenms_dispatcher_registration_retries: 20
 librenms_dispatcher_registration_delay: 3
 librenms_dispatcher_registration_window: 300
+librenms_dispatcher_poller_frequency: "{{ librenms_dispatcher_registration_window }}"
 librenms_dispatcher_registration_nodes: >-
   {{
     librenms_active_web_nodes

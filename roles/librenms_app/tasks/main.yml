@@ -1874,6 +1874,8 @@
       value: "dispatcher"
     - key: "schedule_type.billing"
       value: "dispatcher"
+    - key: "service_poller_frequency"
+      value: "{{ librenms_dispatcher_poller_frequency | int }}"
   become: true
   become_user: "{{ librenms_user }}"
   when:
@@ -2315,11 +2317,12 @@
           - >-
             INSERT INTO `poller_cluster`
             (`node_id`, `poller_name`, `poller_version`, `poller_groups`,
-            `last_report`, `master`)
+            `last_report`, `master`, `poller_frequency`)
             VALUES
             ('{{ hostvars[item].librenms_node_id | default(item) | replace("'", "''") }}',
             '{{ item | replace("'", "''") }}',
-            'librenms-service', '0', NOW(), 0)
+            'librenms-service', '0', NOW(), 0,
+            {{ librenms_dispatcher_poller_frequency | int }})
             ON DUPLICATE KEY UPDATE
             `poller_name` = IF(
               `poller_name` IS NULL OR `poller_name` = '',
@@ -2332,6 +2335,7 @@
               VALUES(`poller_groups`),
               `poller_groups`
             ),
+            `poller_frequency` = VALUES(`poller_frequency`),
             `last_report` = NOW()
       no_log: true
       changed_when: false
@@ -2352,8 +2356,10 @@
             '{{ hostvars[item].librenms_node_id | default(item) | replace("'", "''") }}'
             AND `last_report` >= DATE_SUB(
               NOW(),
-              INTERVAL {{ librenms_dispatcher_registration_window | int }}
-              SECOND
+              INTERVAL COALESCE(
+                `poller_frequency`,
+                {{ librenms_dispatcher_poller_frequency | int }}
+              ) SECOND
             )
       register: librenms_dispatcher_registration_check
       no_log: true
