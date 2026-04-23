@@ -315,6 +315,18 @@
         )
       }}
 
+- name: Determine effective rrdcached endpoint TCP port
+  set_fact:
+    librenms_rrdcached_endpoint_port_effective: >-
+      {{
+        librenms_haproxy_rrdcached_port
+        if (
+          librenms_rrdcached_endpoint_strategy == 'vip_tcp'
+          and librenms_haproxy_rrdcached_enabled | bool
+        )
+        else librenms_rrdcached_bind_port
+      }}
+
 - name: Determine effective rrdcached endpoint
   set_fact:
     librenms_rrdcached_endpoint_effective: >-
@@ -329,7 +341,7 @@
           (
             librenms_rrdcached_tcp_host_effective
             ~ ':'
-            ~ (librenms_rrdcached_bind_port | string)
+            ~ (librenms_rrdcached_endpoint_port_effective | string)
           )
         )
       }}
@@ -1127,6 +1139,7 @@
   when:
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
+    - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
     - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
@@ -1137,6 +1150,7 @@
   when:
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
+    - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
     - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
     - librenms_rrdcached_wildcard_listener.rc | default(1) == 0
@@ -1156,6 +1170,7 @@
   when:
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
+    - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
     - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
@@ -1171,6 +1186,7 @@
   when:
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
+    - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
     - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 

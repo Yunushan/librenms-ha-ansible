@@ -177,6 +177,7 @@ librenms_haproxy_rrdcached_enabled: >-
 librenms_haproxy_rrdcached_check_interval: 2s
 librenms_haproxy_rrdcached_check_fall: 2
 librenms_haproxy_rrdcached_check_rise: 2
+librenms_haproxy_rrdcached_port: "{{ (librenms_rrdcached_bind_port | int) + 1 }}"
 librenms_app_probe_path: /
 librenms_app_probe_success_statuses:
   - 200

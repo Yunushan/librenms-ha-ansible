@@ -107,7 +107,7 @@ backend galera_nodes
 
 {% if librenms_haproxy_rrdcached_enabled | bool %}
 frontend librenms_rrdcached
-    bind {{ librenms_haproxy_bind_address }}:{{ librenms_rrdcached_bind_port }}
+    bind {{ librenms_haproxy_bind_address }}:{{ librenms_haproxy_rrdcached_port }}
     mode tcp
     default_backend librenms_rrdcached_nodes
 
