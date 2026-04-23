@@ -2299,7 +2299,12 @@
           | default({})
         ).get('librenms.service', {}).get('state', '') == 'running'
 
-    - name: Refresh LibreNMS dispatcher poller registration
+    - name: Determine expected LibreNMS dispatcher nodes
+      set_fact:
+        librenms_dispatcher_registration_nodes_effective: >-
+          {{ librenms_dispatcher_registration_nodes }}
+
+    - name: Refresh LibreNMS dispatcher poller registrations
       community.mysql.mysql_query:
         login_host: "{{ librenms_db_host_effective }}"
         login_port: "{{ librenms_db_port }}"
@@ -2312,8 +2317,8 @@
             (`node_id`, `poller_name`, `poller_version`, `poller_groups`,
             `last_report`, `master`)
             VALUES
-            ('{{ librenms_node_id | default(inventory_hostname) | replace("'", "''") }}',
-            '{{ inventory_hostname | replace("'", "''") }}',
+            ('{{ hostvars[item].librenms_node_id | default(item) | replace("'", "''") }}',
+            '{{ item | replace("'", "''") }}',
             'librenms-service', '0', NOW(), 0)
             ON DUPLICATE KEY UPDATE
             `poller_name` = IF(
@@ -2330,8 +2335,9 @@
             `last_report` = NOW()
       no_log: true
       changed_when: false
+      loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
 
-    - name: Verify LibreNMS dispatcher poller registration is active
+    - name: Verify LibreNMS dispatcher poller registrations are active
       community.mysql.mysql_query:
         login_host: "{{ librenms_db_host_effective }}"
         login_port: "{{ librenms_db_port }}"
@@ -2343,7 +2349,7 @@
             SELECT COUNT(*) AS active_pollers
             FROM `poller_cluster`
             WHERE `node_id` =
-            '{{ librenms_node_id | default(inventory_hostname) | replace("'", "''") }}'
+            '{{ hostvars[item].librenms_node_id | default(item) | replace("'", "''") }}'
             AND `last_report` >= DATE_SUB(
               NOW(),
               INTERVAL {{ librenms_dispatcher_registration_window | int }}
@@ -2361,6 +2367,7 @@
             | default(0)
             | int
           ) > 0
+      loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
   rescue:
     - name: Capture LibreNMS dispatcher service status
       command:
