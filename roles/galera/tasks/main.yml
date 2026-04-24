@@ -133,6 +133,7 @@
     librenms_galera_safe_bootstrap_hosts: >-
       {{
         librenms_galera_saved_state.results | default([])
+        | selectattr('stdout', 'defined')
         | selectattr('stdout', 'search', 'safe_to_bootstrap=1')
         | map(attribute='item')
         | list
@@ -199,8 +200,8 @@
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_auto_recover_unsafe_bootstrap | bool
-    - item.rc == 0
-    - item.stdout is search('^\\{')
+    - (item.rc | default(1) | int) == 0
+    - item.stdout | default('') is search('^\\{')
 
 - name: Determine highest Galera recovered seqno
   set_fact:
