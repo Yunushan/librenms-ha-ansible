@@ -59,6 +59,7 @@ librenms_db_user: librenms
 librenms_db_password: CHANGE_ME_DB_PASSWORD
 librenms_db_bind_address: 0.0.0.0
 librenms_mariadb_log_warnings: 1
+librenms_mariadb_default_time_zone: "+00:00"
 librenms_db_user_host: "%"
 librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname]) | first) }}"
 librenms_runtime_db_prefer_local_galera: false

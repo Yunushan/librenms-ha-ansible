@@ -985,6 +985,7 @@
   no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
+    - librenms_db_mode != 'galera'
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS users.created_at schema default
@@ -1001,6 +1002,7 @@
   no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
+    - librenms_db_mode != 'galera'
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Verify LibreNMS validation schema columns after normalization
@@ -1034,6 +1036,7 @@
   no_log: true
   when:
     - librenms_manage_validation_schema_fixes | bool
+    - librenms_db_mode != 'galera'
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS validation schema verification results
@@ -1052,6 +1055,7 @@
       }}
   when:
     - librenms_manage_validation_schema_fixes | bool
+    - librenms_db_mode != 'galera'
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Fail when LibreNMS validation schema columns remain incorrect
@@ -1086,6 +1090,7 @@
       {{ librenms_users_created_at_schema_after_fix | default({}) }}
   when:
     - librenms_manage_validation_schema_fixes | bool
+    - librenms_db_mode != 'galera'
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Verify Galera schema backends are reachable before validation
@@ -1223,6 +1228,30 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
     - (librenms_schema_unavailable_galera_backends_after_recovery | default([]) | length) > 0
+
+- name: Normalize LibreNMS validation schema locally on every Galera backend
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - "--database={{ librenms_db_name }}"
+      - -Nse
+      - |-
+        SET SESSION wsrep_on=OFF;
+        SET TIME_ZONE='+00:00';
+        ALTER TABLE `notifications` CHANGE `datetime` `datetime` timestamp NOT NULL DEFAULT '1970-01-02 00:00:00';
+        ALTER TABLE `users` CHANGE `created_at` `created_at` timestamp NOT NULL DEFAULT '1970-01-02 00:00:01';
+        SET SESSION wsrep_on=ON;
+  loop: "{{ librenms_active_db_nodes }}"
+  delegate_to: "{{ item }}"
+  become: true
+  register: librenms_schema_galera_backend_normalize
+  changed_when: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Wait for LibreNMS validation schema on every Galera backend
   community.mysql.mysql_query:
