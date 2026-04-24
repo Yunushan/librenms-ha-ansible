@@ -123,7 +123,8 @@
         `poller_name` = VALUES(`poller_name`),
         `poller_version` = VALUES(`poller_version`),
         `poller_groups` = VALUES(`poller_groups`),
-        `poller_frequency` = VALUES(`poller_frequency`)
+        `poller_frequency` = VALUES(`poller_frequency`),
+        `last_report` = NOW()
   no_log: true
   changed_when: false
   loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
