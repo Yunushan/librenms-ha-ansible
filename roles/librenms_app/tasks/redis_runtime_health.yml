@@ -179,7 +179,7 @@
     LIBRENMS_REDIS_USERNAME: "{{ librenms_redis_username }}"
     LIBRENMS_REDIS_PASSWORD: "{{ librenms_redis_password }}"
     LIBRENMS_REDIS_DB: "{{ librenms_redis_db }}"
-    LIBRENMS_REDIS_TIMEOUT: "{{ librenms_redis_timeout_effective }}"
+    LIBRENMS_REDIS_TIMEOUT: "{{ librenms_redis_runtime_healthcheck_timeout }}"
     LIBRENMS_NODE_ID: "{{ librenms_node_id | default(inventory_hostname) }}"
     LIBRENMS_HEALTHCHECK_TTL: "{{ librenms_redis_runtime_healthcheck_key_ttl }}"
     LIBRENMS_HEALTHCHECK_BLOCKING_TIMEOUT: >-

@@ -107,7 +107,7 @@ librenms_redis_db: 0
 librenms_redis_cache_db: 1
 librenms_redis_session_db: 0
 librenms_redis_timeout: 5
-librenms_redis_sentinel_timeout: 5
+librenms_redis_sentinel_timeout: 30
 librenms_redis_timeout_effective: >-
   {{
     librenms_redis_sentinel_timeout
