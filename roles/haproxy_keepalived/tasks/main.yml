@@ -250,17 +250,28 @@
   failed_when: false
   when: librenms_db_mode == 'galera'
 
+- name: Initialize unavailable Galera backend list before recovery
+  set_fact:
+    librenms_haproxy_unavailable_galera_backends: []
+  when: librenms_db_mode == 'galera'
+
+- name: Record unavailable Galera backends before recovery
+  set_fact:
+    librenms_haproxy_unavailable_galera_backends: >-
+      {{
+        librenms_haproxy_unavailable_galera_backends
+        + [item.item]
+      }}
+  loop: "{{ librenms_haproxy_galera_backend_wait.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - (item.state | default('')) != 'started'
+
 - name: Restart unavailable Galera backends before HAProxy reload
   service:
     name: "{{ librenms_mariadb_service_name }}"
     state: restarted
-  loop: >-
-    {{
-      librenms_haproxy_galera_backend_wait.results | default([])
-      | rejectattr('state', 'equalto', 'started')
-      | map(attribute='item')
-      | list
-    }}
+  loop: "{{ librenms_haproxy_unavailable_galera_backends }}"
   delegate_to: "{{ item }}"
   register: librenms_haproxy_galera_backend_restart
   failed_when: false
@@ -277,6 +288,23 @@
   register: librenms_haproxy_galera_backend_recheck
   failed_when: false
   when: librenms_db_mode == 'galera'
+
+- name: Initialize unavailable Galera backend list after recovery
+  set_fact:
+    librenms_haproxy_unavailable_galera_backends_after_recovery: []
+  when: librenms_db_mode == 'galera'
+
+- name: Record unavailable Galera backends after recovery
+  set_fact:
+    librenms_haproxy_unavailable_galera_backends_after_recovery: >-
+      {{
+        librenms_haproxy_unavailable_galera_backends_after_recovery
+        + [item.item]
+      }}
+  loop: "{{ librenms_haproxy_galera_backend_recheck.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - (item.state | default('')) != 'started'
 
 - name: Capture unavailable Galera backend diagnostics before HAProxy reload
   shell: |-
@@ -296,13 +324,7 @@
     }
   args:
     executable: /bin/bash
-  loop: >-
-    {{
-      librenms_haproxy_galera_backend_recheck.results | default([])
-      | rejectattr('state', 'equalto', 'started')
-      | map(attribute='item')
-      | list
-    }}
+  loop: "{{ librenms_haproxy_unavailable_galera_backends_after_recovery }}"
   delegate_to: "{{ item }}"
   register: librenms_haproxy_galera_backend_diagnostics
   changed_when: false
@@ -328,13 +350,7 @@
       {{ librenms_haproxy_galera_backend_diagnostics.results | default([]) }}
   when:
     - librenms_db_mode == 'galera'
-    - >-
-      (
-        librenms_haproxy_galera_backend_recheck.results | default([])
-        | rejectattr('state', 'equalto', 'started')
-        | list
-        | length
-      ) > 0
+    - (librenms_haproxy_unavailable_galera_backends_after_recovery | length) > 0
 
 - name: Deploy HAProxy config
   template:
