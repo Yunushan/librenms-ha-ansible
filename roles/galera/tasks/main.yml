@@ -38,18 +38,31 @@
   ignore_unreachable: true
   when: librenms_db_mode == 'galera'
 
-- name: Determine live Galera members
+- name: Initialize reachable and live Galera member lists
   set_fact:
-    librenms_galera_live_members: >-
-      {{
-        librenms_galera_component_probe.results | default([])
-        | selectattr('stdout', 'defined')
-        | selectattr('stdout', 'search', 'wsrep_cluster_status\\s+Primary')
-        | selectattr('stdout', 'search', 'wsrep_ready\\s+ON')
-        | map(attribute='item')
-        | list
-      }}
+    librenms_galera_reachable_db_nodes: []
+    librenms_galera_live_members: []
   when: librenms_db_mode == 'galera'
+
+- name: Record reachable Galera database nodes
+  set_fact:
+    librenms_galera_reachable_db_nodes: "{{ librenms_galera_reachable_db_nodes + [item.item] }}"
+  loop: "{{ librenms_galera_component_probe.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - not (item.unreachable | default(false))
+    - (item.rc | default(1) | int) == 0
+
+- name: Record live Galera primary members
+  set_fact:
+    librenms_galera_live_members: "{{ librenms_galera_live_members + [item.item] }}"
+  loop: "{{ librenms_galera_component_probe.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - not (item.unreachable | default(false))
+    - (item.rc | default(1) | int) == 0
+    - item.stdout | default('') is search('wsrep_cluster_status\\s+Primary')
+    - item.stdout | default('') is search('wsrep_ready\\s+ON')
 
 - name: Determine whether Galera bootstrap is required
   set_fact:
@@ -88,7 +101,7 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_quiesce_librenms_services | bool
     - inventory_hostname == (librenms_active_db_nodes | first)
-    - (librenms_galera_live_members | length) < (librenms_active_db_nodes | length)
+    - not librenms_galera_cluster_has_live_member | bool
 
 - name: Read Galera saved bootstrap state on database nodes
   command:
@@ -105,11 +118,12 @@
           }
         }
       - /var/lib/mysql/grastate.dat
-  loop: "{{ librenms_active_db_nodes }}"
+  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_saved_state
   changed_when: false
   failed_when: false
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
     - not librenms_galera_cluster_has_live_member | bool
@@ -154,11 +168,12 @@
       }'
   args:
     executable: /bin/bash
-  loop: "{{ librenms_active_db_nodes }}"
+  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_recovered_state
   changed_when: false
   failed_when: false
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
     - not librenms_galera_cluster_has_live_member | bool
@@ -377,9 +392,14 @@
   service:
     name: "{{ librenms_mariadb_service_name }}"
     state: stopped
-  loop: "{{ librenms_active_db_nodes | difference([librenms_galera_bootstrap_effective_host]) }}"
+  loop: >-
+    {{
+      (librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes))
+      | difference([librenms_galera_bootstrap_effective_host])
+    }}
   delegate_to: "{{ item }}"
   ignore_errors: true
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
@@ -410,11 +430,12 @@
     exit 1
   args:
     executable: /bin/bash
-  loop: "{{ librenms_active_db_nodes }}"
+  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_stop_process_check
   changed_when: false
   failed_when: false
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
@@ -476,10 +497,11 @@
     systemctl reset-failed "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
   args:
     executable: /bin/bash
-  loop: "{{ librenms_active_db_nodes }}"
+  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_clear_stuck_jobs
   changed_when: librenms_galera_clear_stuck_jobs.rc == 0
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
@@ -500,11 +522,12 @@
     exit 1
   args:
     executable: /bin/bash
-  loop: "{{ librenms_active_db_nodes }}"
+  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_final_stop_process_check
   changed_when: false
   failed_when: false
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
