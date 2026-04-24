@@ -1064,7 +1064,7 @@
           librenms_notifications_datetime_schema_after_fix.column_default
           | default('')
           | string
-          | regex_replace("^'(.*)'$", "\\1")
+          | replace("'", "")
         ) == '1970-01-02 00:00:00'
       - (librenms_users_created_at_schema_after_fix.data_type | default('') | lower) == 'timestamp'
       - (librenms_users_created_at_schema_after_fix.is_nullable | default('') | upper) == 'NO'
@@ -1073,7 +1073,7 @@
           librenms_users_created_at_schema_after_fix.column_default
           | default('')
           | string
-          | regex_replace("^'(.*)'$", "\\1")
+          | replace("'", "")
         ) == '1970-01-02 00:00:01'
     fail_msg: |-
       LibreNMS schema normalization ran, but validation columns are still not
@@ -1087,6 +1087,142 @@
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Verify Galera schema backends are reachable before validation
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: "{{ librenms_db_port }}"
+    timeout: "{{ librenms_schema_galera_backend_wait_timeout | int }}"
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_schema_galera_backend_wait
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Initialize unavailable Galera schema backend list before recovery
+  set_fact:
+    librenms_schema_unavailable_galera_backends: []
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Record unavailable Galera schema backends before recovery
+  set_fact:
+    librenms_schema_unavailable_galera_backends: >-
+      {{
+        librenms_schema_unavailable_galera_backends
+        + [item.item]
+      }}
+  loop: "{{ librenms_schema_galera_backend_wait.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+    - (item.state | default('')) != 'started'
+
+- name: Restart unavailable Galera schema backends before validation
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: restarted
+  loop: "{{ librenms_schema_unavailable_galera_backends | default([]) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_schema_galera_backend_restart
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+    - librenms_schema_recover_galera_backends | bool
+
+- name: Recheck Galera schema backends after recovery restart
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: "{{ librenms_db_port }}"
+    timeout: "{{ librenms_schema_galera_backend_wait_timeout | int }}"
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_schema_galera_backend_recheck
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Initialize unavailable Galera schema backend list after recovery
+  set_fact:
+    librenms_schema_unavailable_galera_backends_after_recovery: []
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Record unavailable Galera schema backends after recovery
+  set_fact:
+    librenms_schema_unavailable_galera_backends_after_recovery: >-
+      {{
+        librenms_schema_unavailable_galera_backends_after_recovery
+        + [item.item]
+      }}
+  loop: "{{ librenms_schema_galera_backend_recheck.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+    - (item.state | default('')) != 'started'
+
+- name: Capture unavailable Galera schema backend diagnostics
+  shell: |-
+    set -o pipefail
+    {
+      echo "--- expected endpoint ---"
+      echo "{{ hostvars[item].ansible_host | default(item) }}:{{ librenms_db_port }}"
+      echo "--- systemctl ---"
+      systemctl status "{{ librenms_mariadb_service_name }}" --no-pager -l || true
+      echo "--- listeners ---"
+      ss -ltnp || true
+      echo "--- wsrep ---"
+      mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+        "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" || true
+      echo "--- journal ---"
+      journalctl -u "{{ librenms_mariadb_service_name }}" -n 120 --no-pager || true
+    }
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_schema_unavailable_galera_backends_after_recovery | default([]) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_schema_galera_backend_diagnostics
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Fail when Galera schema backend is unavailable before validation
+  fail:
+    msg: |-
+      LibreNMS validation schema cannot be checked on every Galera backend
+      because one or more database nodes are not accepting TCP connections on
+      {{ librenms_db_port }}.
+
+      Initial backend wait:
+      {{ librenms_schema_galera_backend_wait.results | default([]) }}
+
+      Recovery restart:
+      {{ librenms_schema_galera_backend_restart.results | default([]) }}
+
+      Backend recheck:
+      {{ librenms_schema_galera_backend_recheck.results | default([]) }}
+
+      Diagnostics:
+      {{ librenms_schema_galera_backend_diagnostics.results | default([]) }}
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+    - (librenms_schema_unavailable_galera_backends_after_recovery | default([]) | length) > 0
 
 - name: Wait for LibreNMS validation schema on every Galera backend
   community.mysql.mysql_query:
@@ -1159,7 +1295,7 @@
           ).column_default
           | default('')
           | string
-          | regex_replace("^'(.*)'$", "\\1")
+          | replace("'", "")
         )
       ) == '1970-01-02 00:00:00'
     - >-
@@ -1201,7 +1337,7 @@
           ).column_default
           | default('')
           | string
-          | regex_replace("^'(.*)'$", "\\1")
+          | replace("'", "")
         )
       ) == '1970-01-02 00:00:01'
   no_log: true
@@ -1237,14 +1373,14 @@
         notifications_schema.column_default
         | default('')
         | string
-        | regex_replace("^'(.*)'$", "\\1")
+        | replace("'", "")
       }}
     users_default: >-
       {{
         users_schema.column_default
         | default('')
         | string
-        | regex_replace("^'(.*)'$", "\\1")
+        | replace("'", "")
       }}
   set_fact:
     librenms_schema_invalid_galera_backends: >-
@@ -1253,6 +1389,8 @@
         + [
             {
               'host': item.item,
+              'query_failed': item.failed | default(false),
+              'message': item.msg | default(''),
               'notifications_datetime': notifications_schema,
               'users_created_at': users_schema
             }

@@ -35,6 +35,8 @@ librenms_bootstrap_completed_effective: "{{ librenms_bootstrap_completed | bool 
 librenms_apply_post_bootstrap_config: "{{ librenms_bootstrap_completed_effective | bool }}"
 
 librenms_manage_validation_schema_fixes: true
+librenms_schema_recover_galera_backends: true
+librenms_schema_galera_backend_wait_timeout: 30
 librenms_manage_web_validation_json_filter: true
 librenms_web_validation_json_filter_path: /etc/librenms/web-validation-json-filter.php
 librenms_manage_bash_completion: true
