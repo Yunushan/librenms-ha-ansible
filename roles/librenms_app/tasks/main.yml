@@ -1088,26 +1088,7 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
 
-- name: Normalize LibreNMS validation schema on every Galera backend
-  community.mysql.mysql_query:
-    login_host: "{{ hostvars[item].ansible_host | default(item) }}"
-    login_port: "{{ librenms_db_port }}"
-    login_user: "{{ librenms_db_user }}"
-    login_password: "{{ librenms_db_password }}"
-    login_db: "{{ librenms_db_name }}"
-    query:
-      - "SET TIME_ZONE='+00:00'"
-      - "ALTER TABLE `notifications` CHANGE `datetime` `datetime` timestamp NOT NULL DEFAULT '1970-01-02 00:00:00'"
-      - "ALTER TABLE `users` CHANGE `created_at` `created_at` timestamp NOT NULL DEFAULT '1970-01-02 00:00:01'"
-  loop: "{{ librenms_active_db_nodes }}"
-  register: librenms_schema_galera_backend_normalize
-  no_log: true
-  when:
-    - librenms_db_mode == 'galera'
-    - librenms_manage_validation_schema_fixes | bool
-    - inventory_hostname == librenms_schema_fix_host_effective
-
-- name: Verify LibreNMS validation schema on every Galera backend
+- name: Wait for LibreNMS validation schema on every Galera backend
   community.mysql.mysql_query:
     login_host: "{{ hostvars[item].ansible_host | default(item) }}"
     login_port: "{{ librenms_db_port }}"
@@ -1135,6 +1116,94 @@
   loop: "{{ librenms_active_db_nodes }}"
   register: librenms_schema_galera_backend_columns
   changed_when: false
+  failed_when: false
+  retries: 10
+  delay: 2
+  until:
+    - >-
+      (
+        (
+          (
+            librenms_schema_galera_backend_columns.query_result[-2]
+            | default([])
+          )
+          | first
+          | default({})
+        ).data_type
+        | default('')
+        | lower
+      ) == 'timestamp'
+    - >-
+      (
+        (
+          (
+            librenms_schema_galera_backend_columns.query_result[-2]
+            | default([])
+          )
+          | first
+          | default({})
+        ).is_nullable
+        | default('')
+        | upper
+      ) == 'NO'
+    - >-
+      (
+        (
+          (
+            (
+              librenms_schema_galera_backend_columns.query_result[-2]
+              | default([])
+            )
+            | first
+            | default({})
+          ).column_default
+          | default('')
+          | string
+          | regex_replace("^'(.*)'$", "\\1")
+        )
+      ) == '1970-01-02 00:00:00'
+    - >-
+      (
+        (
+          (
+            librenms_schema_galera_backend_columns.query_result[-1]
+            | default([])
+          )
+          | first
+          | default({})
+        ).data_type
+        | default('')
+        | lower
+      ) == 'timestamp'
+    - >-
+      (
+        (
+          (
+            librenms_schema_galera_backend_columns.query_result[-1]
+            | default([])
+          )
+          | first
+          | default({})
+        ).is_nullable
+        | default('')
+        | upper
+      ) == 'NO'
+    - >-
+      (
+        (
+          (
+            (
+              librenms_schema_galera_backend_columns.query_result[-1]
+              | default([])
+            )
+            | first
+            | default({})
+          ).column_default
+          | default('')
+          | string
+          | regex_replace("^'(.*)'$", "\\1")
+        )
+      ) == '1970-01-02 00:00:01'
   no_log: true
   when:
     - librenms_db_mode == 'galera'
