@@ -285,6 +285,7 @@ librenms_dispatcher_registration_window: 300
 librenms_dispatcher_poller_frequency: "{{ librenms_dispatcher_registration_window }}"
 librenms_dispatcher_prune_unmanaged_nodes: true
 librenms_dispatcher_restart_before_registration: false
+librenms_dispatcher_watchdog_enabled: true
 librenms_dispatcher_registration_nodes: >-
   {{
     librenms_active_web_nodes

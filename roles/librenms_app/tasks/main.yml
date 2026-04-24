@@ -1846,14 +1846,31 @@
     - librenms_manage_daily_maintenance | bool
     - ansible_service_mgr == 'systemd'
 
+- name: Check LibreNMS dispatcher watchdog service file
+  stat:
+    path: "{{ librenms_install_dir }}/misc/librenms-watchdog.service"
+  register: librenms_dispatcher_watchdog_service_file
+  when:
+    - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+
 - name: Deploy LibreNMS dispatcher service file
   copy:
     remote_src: true
-    src: "{{ librenms_install_dir }}/misc/librenms.service"
+    src: >-
+      {{
+        librenms_install_dir ~ '/misc/librenms-watchdog.service'
+        if (
+          librenms_dispatcher_watchdog_enabled | bool
+          and librenms_dispatcher_watchdog_service_file.stat.exists | default(false)
+        )
+        else librenms_install_dir ~ '/misc/librenms.service'
+      }}
     dest: /etc/systemd/system/librenms.service
     owner: root
     group: root
     mode: "0644"
+  notify: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
     - ansible_service_mgr == 'systemd'
