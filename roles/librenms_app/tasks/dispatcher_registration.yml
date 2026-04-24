@@ -1,15 +1,4 @@
 ---
-- name: Wait for LibreNMS dispatcher service to be active
-  service_facts:
-  register: librenms_dispatcher_active_check
-  retries: "{{ librenms_dispatcher_registration_retries | int }}"
-  delay: "{{ librenms_dispatcher_registration_delay | int }}"
-  until: >-
-    (
-      librenms_dispatcher_active_check.ansible_facts.services
-      | default({})
-    ).get('librenms.service', {}).get('state', '') == 'running'
-
 - name: Determine expected LibreNMS dispatcher nodes
   set_fact:
     librenms_dispatcher_registration_nodes_effective: >-
@@ -17,6 +6,42 @@
         librenms_dispatcher_registration_nodes_input
         | default(librenms_dispatcher_registration_nodes)
       }}
+
+- name: Ensure LibreNMS dispatcher service is enabled and running
+  service:
+    name: librenms.service
+    state: started
+    enabled: true
+  loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
+  delegate_to: "{{ item }}"
+
+- name: Restart LibreNMS dispatcher service before heartbeat validation
+  command:
+    argv:
+      - systemctl
+      - restart
+      - librenms.service
+  loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
+  delegate_to: "{{ item }}"
+  register: librenms_dispatcher_registration_restart
+  retries: 5
+  delay: 3
+  until: librenms_dispatcher_registration_restart.rc == 0
+  when: librenms_dispatcher_restart_before_registration | bool
+
+- name: Wait for LibreNMS dispatcher service to be active
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms.service
+  loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
+  delegate_to: "{{ item }}"
+  register: librenms_dispatcher_active_check
+  changed_when: false
+  retries: "{{ librenms_dispatcher_registration_retries | int }}"
+  delay: "{{ librenms_dispatcher_registration_delay | int }}"
+  until: librenms_dispatcher_active_check.stdout == 'active'
 
 - name: Initialize expected LibreNMS dispatcher node SQL entries
   set_fact:
@@ -98,8 +123,7 @@
         `poller_name` = VALUES(`poller_name`),
         `poller_version` = VALUES(`poller_version`),
         `poller_groups` = VALUES(`poller_groups`),
-        `poller_frequency` = VALUES(`poller_frequency`),
-        `last_report` = NOW()
+        `poller_frequency` = VALUES(`poller_frequency`)
   no_log: true
   changed_when: false
   loop: "{{ librenms_dispatcher_registration_nodes_effective }}"

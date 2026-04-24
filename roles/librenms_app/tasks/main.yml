@@ -2449,6 +2449,9 @@
   block:
     - name: Converge local LibreNMS dispatcher registration state
       include_tasks: dispatcher_registration.yml
+      vars:
+        librenms_dispatcher_registration_nodes_input:
+          - "{{ inventory_hostname }}"
   rescue:
     - name: Capture LibreNMS dispatcher service status
       command:

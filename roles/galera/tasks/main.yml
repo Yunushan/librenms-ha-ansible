@@ -1421,3 +1421,37 @@
     - librenms_haproxy_db_mysql_check_enabled | bool
     - inventory_hostname == librenms_galera_bootstrap_effective_host
     - librenms_galera_local_service_expected | bool
+
+- name: Resume LibreNMS workers after Galera recovery
+  shell: |-
+    set -o pipefail
+    changed=0
+
+    for unit in \
+      librenms-scheduler.timer \
+      librenms-daily.timer \
+      librenms.service; do
+      if systemctl list-unit-files "${unit}" >/dev/null 2>&1; then
+        if ! systemctl is-active --quiet "${unit}"; then
+          systemctl start "${unit}" || true
+          changed=1
+        fi
+      fi
+    done
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_active_web_nodes | default(groups.get('librenms_nodes', [])) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_resume_librenms_workers
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_quiesce_librenms_services | bool
+    - inventory_hostname == (librenms_active_db_nodes | last)
+    - >-
+      (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+      and (librenms_galera_local_status.stdout | default('')) is search('wsrep_ready\\s+ON')
