@@ -1,0 +1,36 @@
+---
+librenms_backup_root: /var/backups/librenms-ha
+librenms_backup_run_id: "{{ ansible_date_time.iso8601_basic_short }}"
+librenms_backup_dir: "{{ librenms_backup_root }}/{{ librenms_backup_run_id }}"
+
+librenms_backup_host: ""
+librenms_backup_app_host: ""
+librenms_backup_rrd_host: ""
+
+librenms_backup_include_database: true
+librenms_backup_include_config: true
+librenms_backup_include_rrd: false
+
+librenms_backup_database_dump_extra_args: >-
+  --single-transaction --quick --skip-lock-tables
+librenms_backup_database_filename: "{{ librenms_db_name }}.sql.gz"
+librenms_backup_config_filename: librenms-config.tar.gz
+librenms_backup_rrd_filename: librenms-rrd.tar.gz
+librenms_backup_manifest_filename: manifest.yml
+
+librenms_backup_rrd_path: >-
+  {{
+    librenms_gluster_mountpoint
+    if librenms_rrd_mode == 'glusterfs'
+    else librenms_install_dir ~ '/rrd'
+  }}
+
+librenms_backup_config_paths:
+  - "{{ librenms_install_dir }}/.env"
+  - "{{ librenms_install_dir }}/config.php"
+  - "{{ librenms_install_dir }}/logs"
+  - /etc/nginx/conf.d/librenms.conf
+  - /etc/haproxy/haproxy.cfg
+  - /etc/keepalived/keepalived.conf
+  - "{{ librenms_redis_conf_path_effective }}"
+  - "{{ librenms_redis_sentinel_conf_path_effective }}"

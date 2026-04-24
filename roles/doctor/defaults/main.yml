@@ -1,0 +1,34 @@
+---
+librenms_doctor_fail_on_warnings: false
+librenms_doctor_fail_on_time_unsync: true
+librenms_doctor_min_memory_mb: >-
+  {{
+    4096
+    if librenms_mode in ['cluster', 'ha']
+    else 2048
+  }}
+librenms_doctor_min_root_free_mb: 5120
+librenms_doctor_min_librenms_free_mb: 10240
+librenms_doctor_primary_support_tiers:
+  - primary
+  - primary-ish
+  - strong-best-effort
+librenms_doctor_best_effort_support_tiers:
+  - best-effort
+librenms_doctor_placeholder_patterns:
+  - CHANGE_ME
+  - CHANGEME
+  - librenms.example.com
+  - example.com
+librenms_doctor_required_commands:
+  - ip
+  - ss
+  - df
+librenms_doctor_required_systemd_commands:
+  - systemctl
+  - timedatectl
+librenms_doctor_ha_required_lb_nodes: 2
+librenms_doctor_ha_required_app_nodes: 2
+librenms_doctor_ha_required_db_nodes: 3
+librenms_doctor_ha_required_redis_nodes: 3
+librenms_doctor_ha_required_gluster_nodes: 3

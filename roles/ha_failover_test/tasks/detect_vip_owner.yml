@@ -1,0 +1,32 @@
+---
+- name: Probe VIP ownership on load balancer nodes
+  shell: >-
+    ip -o addr show |
+    awk '$4 == "{{ librenms_vip_ip }}/{{ librenms_vip_cidr }}" {
+      found=1
+    } END {
+      exit found ? 0 : 1
+    }'
+  args:
+    executable: /bin/sh
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_failover_test_active_lb_nodes }}"
+  register: librenms_failover_test_vip_owner_probe
+  changed_when: false
+  failed_when: false
+  run_once: true
+
+- name: Set detected VIP owner
+  set_fact:
+    librenms_failover_test_detected_vip_owner: >-
+      {{
+        (
+          librenms_failover_test_vip_owner_probe.results
+          | selectattr('rc', 'equalto', 0)
+          | map(attribute='item')
+          | list
+          | first
+        )
+        | default('')
+      }}
+  run_once: true

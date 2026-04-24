@@ -1,0 +1,535 @@
+---
+- name: Build active inventory host lists for doctor
+  set_fact:
+    librenms_doctor_active_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_doctor_active_web_nodes: >-
+      {{
+        groups.get('librenms_web', groups.get('librenms_nodes', []))
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_doctor_active_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_doctor_active_redis_nodes: >-
+      {{
+        groups.get('librenms_redis', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_doctor_active_lb_nodes: >-
+      {{
+        groups.get('lb_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_doctor_active_gluster_nodes: >-
+      {{
+        groups.get('gluster_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+
+- name: Build unique managed host list for doctor
+  set_fact:
+    librenms_doctor_managed_hosts: >-
+      {{
+        (
+          librenms_doctor_active_nodes
+          + librenms_doctor_active_db_nodes
+          + librenms_doctor_active_redis_nodes
+          + librenms_doctor_active_lb_nodes
+          + librenms_doctor_active_gluster_nodes
+        )
+        | unique
+        | list
+      }}
+  run_once: true
+
+- name: Initialize managed host address list
+  set_fact:
+    librenms_doctor_managed_host_addresses: []
+    librenms_doctor_node_ids: []
+  run_once: true
+
+- name: Record managed host addresses
+  set_fact:
+    librenms_doctor_managed_host_addresses: >-
+      {{
+        librenms_doctor_managed_host_addresses
+        + [hostvars[item].ansible_host | default(item)]
+      }}
+  loop: "{{ librenms_doctor_managed_hosts }}"
+  run_once: true
+
+- name: Record LibreNMS node IDs
+  set_fact:
+    librenms_doctor_node_ids: >-
+      {{
+        librenms_doctor_node_ids
+        + [hostvars[item].librenms_node_id | default(item)]
+      }}
+  loop: "{{ librenms_doctor_active_nodes }}"
+  run_once: true
+
+- name: Validate inventory has managed LibreNMS hosts
+  assert:
+    that:
+      - (librenms_doctor_active_nodes | length) > 0
+    fail_msg: "Inventory must define at least one host in librenms_nodes."
+  run_once: true
+
+- name: Validate managed host addresses are unique
+  assert:
+    that:
+      - >-
+        (librenms_doctor_managed_host_addresses | length)
+        == (librenms_doctor_managed_host_addresses | unique | list | length)
+    fail_msg: >-
+      Duplicate ansible_host values were found across managed hosts. Each node
+      must have a unique management address.
+  run_once: true
+
+- name: Validate LibreNMS node IDs are unique
+  assert:
+    that:
+      - >-
+        (librenms_doctor_node_ids | length)
+        == (librenms_doctor_node_ids | unique | list | length)
+    fail_msg: >-
+      Duplicate librenms_node_id values were found. Each LibreNMS node needs a
+      stable unique node ID for dispatcher registration.
+  run_once: true
+
+- name: Validate HA inventory shape
+  assert:
+    that:
+      - (librenms_doctor_active_nodes | length) >= (librenms_doctor_ha_required_app_nodes | int)
+      - (librenms_doctor_active_web_nodes | length) >= (librenms_doctor_ha_required_app_nodes | int)
+      - (librenms_doctor_active_lb_nodes | length) >= (librenms_doctor_ha_required_lb_nodes | int)
+      - librenms_vip_enabled | bool
+      - librenms_vip_ip | length > 0
+    fail_msg: >-
+      HA mode expects at least {{ librenms_doctor_ha_required_app_nodes }}
+      LibreNMS/web nodes, at least {{ librenms_doctor_ha_required_lb_nodes }}
+      load-balancer nodes, and a configured VIP.
+  when: librenms_mode == 'ha'
+  run_once: true
+
+- name: Validate Galera inventory shape
+  assert:
+    that:
+      - (librenms_doctor_active_db_nodes | length) >= (librenms_doctor_ha_required_db_nodes | int)
+    fail_msg: >-
+      Galera mode expects at least {{ librenms_doctor_ha_required_db_nodes }}
+      active DB nodes for quorum.
+  when: librenms_db_mode == 'galera'
+  run_once: true
+
+- name: Validate Redis Sentinel inventory shape
+  assert:
+    that:
+      - (librenms_doctor_active_redis_nodes | length) >= (librenms_doctor_ha_required_redis_nodes | int)
+    fail_msg: >-
+      Redis Sentinel mode expects at least
+      {{ librenms_doctor_ha_required_redis_nodes }} active Redis nodes for
+      quorum.
+  when: librenms_redis_mode == 'sentinel'
+  run_once: true
+
+- name: Validate Gluster inventory shape
+  assert:
+    that:
+      - (librenms_doctor_active_gluster_nodes | length) >= (librenms_doctor_ha_required_gluster_nodes | int)
+    fail_msg: >-
+      GlusterFS RRD mode expects at least
+      {{ librenms_doctor_ha_required_gluster_nodes }} active Gluster nodes.
+  when: librenms_rrd_mode == 'glusterfs'
+  run_once: true
+
+- name: Validate VIP does not reuse a node management address
+  assert:
+    that:
+      - librenms_vip_ip not in librenms_doctor_managed_host_addresses
+    fail_msg: "librenms_vip_ip must not equal any node ansible_host address."
+  when: librenms_vip_enabled | bool
+  run_once: true
+
+- name: Validate VIP and VRRP values
+  assert:
+    that:
+      - (librenms_vip_cidr | int) >= 1
+      - (librenms_vip_cidr | int) <= 32
+      - (librenms_keepalived_vrid | int) >= 1
+      - (librenms_keepalived_vrid | int) <= 255
+      - (librenms_keepalived_auth_pass | length) >= 1
+      - (librenms_keepalived_auth_pass | length) <= 8
+    fail_msg: >-
+      VIP/VRRP settings are invalid. CIDR must be 1-32, VRID must be 1-255,
+      and keepalived PASS authentication must be 1-8 characters.
+  when: librenms_vip_enabled | bool
+  run_once: true
+
+- name: Initialize placeholder variable list
+  set_fact:
+    librenms_doctor_placeholder_variables: []
+  run_once: true
+  no_log: true
+
+- name: Record placeholder configuration values
+  set_fact:
+    librenms_doctor_placeholder_variables: >-
+      {{ librenms_doctor_placeholder_variables + [item.name] }}
+  vars:
+    item_value: "{{ item.value | string }}"
+    placeholder_regex: "{{ librenms_doctor_placeholder_patterns | join('|') }}"
+  loop:
+    - name: librenms_app_key
+      value: "{{ librenms_app_key }}"
+    - name: librenms_fqdn
+      value: "{{ librenms_fqdn }}"
+    - name: librenms_db_password
+      value: "{{ librenms_db_password }}"
+    - name: librenms_redis_password
+      value: "{{ librenms_redis_password }}"
+    - name: librenms_redis_sentinel_password
+      value: "{{ librenms_redis_sentinel_password }}"
+    - name: librenms_keepalived_auth_pass
+      value: "{{ librenms_keepalived_auth_pass }}"
+    - name: librenms_snmp_v2c_community
+      value: "{{ librenms_snmp_v2c_community }}"
+    - name: librenms_snmp_v3_users
+      value: "{{ librenms_snmp_v3_users | to_json }}"
+  when: item_value is search(placeholder_regex)
+  run_once: true
+  no_log: true
+
+- name: Validate no placeholder values remain
+  assert:
+    that:
+      - (librenms_doctor_placeholder_variables | length) == 0
+    fail_msg: >-
+      Replace placeholder values before deployment:
+      {{ librenms_doctor_placeholder_variables | join(', ') }}.
+  run_once: true
+
+- name: Validate SNMPv2c credentials when enabled
+  assert:
+    that:
+      - >-
+        ('v2c' not in librenms_snmp_versions_enabled)
+        or (librenms_snmp_v2c_community | length > 0)
+    fail_msg: "SNMPv2c is enabled but librenms_snmp_v2c_community is empty."
+  run_once: true
+
+- name: Validate SNMPv3 credentials when enabled
+  assert:
+    that:
+      - >-
+        ('v3' not in librenms_snmp_versions_enabled)
+        or (librenms_snmp_v3_users | length > 0)
+      - >-
+        ('v3' not in librenms_snmp_versions_enabled)
+        or ((librenms_snmp_v3_users | first).username | default('') | length > 0)
+      - >-
+        ('v3' not in librenms_snmp_versions_enabled)
+        or ((librenms_snmp_v3_users | first).auth_password | default('') | length > 0)
+    fail_msg: >-
+      SNMPv3 is enabled but librenms_snmp_v3_users does not contain a usable
+      username and auth password.
+  run_once: true
+
+- name: Determine support tier for doctor
+  set_fact:
+    librenms_doctor_support_tier: >-
+      {{
+        librenms_support_tier_map.get(
+          ansible_distribution,
+          librenms_support_tier_map.get(ansible_os_family, 'best-effort')
+        )
+      }}
+
+- name: Validate OS family is supported
+  assert:
+    that:
+      - ansible_os_family in librenms_allowed_os_families
+    fail_msg: "Unsupported OS family {{ ansible_os_family }} for this repo."
+
+- name: Warn for best-effort operating systems
+  debug:
+    msg: >-
+      {{ inventory_hostname }} is {{ ansible_distribution }}
+      {{ ansible_distribution_version }} with support tier
+      {{ librenms_doctor_support_tier }}. Lab-test this OS before production.
+  when: librenms_doctor_support_tier in librenms_doctor_best_effort_support_tiers
+
+- name: Fail on best-effort operating systems when strict doctor mode is enabled
+  assert:
+    that:
+      - librenms_doctor_support_tier not in librenms_doctor_best_effort_support_tiers
+    fail_msg: >-
+      {{ inventory_hostname }} is support tier {{ librenms_doctor_support_tier }}.
+      Set librenms_doctor_fail_on_warnings: false to allow best-effort OS
+      families.
+  when: librenms_doctor_fail_on_warnings | bool
+
+- name: Validate minimum memory
+  assert:
+    that:
+      - (ansible_memtotal_mb | int) >= (librenms_doctor_min_memory_mb | int)
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ ansible_memtotal_mb }} MB RAM; expected at
+      least {{ librenms_doctor_min_memory_mb }} MB for {{ librenms_mode }} mode.
+
+- name: Record root filesystem facts
+  set_fact:
+    librenms_doctor_root_mount: >-
+      {{
+        (
+          ansible_mounts
+          | selectattr('mount', 'equalto', '/')
+          | list
+          | first
+        )
+        | default({})
+      }}
+
+- name: Validate root filesystem free space
+  assert:
+    that:
+      - >-
+        ((librenms_doctor_root_mount.size_available | default(0) | int) / 1048576)
+        >= (librenms_doctor_min_root_free_mb | int)
+    fail_msg: >-
+      {{ inventory_hostname }} has less than
+      {{ librenms_doctor_min_root_free_mb }} MB free on /.
+
+- name: Check LibreNMS install parent filesystem
+  command:
+    argv:
+      - df
+      - -Pm
+      - "{{ librenms_install_dir | dirname }}"
+  register: librenms_doctor_install_parent_df
+  changed_when: false
+  failed_when: false
+
+- name: Validate LibreNMS install parent free space
+  assert:
+    that:
+      - >-
+        (
+          (librenms_doctor_install_parent_df.stdout_lines | default(['', '0 0 0 0 0 0']))[1]
+          | regex_replace('\\s+', ' ')
+          | split(' ')
+        )[3] | int >= (librenms_doctor_min_librenms_free_mb | int)
+    fail_msg: >-
+      {{ inventory_hostname }} has less than
+      {{ librenms_doctor_min_librenms_free_mb }} MB free under
+      {{ librenms_install_dir | dirname }}.
+  when: librenms_doctor_install_parent_df.rc == 0
+
+- name: Check required base commands
+  shell: "command -v {{ item | quote }}"
+  args:
+    executable: /bin/sh
+  register: librenms_doctor_required_command_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ librenms_doctor_required_commands }}"
+
+- name: Validate required base commands exist
+  assert:
+    that:
+      - >-
+        (
+          librenms_doctor_required_command_check.results
+          | selectattr('rc', 'ne', 0)
+          | list
+          | length
+        ) == 0
+    fail_msg: >-
+      One or more required base commands are missing on {{ inventory_hostname }}:
+      {{
+        librenms_doctor_required_command_check.results
+        | selectattr('rc', 'ne', 0)
+        | map(attribute='item')
+        | join(', ')
+      }}.
+
+- name: Check required systemd commands
+  shell: "command -v {{ item | quote }}"
+  args:
+    executable: /bin/sh
+  register: librenms_doctor_required_systemd_command_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ librenms_doctor_required_systemd_commands }}"
+  when: ansible_service_mgr == 'systemd'
+
+- name: Validate required systemd commands exist
+  assert:
+    that:
+      - >-
+        (
+          librenms_doctor_required_systemd_command_check.results
+          | selectattr('rc', 'ne', 0)
+          | list
+          | length
+        ) == 0
+    fail_msg: >-
+      One or more required systemd commands are missing on
+      {{ inventory_hostname }}:
+      {{
+        librenms_doctor_required_systemd_command_check.results
+        | selectattr('rc', 'ne', 0)
+        | map(attribute='item')
+        | join(', ')
+      }}.
+  when: ansible_service_mgr == 'systemd'
+
+- name: Check time synchronization state
+  command:
+    argv:
+      - timedatectl
+      - show
+      - -p
+      - NTPSynchronized
+      - --value
+  register: librenms_doctor_time_sync
+  changed_when: false
+  failed_when: false
+  when: ansible_service_mgr == 'systemd'
+
+- name: Validate time synchronization is active
+  assert:
+    that:
+      - (librenms_doctor_time_sync.stdout | trim | lower) in ['yes', 'true', '1']
+    fail_msg: >-
+      Time synchronization is not active on {{ inventory_hostname }}. Enable NTP
+      before running Galera, Redis Sentinel, or TLS workflows.
+  when:
+    - ansible_service_mgr == 'systemd'
+    - librenms_doctor_fail_on_time_unsync | bool
+    - librenms_doctor_time_sync.rc == 0
+
+- name: Warn when time synchronization could not be verified
+  debug:
+    msg: >-
+      timedatectl could not verify time synchronization on {{ inventory_hostname }}.
+      Check NTP manually before production deployment.
+  when:
+    - ansible_service_mgr == 'systemd'
+    - librenms_doctor_time_sync.rc != 0
+
+- name: Warn when time synchronization check is skipped on non-systemd hosts
+  debug:
+    msg: >-
+      Automatic time synchronization verification is skipped on
+      {{ inventory_hostname }} because service manager is
+      {{ ansible_service_mgr }}. Check NTP manually before production
+      deployment.
+  when: ansible_service_mgr != 'systemd'
+
+- name: Validate configured VIP interface exists
+  assert:
+    that:
+      - librenms_vip_interface in ansible_interfaces
+    fail_msg: >-
+      librenms_vip_interface={{ librenms_vip_interface }} does not exist on
+      {{ inventory_hostname }}.
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_vip_interface | length > 0
+    - inventory_hostname in librenms_doctor_active_lb_nodes
+
+- name: Check route to VIP address from load balancers
+  command:
+    argv:
+      - ip
+      - route
+      - get
+      - "{{ librenms_vip_ip }}"
+  register: librenms_doctor_vip_route
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_vip_enabled | bool
+    - inventory_hostname in librenms_doctor_active_lb_nodes
+
+- name: Validate VIP route exists from load balancers
+  assert:
+    that:
+      - librenms_doctor_vip_route.rc == 0
+    fail_msg: >-
+      {{ inventory_hostname }} cannot resolve a route to VIP
+      {{ librenms_vip_ip }}. Check subnet, interface, and routing.
+  when:
+    - librenms_vip_enabled | bool
+    - inventory_hostname in librenms_doctor_active_lb_nodes
+
+- name: Check Gluster brick parent path
+  stat:
+    path: "{{ librenms_gluster_brick_path | dirname }}"
+  register: librenms_doctor_gluster_brick_parent
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_doctor_active_gluster_nodes
+
+- name: Validate Gluster brick parent path is usable
+  assert:
+    that:
+      - >-
+        not (librenms_doctor_gluster_brick_parent.stat.exists | default(false))
+        or (librenms_doctor_gluster_brick_parent.stat.isdir | default(false))
+    fail_msg: >-
+      Gluster brick parent {{ librenms_gluster_brick_path | dirname }} exists
+      on {{ inventory_hostname }} but is not a directory.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_doctor_active_gluster_nodes
+
+- name: Warn when Gluster brick parent will be created by deployment
+  debug:
+    msg: >-
+      Gluster brick parent {{ librenms_gluster_brick_path | dirname }} does not
+      exist on {{ inventory_hostname }} yet. The deployment playbook will create
+      it.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_doctor_active_gluster_nodes
+    - not (librenms_doctor_gluster_brick_parent.stat.exists | default(false))
+
+- name: Check configured Gluster brick device
+  stat:
+    path: "{{ librenms_gluster_brick_device }}"
+  register: librenms_doctor_gluster_brick_device
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_manage_brick_device | bool
+    - librenms_gluster_brick_device | length > 0
+    - inventory_hostname in librenms_doctor_active_gluster_nodes
+
+- name: Validate configured Gluster brick device exists
+  assert:
+    that:
+      - librenms_doctor_gluster_brick_device.stat.exists
+    fail_msg: >-
+      Configured Gluster brick device {{ librenms_gluster_brick_device }} does
+      not exist on {{ inventory_hostname }}.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_manage_brick_device | bool
+    - librenms_gluster_brick_device | length > 0
+    - inventory_hostname in librenms_doctor_active_gluster_nodes
+
+- name: Report doctor summary
+  debug:
+    msg: >-
+      Doctor checks passed on {{ inventory_hostname }}:
+      {{ ansible_distribution }} {{ ansible_distribution_version }},
+      support={{ librenms_doctor_support_tier }},
+      memory={{ ansible_memtotal_mb }}MB,
+      mode={{ librenms_mode }}.

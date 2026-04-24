@@ -1,0 +1,260 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_backup_common_vars_lookup) }}"
+  vars:
+    librenms_backup_common_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Build active host lists for backup
+  set_fact:
+    librenms_backup_active_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_backup_active_web_nodes: >-
+      {{
+        groups.get('librenms_web', groups.get('librenms_nodes', []))
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_backup_active_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_backup_active_gluster_nodes: >-
+      {{
+        groups.get('gluster_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+  run_once: true
+
+- name: Determine backup source hosts
+  set_fact:
+    librenms_backup_host_effective: >-
+      {{
+        librenms_backup_host
+        if librenms_backup_host | length > 0
+        else (
+          librenms_backup_active_db_nodes
+          | first
+          | default(librenms_backup_active_nodes | first | default(''))
+        )
+      }}
+    librenms_backup_app_host_effective: >-
+      {{
+        librenms_backup_app_host
+        if librenms_backup_app_host | length > 0
+        else (
+          librenms_backup_active_web_nodes
+          | first
+          | default(librenms_backup_active_nodes | first | default(''))
+        )
+      }}
+    librenms_backup_rrd_host_effective: >-
+      {{
+        librenms_backup_rrd_host
+        if librenms_backup_rrd_host | length > 0
+        else (
+          librenms_backup_active_gluster_nodes
+          | first
+          | default(librenms_backup_active_nodes | first | default(''))
+        )
+      }}
+  run_once: true
+
+- name: Build backup target host list
+  set_fact:
+    librenms_backup_target_hosts: >-
+      {{
+        [
+          librenms_backup_host_effective,
+          librenms_backup_app_host_effective,
+          librenms_backup_rrd_host_effective
+        ]
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+  run_once: true
+
+- name: Validate backup source hosts
+  assert:
+    that:
+      - (librenms_backup_target_hosts | length) > 0
+      - >-
+        (not librenms_backup_include_database | bool)
+        or librenms_backup_host_effective | length > 0
+      - >-
+        (not librenms_backup_include_config | bool)
+        or librenms_backup_app_host_effective | length > 0
+      - >-
+        (not librenms_backup_include_rrd | bool)
+        or librenms_backup_rrd_host_effective | length > 0
+    fail_msg: >-
+      Backup source host selection failed. Check librenms_nodes/librenms_db
+      inventory groups or set librenms_backup_host/librenms_backup_app_host.
+  run_once: true
+
+- name: Create backup directories
+  file:
+    path: "{{ librenms_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_backup_target_hosts }}"
+  run_once: true
+
+- name: Dump local or Galera LibreNMS database
+  community.mysql.mysql_db:
+    name: "{{ librenms_db_name }}"
+    state: dump
+    target: "{{ librenms_backup_dir }}/{{ librenms_backup_database_filename }}"
+    login_unix_socket: >-
+      {{
+        hostvars[librenms_backup_host_effective].librenms_mariadb_socket
+        | default(librenms_mariadb_socket)
+      }}
+    check_implicit_admin: true
+    dump_extra_args: "{{ librenms_backup_database_dump_extra_args }}"
+  delegate_to: "{{ librenms_backup_host_effective }}"
+  when:
+    - librenms_backup_include_database | bool
+    - librenms_db_mode in ['local', 'galera']
+  run_once: true
+
+- name: Dump external LibreNMS database
+  community.mysql.mysql_db:
+    name: "{{ librenms_db_name }}"
+    state: dump
+    target: "{{ librenms_backup_dir }}/{{ librenms_backup_database_filename }}"
+    login_host: "{{ librenms_db_host }}"
+    login_port: "{{ librenms_db_port | int }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    dump_extra_args: "{{ librenms_backup_database_dump_extra_args }}"
+  delegate_to: "{{ librenms_backup_host_effective }}"
+  when:
+    - librenms_backup_include_database | bool
+    - librenms_db_mode not in ['local', 'galera']
+    - librenms_db_host | length > 0
+  no_log: true
+  run_once: true
+
+- name: Fail when external database backup is requested without host
+  assert:
+    that:
+      - librenms_db_host | length > 0
+    fail_msg: >-
+      librenms_backup_include_database is true, but librenms_db_host is empty
+      for external database mode.
+  when:
+    - librenms_backup_include_database | bool
+    - librenms_db_mode not in ['local', 'galera']
+  run_once: true
+
+- name: Probe configured LibreNMS config backup paths
+  stat:
+    path: "{{ item }}"
+  delegate_to: "{{ librenms_backup_app_host_effective }}"
+  loop: "{{ librenms_backup_config_paths }}"
+  register: librenms_backup_config_path_stats
+  when: librenms_backup_include_config | bool
+  run_once: true
+
+- name: Build existing LibreNMS config backup path list
+  set_fact:
+    librenms_backup_existing_config_paths: >-
+      {{
+        librenms_backup_config_path_stats.results
+        | default([])
+        | selectattr('stat.exists', 'equalto', true)
+        | map(attribute='item')
+        | list
+      }}
+  when: librenms_backup_include_config | bool
+  run_once: true
+
+- name: Archive LibreNMS config and service files
+  archive:
+    path: "{{ librenms_backup_existing_config_paths }}"
+    dest: "{{ librenms_backup_dir }}/{{ librenms_backup_config_filename }}"
+    format: gz
+    force_archive: true
+  delegate_to: "{{ librenms_backup_app_host_effective }}"
+  when:
+    - librenms_backup_include_config | bool
+    - (librenms_backup_existing_config_paths | default([]) | length) > 0
+  run_once: true
+
+- name: Probe RRD backup path
+  stat:
+    path: "{{ librenms_backup_rrd_path }}"
+  delegate_to: "{{ librenms_backup_rrd_host_effective }}"
+  register: librenms_backup_rrd_path_stat
+  when: librenms_backup_include_rrd | bool
+  run_once: true
+
+- name: Archive LibreNMS RRD data
+  archive:
+    path: "{{ librenms_backup_rrd_path }}"
+    dest: "{{ librenms_backup_dir }}/{{ librenms_backup_rrd_filename }}"
+    format: gz
+    force_archive: true
+  delegate_to: "{{ librenms_backup_rrd_host_effective }}"
+  when:
+    - librenms_backup_include_rrd | bool
+    - librenms_backup_rrd_path_stat.stat.exists | default(false)
+  run_once: true
+
+- name: Write backup manifest
+  copy:
+    dest: "{{ librenms_backup_dir }}/{{ librenms_backup_manifest_filename }}"
+    owner: root
+    group: root
+    mode: "0640"
+    content: |
+      backup_run_id: "{{ librenms_backup_run_id }}"
+      backup_dir: "{{ librenms_backup_dir }}"
+      generated_at: "{{ ansible_date_time.iso8601 }}"
+      database:
+        included: {{ librenms_backup_include_database | bool | to_json }}
+        host: "{{ librenms_backup_host_effective }}"
+        file: "{{ librenms_backup_database_filename }}"
+        mode: "{{ librenms_db_mode }}"
+        name: "{{ librenms_db_name }}"
+      config:
+        included: {{ librenms_backup_include_config | bool | to_json }}
+        host: "{{ librenms_backup_app_host_effective }}"
+        file: "{{ librenms_backup_config_filename }}"
+        paths:
+      {% for path in librenms_backup_existing_config_paths | default([]) %}
+          - "{{ path }}"
+      {% endfor %}
+      rrd:
+        included: {{ librenms_backup_include_rrd | bool | to_json }}
+        host: "{{ librenms_backup_rrd_host_effective }}"
+        path: "{{ librenms_backup_rrd_path }}"
+        file: "{{ librenms_backup_rrd_filename }}"
+  delegate_to: "{{ librenms_backup_host_effective }}"
+  run_once: true
+
+- name: Report backup summary
+  debug:
+    msg: >-
+      LibreNMS backup completed. Database/manifest location:
+      {{ librenms_backup_host_effective }}:{{ librenms_backup_dir }}.
+      Config archive host: {{ librenms_backup_app_host_effective }}.
+      RRD archive host: {{
+        librenms_backup_rrd_host_effective
+        if librenms_backup_include_rrd | bool
+        else 'not requested'
+      }}.
+  run_once: true

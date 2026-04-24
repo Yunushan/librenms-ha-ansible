@@ -1,0 +1,19 @@
+---
+librenms_failover_test_confirm: false
+librenms_failover_test_cases:
+  - web_backend
+  - keepalived_vip
+
+librenms_failover_test_web_backend_host: ""
+librenms_failover_test_probe_delegate: ""
+librenms_failover_test_restore_services: true
+
+librenms_failover_test_http_path: "{{ librenms_app_probe_path }}"
+librenms_failover_test_http_statuses: "{{ librenms_app_probe_success_statuses }}"
+librenms_failover_test_http_timeout: "{{ librenms_app_probe_timeout }}"
+librenms_failover_test_probe_retries: 20
+librenms_failover_test_probe_delay: 2
+librenms_failover_test_validate_certs: "{{ librenms_vip_app_probe_validate_certs }}"
+
+librenms_failover_test_wait_after_stop: 2
+librenms_failover_test_wait_after_restore: 3

@@ -1,0 +1,313 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_failover_test_common_vars_lookup) }}"
+  vars:
+    librenms_failover_test_common_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Build active host lists for HA failover test
+  set_fact:
+    librenms_failover_test_active_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_failover_test_active_web_nodes: >-
+      {{
+        groups.get('librenms_web', groups.get('librenms_nodes', []))
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_failover_test_active_lb_nodes: >-
+      {{
+        groups.get('lb_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+  run_once: true
+
+- name: Determine HA failover test endpoints
+  set_fact:
+    librenms_failover_test_web_backend_host_effective: >-
+      {{
+        librenms_failover_test_web_backend_host
+        if librenms_failover_test_web_backend_host | length > 0
+        else (librenms_failover_test_active_web_nodes | first | default(''))
+      }}
+    librenms_failover_test_probe_delegate_effective: >-
+      {{
+        librenms_failover_test_probe_delegate
+        if librenms_failover_test_probe_delegate | length > 0
+        else (
+          librenms_failover_test_active_lb_nodes
+          | first
+          | default(librenms_failover_test_active_nodes | first | default(''))
+        )
+      }}
+    librenms_failover_test_vip_url: >-
+      {{
+        ('https' if librenms_haproxy_tls_enabled | bool else 'http')
+        ~ '://'
+        ~ librenms_vip_ip
+        ~ (
+          ':' ~ (librenms_haproxy_https_port | string)
+          if librenms_haproxy_tls_enabled | bool
+          and librenms_haproxy_https_port | int != 443
+          else (
+            ':' ~ (librenms_haproxy_web_port | string)
+            if not librenms_haproxy_tls_enabled | bool
+            and librenms_haproxy_web_port | int != 80
+            else ''
+          )
+        )
+        ~ librenms_failover_test_http_path
+      }}
+    librenms_failover_test_http_host: >-
+      {{
+        librenms_haproxy_web_check_host
+        if librenms_haproxy_web_check_host | length > 0
+        else (
+          librenms_fqdn
+          if librenms_fqdn | length > 0
+          and librenms_fqdn != librenms_default_fqdn_placeholder
+          else librenms_vip_ip
+        )
+      }}
+  run_once: true
+
+- name: Require explicit confirmation before disruptive failover tests
+  assert:
+    that:
+      - librenms_failover_test_confirm | bool
+    fail_msg: >-
+      This playbook intentionally stops HA services to prove failover behavior.
+      Rerun with -e librenms_failover_test_confirm=true when you are ready.
+  run_once: true
+
+- name: Validate HA failover test inventory
+  assert:
+    that:
+      - librenms_mode == 'ha'
+      - librenms_vip_enabled | bool
+      - librenms_vip_ip | length > 0
+      - (librenms_failover_test_active_web_nodes | length) >= 2
+      - (librenms_failover_test_active_lb_nodes | length) >= 2
+      - librenms_failover_test_web_backend_host_effective | length > 0
+      - librenms_failover_test_probe_delegate_effective | length > 0
+    fail_msg: >-
+      Controlled failover testing requires HA mode, a configured VIP, at least
+      two active web nodes, and at least two active load balancer nodes.
+  run_once: true
+
+- name: Probe VIP before failover tests
+  uri:
+    url: "{{ librenms_failover_test_vip_url }}"
+    headers:
+      Host: "{{ librenms_failover_test_http_host }}"
+    method: GET
+    return_content: false
+    status_code: "{{ librenms_failover_test_http_statuses }}"
+    timeout: "{{ librenms_failover_test_http_timeout }}"
+    validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
+  delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+  register: librenms_failover_test_baseline_probe
+  retries: "{{ librenms_failover_test_probe_retries | int }}"
+  delay: "{{ librenms_failover_test_probe_delay | int }}"
+  until:
+    - >-
+      (librenms_failover_test_baseline_probe.status | default(0) | int)
+      in librenms_failover_test_http_statuses
+  changed_when: false
+  run_once: true
+
+- name: Test HAProxy web backend failover
+  block:
+    - name: Stop selected web backend
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_web_backend_host_effective
+            ].librenms_nginx_service_name
+            | default(librenms_nginx_service_name)
+          }}
+        state: stopped
+      delegate_to: "{{ librenms_failover_test_web_backend_host_effective }}"
+      run_once: true
+
+    - name: Wait briefly for HAProxy to mark web backend down
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_stop | int }}"
+      run_once: true
+
+    - name: Verify VIP stays reachable after web backend stop
+      uri:
+        url: "{{ librenms_failover_test_vip_url }}"
+        headers:
+          Host: "{{ librenms_failover_test_http_host }}"
+        method: GET
+        return_content: false
+        status_code: "{{ librenms_failover_test_http_statuses }}"
+        timeout: "{{ librenms_failover_test_http_timeout }}"
+        validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
+      delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+      register: librenms_failover_test_web_probe
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - >-
+          (librenms_failover_test_web_probe.status | default(0) | int)
+          in librenms_failover_test_http_statuses
+      changed_when: false
+      run_once: true
+  always:
+    - name: Restore selected web backend
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_web_backend_host_effective
+            ].librenms_nginx_service_name
+            | default(librenms_nginx_service_name)
+          }}
+        state: started
+      delegate_to: "{{ librenms_failover_test_web_backend_host_effective }}"
+      when: librenms_failover_test_restore_services | bool
+      run_once: true
+
+    - name: Wait briefly after web backend restore
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
+      when: librenms_failover_test_restore_services | bool
+      run_once: true
+  when: "'web_backend' in librenms_failover_test_cases"
+
+- name: Detect VIP owner before keepalived failover test
+  include_tasks: detect_vip_owner.yml
+  when: "'keepalived_vip' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Record original VIP owner
+  set_fact:
+    librenms_failover_test_original_vip_owner: >-
+      {{ librenms_failover_test_detected_vip_owner }}
+  when: "'keepalived_vip' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Validate VIP owner was detected
+  assert:
+    that:
+      - librenms_failover_test_original_vip_owner | length > 0
+    fail_msg: >-
+      No load balancer currently owns VIP
+      {{ librenms_vip_ip }}/{{ librenms_vip_cidr }}. Check keepalived before
+      running the failover test.
+  when: "'keepalived_vip' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Test keepalived VIP failover
+  block:
+    - name: Stop keepalived on current VIP owner
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_original_vip_owner
+            ].librenms_keepalived_service_name
+            | default(librenms_keepalived_service_name)
+          }}
+        state: stopped
+      delegate_to: "{{ librenms_failover_test_original_vip_owner }}"
+      run_once: true
+
+    - name: Verify VIP stays reachable after keepalived stop
+      uri:
+        url: "{{ librenms_failover_test_vip_url }}"
+        headers:
+          Host: "{{ librenms_failover_test_http_host }}"
+        method: GET
+        return_content: false
+        status_code: "{{ librenms_failover_test_http_statuses }}"
+        timeout: "{{ librenms_failover_test_http_timeout }}"
+        validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
+      delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+      register: librenms_failover_test_keepalived_probe
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - >-
+          (librenms_failover_test_keepalived_probe.status | default(0) | int)
+          in librenms_failover_test_http_statuses
+      changed_when: false
+      run_once: true
+
+    - name: Detect VIP owner after keepalived failover
+      include_tasks: detect_vip_owner.yml
+      run_once: true
+
+    - name: Validate VIP moved to another load balancer
+      assert:
+        that:
+          - librenms_failover_test_detected_vip_owner | length > 0
+          - >-
+            librenms_failover_test_detected_vip_owner
+            != librenms_failover_test_original_vip_owner
+        fail_msg: >-
+          VIP did not move away from
+          {{ librenms_failover_test_original_vip_owner }} while keepalived was
+          stopped there.
+      run_once: true
+  always:
+    - name: Restore keepalived on original VIP owner
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_original_vip_owner
+            ].librenms_keepalived_service_name
+            | default(librenms_keepalived_service_name)
+          }}
+        state: started
+      delegate_to: "{{ librenms_failover_test_original_vip_owner }}"
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_failover_test_original_vip_owner | length > 0
+      run_once: true
+
+    - name: Wait briefly after keepalived restore
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
+      when: librenms_failover_test_restore_services | bool
+      run_once: true
+
+    - name: Verify VIP is reachable after keepalived restore
+      uri:
+        url: "{{ librenms_failover_test_vip_url }}"
+        headers:
+          Host: "{{ librenms_failover_test_http_host }}"
+        method: GET
+        return_content: false
+        status_code: "{{ librenms_failover_test_http_statuses }}"
+        timeout: "{{ librenms_failover_test_http_timeout }}"
+        validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
+      delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+      register: librenms_failover_test_restored_probe
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - >-
+          (librenms_failover_test_restored_probe.status | default(0) | int)
+          in librenms_failover_test_http_statuses
+      changed_when: false
+      run_once: true
+  when: "'keepalived_vip' in librenms_failover_test_cases"
+
+- name: Report HA failover test summary
+  debug:
+    msg: >-
+      HA failover tests passed for VIP {{ librenms_vip_ip }} using cases
+      {{ librenms_failover_test_cases | join(', ') }}.
+  run_once: true

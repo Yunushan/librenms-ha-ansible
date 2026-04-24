@@ -138,6 +138,7 @@ Upstream LibreNMS documentation currently provides package/install examples for 
 See also:
 - [docs/support-matrix.md](docs/support-matrix.md)
 - [docs/architecture.md](docs/architecture.md)
+- [docs/operations.md](docs/operations.md)
 - [examples/docker-ha/README.md](examples/docker-ha/README.md)
 
 ---
@@ -286,6 +287,7 @@ journals.
 ├── compose.yaml
 ├── docs/
 │   ├── architecture.md
+│   ├── operations.md
 │   └── docker.md
 ├── examples/
 │   └── docker-ha/
@@ -296,6 +298,9 @@ journals.
 │   ├── site.yml
 │   ├── cluster.yml
 │   ├── standalone.yml
+│   ├── doctor.yml
+│   ├── ha-failover-test.yml
+│   ├── backup.yml
 │   ├── add-node.yml
 │   ├── remove-node.yml
 │   └── validate.yml
@@ -308,9 +313,14 @@ journals.
 │   ├── haproxy_keepalived/
 │   ├── librenms_app/
 │   ├── snmpd/
+│   ├── doctor/
+│   ├── ha_failover_test/
+│   ├── backup/
 │   ├── remove_node/
 │   └── validate/
-├── scripts/generate-secrets.py
+├── scripts/
+│   ├── generate-secrets.py
+│   └── validate-inventory.py
 ├── ansible.cfg
 ├── requirements.yml
 └── README.md
@@ -405,6 +415,13 @@ At minimum, set:
 
 ### 5) Run the deployment
 
+Before the first deployment, run the doctor playbook to catch unsafe inventory
+values and host prerequisites:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml --ask-become-pass
+```
+
 Standalone:
 
 ```bash
@@ -449,6 +466,127 @@ complete the installer, then rerun with:
 ```yaml
 librenms_bootstrap_completed: true
 ```
+
+---
+
+## Doctor / Preflight Checks
+
+The doctor playbook is a non-installing preflight and operational sanity check.
+Run it before the first deployment, before a major OS upgrade, after inventory
+changes, and before planned HA failover testing:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml --ask-become-pass
+```
+
+For quick local checks before SSH or sudo is working, run:
+
+```bash
+python3 scripts/validate-inventory.py \
+  --inventory inventories/ha/hosts.yml \
+  --group-vars inventories/ha/group_vars/all.yml
+```
+
+It checks:
+
+- required inventory groups and HA quorum counts
+- duplicate node management addresses
+- VIP configuration and routing from load-balancer nodes
+- placeholder secrets and sample values
+- OS family support tier
+- memory and filesystem free space
+- required base commands
+- time synchronization
+- Gluster brick parent/device prerequisites
+
+Strictness can be tuned in inventory:
+
+```yaml
+librenms_doctor_fail_on_warnings: false
+librenms_doctor_fail_on_time_unsync: true
+librenms_doctor_min_memory_mb: 4096
+librenms_doctor_min_root_free_mb: 5120
+librenms_doctor_min_librenms_free_mb: 10240
+```
+
+`doctor.yml` is not a replacement for `validate.yml`. Use `doctor.yml` before
+or around maintenance; use `validate.yml` after deployment to check the running
+LibreNMS, Galera, Redis Sentinel, and Gluster services.
+
+---
+
+## Controlled HA Failover Tests
+
+Use `ha-failover-test.yml` before trusting maintenance or outage behavior. It is
+deliberately guarded because it stops services during the test. By default it:
+
+- stops one web backend and verifies the VIP still answers through HAProxy
+- stops keepalived on the current VIP owner and verifies the VIP moves to another
+  load balancer
+- starts any service it stopped before exiting
+
+Run it only after `doctor.yml`, `cluster.yml`, and `validate.yml` are clean:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/ha-failover-test.yml \
+  --ask-become-pass \
+  -e librenms_failover_test_confirm=true
+```
+
+Optional tuning:
+
+```yaml
+librenms_failover_test_cases:
+  - web_backend
+  - keepalived_vip
+librenms_failover_test_web_backend_host: lnms2
+librenms_failover_test_probe_retries: 20
+librenms_failover_test_probe_delay: 2
+```
+
+This is a controlled service failover test, not a hard power-off test. Hard
+power-off tests are still useful, but they include hypervisor, switch, ARP, and
+client TCP timeout behavior that Ansible cannot make deterministic.
+
+---
+
+## Backups
+
+Run `backup.yml` before major upgrades, schema work, or HA failover drills:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/backup.yml --ask-become-pass
+```
+
+By default it creates `/var/backups/librenms-ha/<timestamp>/` on the selected
+source hosts and backs up:
+
+- the LibreNMS database as `librenms.sql.gz`
+- core LibreNMS and service configuration as `librenms-config.tar.gz`
+- a `manifest.yml` describing the backup source hosts and files
+
+RRD archives can be large, so they are optional:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/backup.yml \
+  --ask-become-pass \
+  -e librenms_backup_include_rrd=true
+```
+
+Useful overrides:
+
+```yaml
+librenms_backup_root: /var/backups/librenms-ha
+librenms_backup_host: lnms2
+librenms_backup_app_host: lnms2
+librenms_backup_rrd_host: lnms2
+librenms_backup_include_rrd: false
+```
+
+Keep at least one recent backup outside the cluster. Backups stored only on the
+same three nodes are useful for operator mistakes, but they do not protect you
+from storage loss, accidental VM deletion, or a failed upgrade that corrupts all
+members.
 
 ---
 
