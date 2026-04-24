@@ -1,0 +1,8 @@
+[Unit]
+Description=LibreNMS dispatcher HA recovery
+After=network-online.target mariadb.service haproxy.service redis-server.service librenms.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/librenms-dispatcher-ha-recover

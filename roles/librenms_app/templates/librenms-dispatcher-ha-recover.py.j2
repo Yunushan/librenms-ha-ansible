@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+import socket
+import subprocess
+import sys
+
+try:
+    import pymysql
+except Exception as exc:
+    print(f"PyMySQL is unavailable: {exc}", file=sys.stderr)
+    sys.exit(0)
+
+
+LOCAL_HOST = {{ inventory_hostname | to_json }}
+LOCAL_NODE_ID = {{ (librenms_node_id | default(inventory_hostname)) | to_json }}
+DB_HOST = {{ librenms_db_host_effective | to_json }}
+DB_PORT = {{ librenms_db_port | int }}
+DB_NAME = {{ librenms_db_name | to_json }}
+DB_USER = {{ librenms_db_user | to_json }}
+DB_PASSWORD = {{ librenms_db_password | to_json }}
+DB_TIMEOUT = {{ librenms_dispatcher_failover_db_timeout | int }}
+TCP_TIMEOUT = {{ librenms_dispatcher_failover_tcp_timeout | int }}
+RESTART_TIMEOUT = {{ librenms_dispatcher_failover_restart_timeout | int }}
+POLLER_FREQUENCY = {{ librenms_dispatcher_poller_frequency | int }}
+PRUNE_UNREACHABLE_NODES = {{ (librenms_dispatcher_failover_prune_unreachable_nodes | bool) | ternary('True', 'False') }}
+REFRESH_LOCAL_REGISTRATION = {{ (librenms_dispatcher_failover_refresh_local_registration | bool) | ternary('True', 'False') }}
+
+NODES = [
+{% for host in librenms_dispatcher_registration_nodes %}
+    {
+        "host": {{ host | to_json }},
+        "node_id": {{ (hostvars[host].librenms_node_id | default(host)) | to_json }},
+        "address": {{ (hostvars[host].ansible_host | default(host)) | to_json }},
+        "web_port": 80,
+    },
+{% endfor %}
+]
+
+
+def service_active():
+    return subprocess.run(
+        ["systemctl", "is-active", "--quiet", "librenms.service"],
+        check=False,
+    ).returncode == 0
+
+
+def restart_dispatcher(reason):
+    print(f"Restarting librenms.service: {reason}")
+    try:
+        subprocess.run(
+            ["systemctl", "restart", "librenms.service"],
+            check=False,
+            timeout=RESTART_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        print("Timed out while restarting librenms.service", file=sys.stderr)
+
+
+def tcp_reachable(host, port):
+    try:
+        with socket.create_connection((host, int(port)), timeout=TCP_TIMEOUT):
+            return True
+    except OSError:
+        return False
+
+
+def db_connect():
+    return pymysql.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME,
+        connect_timeout=DB_TIMEOUT,
+        read_timeout=DB_TIMEOUT,
+        write_timeout=DB_TIMEOUT,
+        autocommit=True,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+
+def query_one(conn, sql, args):
+    with conn.cursor() as cursor:
+        cursor.execute(sql, args)
+        return cursor.fetchone() or {}
+
+
+def execute(conn, sql, args):
+    with conn.cursor() as cursor:
+        cursor.execute(sql, args)
+
+
+def local_registration_is_active(conn):
+    row = query_one(
+        conn,
+        """
+        SELECT COUNT(*) AS active_pollers
+        FROM `poller_cluster`
+        WHERE `node_id` = %s
+        AND `last_report` >= DATE_SUB(
+          NOW(),
+          INTERVAL COALESCE(`poller_frequency`, %s) SECOND
+        )
+        """,
+        (LOCAL_NODE_ID, POLLER_FREQUENCY),
+    )
+    return int(row.get("active_pollers") or 0) > 0
+
+
+def refresh_local_registration(conn):
+    execute(
+        conn,
+        """
+        INSERT INTO `poller_cluster`
+        (`node_id`, `poller_name`, `poller_version`, `poller_groups`,
+         `last_report`, `master`, `poller_frequency`)
+        VALUES (%s, %s, 'librenms-service', '0', NOW(), 0, %s)
+        ON DUPLICATE KEY UPDATE
+          `poller_name` = VALUES(`poller_name`),
+          `poller_version` = VALUES(`poller_version`),
+          `poller_groups` = VALUES(`poller_groups`),
+          `poller_frequency` = VALUES(`poller_frequency`),
+          `last_report` = NOW()
+        """,
+        (LOCAL_NODE_ID, LOCAL_HOST, POLLER_FREQUENCY),
+    )
+
+
+def prune_node(conn, node):
+    execute(
+        conn,
+        """
+        DELETE `poller_cluster_stats`
+        FROM `poller_cluster_stats`
+        INNER JOIN `poller_cluster`
+          ON `poller_cluster`.`id` = `poller_cluster_stats`.`parent_poller`
+        WHERE `poller_cluster`.`node_id` = %s
+        """,
+        (node["node_id"],),
+    )
+    execute(
+        conn,
+        "DELETE FROM `poller_cluster` WHERE `node_id` = %s",
+        (node["node_id"],),
+    )
+    print(f"Pruned unreachable dispatcher node {node['host']} ({node['node_id']})")
+
+
+def main():
+    if not service_active():
+        restart_dispatcher("dispatcher service is not active")
+
+    try:
+        conn = db_connect()
+    except Exception as exc:
+        print(f"Unable to connect to LibreNMS database through {DB_HOST}:{DB_PORT}: {exc}", file=sys.stderr)
+        return 0
+
+    with conn:
+        if service_active() and not local_registration_is_active(conn):
+            restart_dispatcher("local dispatcher registration is stale")
+            if REFRESH_LOCAL_REGISTRATION:
+                refresh_local_registration(conn)
+
+        if PRUNE_UNREACHABLE_NODES:
+            for node in NODES:
+                if node["node_id"] == LOCAL_NODE_ID:
+                    continue
+                if not tcp_reachable(node["address"], node["web_port"]):
+                    prune_node(conn, node)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

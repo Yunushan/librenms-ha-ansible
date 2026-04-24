@@ -1,0 +1,11 @@
+[Unit]
+Description=Run LibreNMS dispatcher HA recovery
+
+[Timer]
+OnBootSec={{ librenms_dispatcher_failover_recovery_interval }}
+OnUnitActiveSec={{ librenms_dispatcher_failover_recovery_interval }}
+AccuracySec=5s
+Unit=librenms-dispatcher-ha-recover.service
+
+[Install]
+WantedBy=timers.target

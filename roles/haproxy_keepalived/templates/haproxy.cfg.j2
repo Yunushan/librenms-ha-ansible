@@ -42,6 +42,7 @@ global
 defaults
     log global
     timeout connect {{ librenms_haproxy_timeout_connect }}
+    timeout check {{ librenms_haproxy_timeout_check }}
     timeout client {{ librenms_haproxy_timeout_client }}
     timeout server {{ librenms_haproxy_timeout_server }}
     retries {{ librenms_haproxy_retries }}

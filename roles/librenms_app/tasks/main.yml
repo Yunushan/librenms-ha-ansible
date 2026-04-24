@@ -1875,6 +1875,43 @@
     - librenms_manage_dispatcher | bool
     - ansible_service_mgr == 'systemd'
 
+- name: Deploy LibreNMS dispatcher HA recovery script
+  template:
+    src: librenms-dispatcher-ha-recover.py.j2
+    dest: /usr/local/sbin/librenms-dispatcher-ha-recover
+    owner: root
+    group: root
+    mode: "0750"
+  no_log: true
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_dispatcher_failover_recovery_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy LibreNMS dispatcher HA recovery service
+  template:
+    src: librenms-dispatcher-ha-recover.service.j2
+    dest: /etc/systemd/system/librenms-dispatcher-ha-recover.service
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_dispatcher_failover_recovery_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy LibreNMS dispatcher HA recovery timer
+  template:
+    src: librenms-dispatcher-ha-recover.timer.j2
+    dest: /etc/systemd/system/librenms-dispatcher-ha-recover.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_dispatcher_failover_recovery_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
 - name: Reload systemd for LibreNMS services
   systemd:
     daemon_reload: true
@@ -1905,6 +1942,16 @@
     enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
   when:
     - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Enable and start dispatcher HA recovery timer
+  service:
+    name: librenms-dispatcher-ha-recover.timer
+    state: "{{ 'started' if librenms_bootstrap_completed_effective | bool else 'stopped' }}"
+    enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_dispatcher_failover_recovery_enabled | bool
     - ansible_service_mgr == 'systemd'
 
 - name: Remove legacy cron file

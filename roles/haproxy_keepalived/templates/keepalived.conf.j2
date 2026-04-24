@@ -5,7 +5,7 @@ global_defs {
 
 vrrp_script chk_haproxy {
   script "/usr/bin/pgrep -x haproxy"
-  interval 2
+  interval {{ librenms_keepalived_track_haproxy_interval }}
   weight 20
 }
 
@@ -14,7 +14,11 @@ vrrp_instance VI_1 {
   interface {{ librenms_vip_interface_effective }}
   virtual_router_id {{ librenms_keepalived_vrid }}
   priority {{ hostvars[inventory_hostname].librenms_keepalived_priority | default(librenms_keepalived_priority) }}
-  advert_int 1
+  advert_int {{ librenms_keepalived_advert_interval }}
+  garp_master_delay {{ librenms_keepalived_garp_master_delay }}
+  garp_master_repeat {{ librenms_keepalived_garp_master_repeat }}
+  garp_master_refresh {{ librenms_keepalived_garp_master_refresh }}
+  garp_master_refresh_repeat {{ librenms_keepalived_garp_master_refresh_repeat }}
   authentication {
     auth_type PASS
     auth_pass {{ librenms_keepalived_auth_pass[:8] }}

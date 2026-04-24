@@ -107,7 +107,7 @@ librenms_redis_db: 0
 librenms_redis_cache_db: 1
 librenms_redis_session_db: 0
 librenms_redis_timeout: 5
-librenms_redis_sentinel_timeout: 30
+librenms_redis_sentinel_timeout: 5
 librenms_redis_timeout_effective: >-
   {{
     librenms_redis_sentinel_timeout
@@ -120,7 +120,7 @@ librenms_redis_runtime_healthcheck_delay: 5
 librenms_redis_runtime_healthcheck_timeout: 5
 librenms_redis_runtime_healthcheck_connect_timeout: 3
 librenms_redis_runtime_healthcheck_key_ttl: 30
-librenms_redis_runtime_healthcheck_blocking_timeout: 10
+librenms_redis_runtime_healthcheck_blocking_timeout: 3
 librenms_redis_quorum: 2
 librenms_redis_sentinel_down_after_milliseconds: 5000
 librenms_redis_sentinel_failover_timeout: 30000
@@ -174,6 +174,12 @@ librenms_vip_interface: ""
 librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
 librenms_keepalived_vrid: 51
 librenms_keepalived_priority: 100
+librenms_keepalived_track_haproxy_interval: 1
+librenms_keepalived_advert_interval: 1
+librenms_keepalived_garp_master_delay: 0
+librenms_keepalived_garp_master_repeat: 5
+librenms_keepalived_garp_master_refresh: 10
+librenms_keepalived_garp_master_refresh_repeat: 2
 librenms_haproxy_web_port: 80
 librenms_haproxy_https_port: 443
 librenms_haproxy_tls_enabled: false
@@ -208,25 +214,26 @@ librenms_haproxy_db_health_user: haproxy_check
 librenms_haproxy_db_health_user_host: "%"
 librenms_haproxy_recover_galera_backends: true
 librenms_haproxy_galera_backend_wait_timeout: 30
-librenms_haproxy_timeout_connect: 3s
+librenms_haproxy_timeout_connect: 1s
+librenms_haproxy_timeout_check: 1s
 librenms_haproxy_timeout_client: 180s
 librenms_haproxy_timeout_server: 180s
 librenms_haproxy_retries: 2
 librenms_haproxy_redispatch: true
-librenms_haproxy_web_check_interval: 2s
+librenms_haproxy_web_check_interval: 1s
 librenms_haproxy_web_check_fall: 2
-librenms_haproxy_web_check_rise: 2
-librenms_haproxy_db_check_interval: 2s
+librenms_haproxy_web_check_rise: 1
+librenms_haproxy_db_check_interval: 1s
 librenms_haproxy_db_check_fall: 2
-librenms_haproxy_db_check_rise: 2
+librenms_haproxy_db_check_rise: 1
 librenms_haproxy_rrdcached_enabled: >-
   {{
     librenms_manage_rrdcached | bool
     and librenms_rrdcached_endpoint_strategy == 'vip_tcp'
   }}
-librenms_haproxy_rrdcached_check_interval: 2s
+librenms_haproxy_rrdcached_check_interval: 1s
 librenms_haproxy_rrdcached_check_fall: 2
-librenms_haproxy_rrdcached_check_rise: 2
+librenms_haproxy_rrdcached_check_rise: 1
 librenms_haproxy_rrdcached_port: "{{ (librenms_rrdcached_bind_port | int) + 1 }}"
 librenms_app_probe_path: /
 librenms_app_probe_success_statuses:
@@ -286,6 +293,13 @@ librenms_dispatcher_poller_frequency: "{{ librenms_dispatcher_registration_windo
 librenms_dispatcher_prune_unmanaged_nodes: true
 librenms_dispatcher_restart_before_registration: false
 librenms_dispatcher_watchdog_enabled: true
+librenms_dispatcher_failover_recovery_enabled: true
+librenms_dispatcher_failover_recovery_interval: 15s
+librenms_dispatcher_failover_tcp_timeout: 1
+librenms_dispatcher_failover_db_timeout: 3
+librenms_dispatcher_failover_restart_timeout: 20
+librenms_dispatcher_failover_prune_unreachable_nodes: true
+librenms_dispatcher_failover_refresh_local_registration: true
 librenms_dispatcher_registration_nodes: >-
   {{
     librenms_active_web_nodes
