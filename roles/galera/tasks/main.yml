@@ -125,10 +125,22 @@
       }}
   when: librenms_db_mode == 'galera'
 
+- name: Stop local MariaDB before Galera recovery position probe
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: stopped
+  register: librenms_galera_recovery_stop
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname in librenms_active_db_nodes
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+
 - name: Recover Galera positions when no node is marked safe to bootstrap
   shell: |-
-    set -o pipefail
-    galera_recovery 2>&1 | awk '
+    { galera_recovery 2>&1 || true; } | awk '
       /Recovered position/ {
         pos=$NF
         gsub(/[;,]/, "", pos)
@@ -253,6 +265,12 @@
 
       Recovery tie breaker:
       {{ librenms_galera_recovery_tie_breaker }}
+
+      Local MariaDB stop before recovery:
+      {{ librenms_galera_recovery_stop | default({}) }}
+
+      Raw galera_recovery results:
+      {{ librenms_galera_recovered_state.results | default([]) }}
 
       Stop MariaDB on all DB nodes, run galera_recovery on each node, choose the
       node with the highest seqno, set safe_to_bootstrap: 1 on only that node,
