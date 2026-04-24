@@ -393,24 +393,42 @@
 
 - name: Verify Redis Sentinel master accepts cache writes
   no_log: true
-  command: >-
-    redis-cli
-    -h {{ librenms_redis_sentinel_master_host_effective | quote }}
-    -p {{ librenms_redis_sentinel_master_port_effective | quote }}
-    {% if librenms_redis_username | length > 0 %}
-    --user {{ librenms_redis_username | quote }}
-    {% endif %}
-    SET librenms:sentinel-write-check {{ inventory_hostname | quote }} EX 30
+  shell: |-
+    set -euo pipefail
+
+    attempts={{ librenms_redis_sentinel_write_check_retries | int }}
+    delay={{ librenms_redis_sentinel_write_check_delay | int }}
+    attempt=1
+
+    while [ "${attempt}" -le "${attempts}" ]; do
+      result=$(
+        redis-cli \
+          -h {{ librenms_redis_sentinel_master_host_effective | quote }} \
+          -p {{ librenms_redis_sentinel_master_port_effective | quote }} \
+        {% if librenms_redis_username | length > 0 %}
+          --user {{ librenms_redis_username | quote }} \
+        {% endif %}
+          SET librenms:sentinel-write-check {{ inventory_hostname | quote }} EX 30 \
+          2>/dev/null || true
+      )
+
+      if [ "${result}" = "OK" ]; then
+        exit 0
+      fi
+
+      if [ "${attempt}" -lt "${attempts}" ]; then
+        sleep "${delay}"
+      fi
+      attempt=$((attempt + 1))
+    done
+
+    exit 1
+  args:
+    executable: /bin/bash
   environment:
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
   register: librenms_redis_sentinel_write_check
   changed_when: false
-  failed_when: false
-  retries: 6
-  delay: 5
-  until:
-    - librenms_redis_sentinel_write_check.rc == 0
-    - (librenms_redis_sentinel_write_check.stdout | default('') | trim) == 'OK'
   when: librenms_redis_mode == 'sentinel'
 
 - name: Confirm Redis Sentinel writable master
