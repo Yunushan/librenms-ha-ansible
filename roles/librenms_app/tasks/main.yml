@@ -725,6 +725,7 @@
     }}
   when:
     - item | length > 0
+  notify: Restart PHP-FPM
 
 - name: Ensure LibreNMS PHP-FPM support directory exists
   file:

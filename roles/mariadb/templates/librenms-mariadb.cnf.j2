@@ -2,7 +2,6 @@
 innodb_file_per_table=1
 lower_case_table_names=0
 log_warnings={{ librenms_mariadb_log_warnings }}
-default_time_zone='{{ librenms_mariadb_default_time_zone }}'
 bind-address={{
   (
     ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))

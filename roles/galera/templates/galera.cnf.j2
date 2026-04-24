@@ -3,7 +3,6 @@ binlog_format=ROW
 default_storage_engine=InnoDB
 innodb_autoinc_lock_mode=2
 log_warnings={{ librenms_mariadb_log_warnings }}
-default_time_zone='{{ librenms_mariadb_default_time_zone }}'
 bind-address={{
   (
     ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
