@@ -1088,6 +1088,136 @@
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
 
+- name: Normalize LibreNMS validation schema on every Galera backend
+  community.mysql.mysql_query:
+    login_host: "{{ hostvars[item].ansible_host | default(item) }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - "SET TIME_ZONE='+00:00'"
+      - "ALTER TABLE `notifications` CHANGE `datetime` `datetime` timestamp NOT NULL DEFAULT '1970-01-02 00:00:00'"
+      - "ALTER TABLE `users` CHANGE `created_at` `created_at` timestamp NOT NULL DEFAULT '1970-01-02 00:00:01'"
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_schema_galera_backend_normalize
+  no_log: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Verify LibreNMS validation schema on every Galera backend
+  community.mysql.mysql_query:
+    login_host: "{{ hostvars[item].ansible_host | default(item) }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - "SET TIME_ZONE='+00:00'"
+      - >-
+        SELECT LOWER(DATA_TYPE) AS data_type, UPPER(IS_NULLABLE) AS is_nullable,
+        COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), COLUMN_DEFAULT, '')
+        AS column_default
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
+        AND TABLE_NAME = 'notifications'
+        AND COLUMN_NAME = 'datetime'
+      - >-
+        SELECT LOWER(DATA_TYPE) AS data_type, UPPER(IS_NULLABLE) AS is_nullable,
+        COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), COLUMN_DEFAULT, '')
+        AS column_default
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
+        AND TABLE_NAME = 'users'
+        AND COLUMN_NAME = 'created_at'
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_schema_galera_backend_columns
+  changed_when: false
+  no_log: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Initialize invalid Galera schema backend list
+  set_fact:
+    librenms_schema_invalid_galera_backends: []
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Record Galera schema backends that still fail validation
+  vars:
+    notifications_schema: >-
+      {{
+        (item.query_result[-2] | default([]))
+        | first
+        | default({})
+      }}
+    users_schema: >-
+      {{
+        (item.query_result[-1] | default([]))
+        | first
+        | default({})
+      }}
+    notifications_default: >-
+      {{
+        notifications_schema.column_default
+        | default('')
+        | string
+        | regex_replace("^'(.*)'$", "\\1")
+      }}
+    users_default: >-
+      {{
+        users_schema.column_default
+        | default('')
+        | string
+        | regex_replace("^'(.*)'$", "\\1")
+      }}
+  set_fact:
+    librenms_schema_invalid_galera_backends: >-
+      {{
+        librenms_schema_invalid_galera_backends
+        + [
+            {
+              'host': item.item,
+              'notifications_datetime': notifications_schema,
+              'users_created_at': users_schema
+            }
+          ]
+      }}
+  loop: "{{ librenms_schema_galera_backend_columns.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+    - >-
+      (notifications_schema.data_type | default('') | lower) != 'timestamp'
+      or (notifications_schema.is_nullable | default('') | upper) != 'NO'
+      or notifications_default != '1970-01-02 00:00:00'
+      or (users_schema.data_type | default('') | lower) != 'timestamp'
+      or (users_schema.is_nullable | default('') | upper) != 'NO'
+      or users_default != '1970-01-02 00:00:01'
+
+- name: Fail when any Galera backend has stale LibreNMS validation schema
+  assert:
+    that:
+      - (librenms_schema_invalid_galera_backends | length) == 0
+    fail_msg: |-
+      LibreNMS validation schema differs across Galera backends. The Web UI can
+      fail intermittently when HAProxy sends a request to one of these stale DB
+      nodes.
+
+      Invalid Galera backends:
+      {{ librenms_schema_invalid_galera_backends }}
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
 - name: Check if the initial LibreNMS admin user already exists
   community.mysql.mysql_query:
     login_host: "{{ librenms_db_host_install_effective }}"
