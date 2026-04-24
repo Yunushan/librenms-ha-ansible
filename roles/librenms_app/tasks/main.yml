@@ -986,10 +986,6 @@
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
-    - >-
-      (librenms_notifications_datetime_schema.data_type | default('') | lower) != 'timestamp'
-      or (librenms_notifications_datetime_schema.is_nullable | default('') | upper) != 'NO'
-      or (librenms_notifications_datetime_schema.column_default | default('')) != '1970-01-02 00:00:00'
 
 - name: Normalize LibreNMS users.created_at schema default
   community.mysql.mysql_query:
@@ -1006,10 +1002,79 @@
   when:
     - librenms_manage_validation_schema_fixes | bool
     - inventory_hostname == librenms_schema_fix_host_effective
-    - >-
-      (librenms_users_created_at_schema.data_type | default('') | lower) != 'timestamp'
-      or (librenms_users_created_at_schema.is_nullable | default('') | upper) != 'NO'
-      or (librenms_users_created_at_schema.column_default | default('')) != '1970-01-02 00:00:01'
+
+- name: Verify LibreNMS validation schema columns after normalization
+  community.mysql.mysql_query:
+    login_host: "{{ librenms_db_host_install_effective }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - "SET TIME_ZONE='+00:00'"
+      - >-
+        SELECT LOWER(DATA_TYPE) AS data_type, UPPER(IS_NULLABLE) AS is_nullable,
+        COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), COLUMN_DEFAULT, '')
+        AS column_default
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
+        AND TABLE_NAME = 'notifications'
+        AND COLUMN_NAME = 'datetime'
+      - >-
+        SELECT LOWER(DATA_TYPE) AS data_type, UPPER(IS_NULLABLE) AS is_nullable,
+        COALESCE(DATE_FORMAT(COLUMN_DEFAULT, '%Y-%m-%d %H:%i:%s'), COLUMN_DEFAULT, '')
+        AS column_default
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{{ librenms_db_name }}'
+        AND TABLE_NAME = 'users'
+        AND COLUMN_NAME = 'created_at'
+  register: librenms_schema_columns_after_fix
+  become: true
+  changed_when: false
+  no_log: true
+  when:
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Normalize LibreNMS validation schema verification results
+  set_fact:
+    librenms_notifications_datetime_schema_after_fix: >-
+      {{
+        (librenms_schema_columns_after_fix.query_result[-2] | default([]))
+        | first
+        | default({})
+      }}
+    librenms_users_created_at_schema_after_fix: >-
+      {{
+        (librenms_schema_columns_after_fix.query_result[-1] | default([]))
+        | first
+        | default({})
+      }}
+  when:
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
+
+- name: Fail when LibreNMS validation schema columns remain incorrect
+  assert:
+    that:
+      - (librenms_notifications_datetime_schema_after_fix.data_type | default('') | lower) == 'timestamp'
+      - (librenms_notifications_datetime_schema_after_fix.is_nullable | default('') | upper) == 'NO'
+      - (librenms_notifications_datetime_schema_after_fix.column_default | default('')) == '1970-01-02 00:00:00'
+      - (librenms_users_created_at_schema_after_fix.data_type | default('') | lower) == 'timestamp'
+      - (librenms_users_created_at_schema_after_fix.is_nullable | default('') | upper) == 'NO'
+      - (librenms_users_created_at_schema_after_fix.column_default | default('')) == '1970-01-02 00:00:01'
+    fail_msg: |-
+      LibreNMS schema normalization ran, but validation columns are still not
+      in the expected shape.
+
+      notifications.datetime:
+      {{ librenms_notifications_datetime_schema_after_fix | default({}) }}
+
+      users.created_at:
+      {{ librenms_users_created_at_schema_after_fix | default({}) }}
+  when:
+    - librenms_manage_validation_schema_fixes | bool
+    - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Check if the initial LibreNMS admin user already exists
   community.mysql.mysql_query:

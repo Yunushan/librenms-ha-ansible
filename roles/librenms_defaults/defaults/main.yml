@@ -204,6 +204,8 @@ librenms_nginx_redirect_unmatched_hosts: "{{ librenms_vip_enabled | bool }}"
 librenms_haproxy_db_mysql_check_enabled: true
 librenms_haproxy_db_health_user: haproxy_check
 librenms_haproxy_db_health_user_host: "%"
+librenms_haproxy_recover_galera_backends: true
+librenms_haproxy_galera_backend_wait_timeout: 30
 librenms_haproxy_timeout_connect: 3s
 librenms_haproxy_timeout_client: 180s
 librenms_haproxy_timeout_server: 180s

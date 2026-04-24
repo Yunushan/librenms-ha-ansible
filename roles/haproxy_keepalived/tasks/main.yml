@@ -240,6 +240,102 @@
     - not librenms_haproxy_tls_manage_cert | bool
     - not librenms_letsencrypt_enabled | bool
 
+- name: Verify Galera backends are reachable before HAProxy reload
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: "{{ librenms_db_port }}"
+    timeout: "{{ librenms_haproxy_galera_backend_wait_timeout | int }}"
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_haproxy_galera_backend_wait
+  failed_when: false
+  when: librenms_db_mode == 'galera'
+
+- name: Restart unavailable Galera backends before HAProxy reload
+  service:
+    name: "{{ librenms_mariadb_service_name }}"
+    state: restarted
+  loop: >-
+    {{
+      librenms_haproxy_galera_backend_wait.results | default([])
+      | rejectattr('state', 'equalto', 'started')
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  register: librenms_haproxy_galera_backend_restart
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_haproxy_recover_galera_backends | bool
+
+- name: Recheck Galera backends after recovery restart
+  wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: "{{ librenms_db_port }}"
+    timeout: "{{ librenms_haproxy_galera_backend_wait_timeout | int }}"
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_haproxy_galera_backend_recheck
+  failed_when: false
+  when: librenms_db_mode == 'galera'
+
+- name: Capture unavailable Galera backend diagnostics before HAProxy reload
+  shell: |-
+    set -o pipefail
+    {
+      echo "--- expected endpoint ---"
+      echo "{{ hostvars[item].ansible_host | default(item) }}:{{ librenms_db_port }}"
+      echo "--- systemctl ---"
+      systemctl status "{{ librenms_mariadb_service_name }}" --no-pager -l || true
+      echo "--- listeners ---"
+      ss -ltnp || true
+      echo "--- wsrep ---"
+      mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+        "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" || true
+      echo "--- journal ---"
+      journalctl -u "{{ librenms_mariadb_service_name }}" -n 120 --no-pager || true
+    }
+  args:
+    executable: /bin/bash
+  loop: >-
+    {{
+      librenms_haproxy_galera_backend_recheck.results | default([])
+      | rejectattr('state', 'equalto', 'started')
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  register: librenms_haproxy_galera_backend_diagnostics
+  changed_when: false
+  failed_when: false
+  when: librenms_db_mode == 'galera'
+
+- name: Fail when Galera backend is unavailable before HAProxy reload
+  fail:
+    msg: |-
+      HAProxy would mark one or more Galera backends DOWN because they are not
+      accepting TCP connections on {{ librenms_db_port }}.
+
+      Initial backend wait:
+      {{ librenms_haproxy_galera_backend_wait.results | default([]) }}
+
+      Recovery restart:
+      {{ librenms_haproxy_galera_backend_restart.results | default([]) }}
+
+      Backend recheck:
+      {{ librenms_haproxy_galera_backend_recheck.results | default([]) }}
+
+      Diagnostics:
+      {{ librenms_haproxy_galera_backend_diagnostics.results | default([]) }}
+  when:
+    - librenms_db_mode == 'galera'
+    - >-
+      (
+        librenms_haproxy_galera_backend_recheck.results | default([])
+        | rejectattr('state', 'equalto', 'started')
+        | list
+        | length
+      ) > 0
+
 - name: Deploy HAProxy config
   template:
     src: haproxy.cfg.j2
