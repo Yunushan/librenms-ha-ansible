@@ -391,7 +391,7 @@
       {{ librenms_redis_sentinel_service }} on {{ inventory_hostname }}.
   when: librenms_redis_mode == 'sentinel'
 
-- name: Verify Redis Sentinel master accepts cache writes
+- name: Probe Redis Sentinel reported master accepts cache writes
   no_log: true
   shell: |-
     set -euo pipefail
@@ -429,6 +429,7 @@
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
   register: librenms_redis_sentinel_write_check
   changed_when: false
+  failed_when: false
   when: librenms_redis_mode == 'sentinel'
 
 - name: Confirm Redis Sentinel writable master
@@ -437,7 +438,21 @@
       Redis Sentinel {{ librenms_redis_sentinel_service }} reports writable
       master {{ librenms_redis_sentinel_master_host_effective }}:{{
       librenms_redis_sentinel_master_port_effective }} on {{ inventory_hostname }}.
-  when: librenms_redis_mode == 'sentinel'
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - (librenms_redis_sentinel_write_check.rc | default(1) | int) == 0
+
+- name: Report Redis Sentinel local master is still converging
+  debug:
+    msg: >-
+      Redis Sentinel {{ librenms_redis_sentinel_service }} on
+      {{ inventory_hostname }} currently reports
+      {{ librenms_redis_sentinel_master_host_effective }}:{{
+      librenms_redis_sentinel_master_port_effective }}, but that endpoint is
+      not writable yet. Continuing to quorum consensus validation.
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - (librenms_redis_sentinel_write_check.rc | default(0) | int) != 0
 
 - name: Determine Redis Sentinel consensus query nodes
   set_fact:
@@ -565,24 +580,42 @@
 
 - name: Verify Redis Sentinel consensus master accepts cache writes
   no_log: true
-  command: >-
-    redis-cli
-    -h {{ librenms_redis_sentinel_consensus_master_host | quote }}
-    -p {{ librenms_redis_sentinel_consensus_master_port | quote }}
-    {% if librenms_redis_username | length > 0 %}
-    --user {{ librenms_redis_username | quote }}
-    {% endif %}
-    SET librenms:sentinel-consensus-write-check {{ inventory_hostname | quote }} EX 30
+  shell: |-
+    set -euo pipefail
+
+    attempts={{ librenms_redis_sentinel_consensus_retries | int }}
+    delay={{ librenms_redis_sentinel_consensus_delay | int }}
+    attempt=1
+
+    while [ "${attempt}" -le "${attempts}" ]; do
+      result=$(
+        redis-cli \
+          -h {{ librenms_redis_sentinel_consensus_master_host | quote }} \
+          -p {{ librenms_redis_sentinel_consensus_master_port | quote }} \
+        {% if librenms_redis_username | length > 0 %}
+          --user {{ librenms_redis_username | quote }} \
+        {% endif %}
+          SET librenms:sentinel-consensus-write-check {{ inventory_hostname | quote }} EX 30 \
+          2>/dev/null || true
+      )
+
+      if [ "${result}" = "OK" ]; then
+        exit 0
+      fi
+
+      if [ "${attempt}" -lt "${attempts}" ]; then
+        sleep "${delay}"
+      fi
+      attempt=$((attempt + 1))
+    done
+
+    exit 1
+  args:
+    executable: /bin/bash
   environment:
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
   register: librenms_redis_sentinel_consensus_write_check
   changed_when: false
-  failed_when: false
-  retries: "{{ librenms_redis_sentinel_consensus_retries | int }}"
-  delay: "{{ librenms_redis_sentinel_consensus_delay | int }}"
-  until:
-    - librenms_redis_sentinel_consensus_write_check.rc == 0
-    - (librenms_redis_sentinel_consensus_write_check.stdout | default('') | trim) == 'OK'
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
