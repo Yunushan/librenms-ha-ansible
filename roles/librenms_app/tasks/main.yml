@@ -1059,10 +1059,22 @@
     that:
       - (librenms_notifications_datetime_schema_after_fix.data_type | default('') | lower) == 'timestamp'
       - (librenms_notifications_datetime_schema_after_fix.is_nullable | default('') | upper) == 'NO'
-      - (librenms_notifications_datetime_schema_after_fix.column_default | default('')) == '1970-01-02 00:00:00'
+      - >-
+        (
+          librenms_notifications_datetime_schema_after_fix.column_default
+          | default('')
+          | string
+          | regex_replace("^'(.*)'$", "\\1")
+        ) == '1970-01-02 00:00:00'
       - (librenms_users_created_at_schema_after_fix.data_type | default('') | lower) == 'timestamp'
       - (librenms_users_created_at_schema_after_fix.is_nullable | default('') | upper) == 'NO'
-      - (librenms_users_created_at_schema_after_fix.column_default | default('')) == '1970-01-02 00:00:01'
+      - >-
+        (
+          librenms_users_created_at_schema_after_fix.column_default
+          | default('')
+          | string
+          | regex_replace("^'(.*)'$", "\\1")
+        ) == '1970-01-02 00:00:01'
     fail_msg: |-
       LibreNMS schema normalization ran, but validation columns are still not
       in the expected shape.
