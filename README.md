@@ -142,6 +142,141 @@ See also:
 
 ---
 
+## Major OS Upgrades on Existing Nodes
+
+Major distro upgrades are intentionally not automated by this playbook. The
+playbook can re-converge packages, config files, services, timers, HAProxy,
+Keepalived, MariaDB/Galera, Redis/Sentinel, GlusterFS, and LibreNMS after a node
+comes back, but the actual OS release upgrade must be handled with the vendor's
+upgrade tooling and a maintenance plan.
+
+For production HA clusters, upgrade one node at a time. Do not upgrade all
+nodes together unless you have accepted a full outage and have verified backups.
+
+### Before upgrading
+
+1. Confirm that the target OS release is supported by LibreNMS and by this repo's
+   package mappings. Primary support is Ubuntu and Debian; other families should
+   be lab-tested first.
+2. Pin `librenms_version` to an explicit released tag instead of
+   `latest-stable` if you need a repeatable maintenance window.
+3. Take VM snapshots or image backups for every node.
+4. Back up MariaDB/Galera, Redis data if used for persistent cache/session
+   state, `/opt/librenms`, `/opt/librenms/rrd` or the Gluster volume, and any
+   inventory/vault files.
+5. Verify the cluster is healthy before touching the OS:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml
+```
+
+### Rolling HA upgrade order
+
+Use this order for full HA clusters:
+
+1. Upgrade a non-VIP application or poller node first.
+2. Upgrade remaining non-VIP nodes one at a time.
+3. Upgrade DB/Redis/Gluster-capable nodes one at a time, waiting for Galera
+   `Primary`/`Synced`, Redis Sentinel consensus, and Gluster health after each
+   reboot.
+4. Upgrade the current Keepalived `MASTER` / VIP holder last. Before upgrading
+   that node, move the VIP away cleanly:
+
+```bash
+sudo systemctl stop keepalived
+```
+
+After each node returns, rerun the cluster playbook to restore repo packages,
+service files, systemd drop-ins, timers, PHP-FPM/nginx config, HA repair timers,
+and LibreNMS runtime settings:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml --ask-become-pass
+```
+
+Then validate again before moving to the next node:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml --ask-become-pass
+```
+
+### Ubuntu
+
+Use Ubuntu's supported release-upgrade path. For LTS-to-LTS production upgrades,
+wait for the next LTS first point release unless you have already lab-tested the
+new release with your LibreNMS, PHP, MariaDB, Redis, and GlusterFS versions.
+
+Typical per-node flow:
+
+```bash
+sudo apt update
+sudo apt full-upgrade
+sudo do-release-upgrade
+sudo reboot
+```
+
+After reboot, rerun the cluster playbook and validation before continuing to the
+next node.
+
+### Debian
+
+Use Debian's release notes for the exact source-list and package-manager steps
+for your source and target releases. Do not mix Debian releases across all nodes
+at once; roll one node, re-converge it, and validate the cluster before the next
+node.
+
+Typical per-node shape:
+
+```bash
+sudo apt update
+sudo apt full-upgrade
+# Update APT sources to the target Debian release according to Debian release notes.
+sudo apt update
+sudo apt full-upgrade
+sudo reboot
+```
+
+After reboot, rerun the cluster playbook and validation.
+
+### RedHat-family systems
+
+AlmaLinux and Rocky Linux major upgrades usually require the distro-supported
+major-upgrade tooling for that family. Fedora major upgrades normally use
+`dnf system-upgrade`. CentOS Stream behavior depends on the stream and enabled
+repositories.
+
+Before production use, lab-test:
+
+- PHP version and extensions
+- MariaDB/Galera packages
+- Redis/Sentinel packages
+- GlusterFS packages
+- EPEL/Remi or any other extra repositories
+
+Then rerun the cluster playbook after each upgraded node returns.
+
+### Arch, Manjaro, Alpine, Gentoo, and other best-effort distros
+
+These are best-effort targets in this repo. Treat major upgrades as lab-first
+operations. Package names, init systems, PHP extension names, Redis/Sentinel
+unit names, and GlusterFS behavior may differ from the primary Ubuntu/Debian
+paths.
+
+After the distro upgrade, rerun the playbook and fix any required package or
+service-name overrides in inventory before continuing to the next node.
+
+### Expected behavior after a full cluster restart
+
+After a complete power-off, some LibreNMS validation checks can be temporarily
+red while Galera, Redis Sentinel, GlusterFS, HAProxy, Keepalived, scheduler, and
+dispatcher services converge. With the managed systemd timers from this repo,
+the cluster should repair normal boot drift automatically after the nodes are
+back and quorum is available. If validation is still failing several minutes
+after all nodes are up, run the cluster playbook and inspect the failing service
+journals.
+
+---
+
 ## Repository Layout
 
 ```text
