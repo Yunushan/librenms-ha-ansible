@@ -1,0 +1,123 @@
+#!/bin/bash
+set -u
+
+LOCK_FILE=/run/librenms-ha-startup-repair.lock
+exec 9>"${LOCK_FILE}"
+flock -n 9 || exit 0
+
+LIBRENMS_DIR={{ librenms_install_dir | quote }}
+LIBRENMS_USER={{ librenms_user | quote }}
+LIBRENMS_GROUP={{ librenms_group | quote }}
+RRD_MODE={{ librenms_rrd_mode | quote }}
+RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
+GLUSTER_MOUNT_WAIT={{ librenms_startup_repair_gluster_mount_wait | int }}
+RUNTIME_RETRIES={{ librenms_startup_repair_runtime_retries | int }}
+RUNTIME_DELAY={{ librenms_startup_repair_runtime_delay | int }}
+FIX_GIT_RRD_PLACEHOLDER={{ (librenms_startup_repair_fix_git_rrd_placeholder | bool) | ternary('1', '0') }}
+FIX_WRITABLE_OWNERSHIP={{ (librenms_startup_repair_fix_writable_ownership | bool) | ternary('1', '0') }}
+
+log() {
+  echo "librenms-ha-startup-repair: $*"
+}
+
+run_as_librenms() {
+  runuser -u "${LIBRENMS_USER}" -- "$@"
+}
+
+wait_for_rrd_mount() {
+  [ "${RRD_MODE}" = "glusterfs" ] || return 0
+
+  local elapsed=0
+  while [ "${elapsed}" -lt "${GLUSTER_MOUNT_WAIT}" ]; do
+    if findmnt --target "${RRD_PATH}" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    mount "${RRD_PATH}" >/dev/null 2>&1 || true
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+
+  log "RRD path ${RRD_PATH} is not mounted after ${GLUSTER_MOUNT_WAIT}s"
+  return 1
+}
+
+repair_writable_path() {
+  local path=$1
+  [ -e "${path}" ] || return 0
+
+  local current_owner
+  current_owner=$(stat -c '%U:%G' "${path}" 2>/dev/null || true)
+  if [ "${current_owner}" != "${LIBRENMS_USER}:${LIBRENMS_GROUP}" ]; then
+    log "fixing ownership on ${path}"
+    chown -R "${LIBRENMS_USER}:${LIBRENMS_GROUP}" "${path}" || return 1
+  fi
+
+  chmod ug+rwx "${path}" >/dev/null 2>&1 || true
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m "g:${LIBRENMS_GROUP}:rwx" "${path}" >/dev/null 2>&1 || true
+    setfacl -d -m "g:${LIBRENMS_GROUP}:rwx" "${path}" >/dev/null 2>&1 || true
+  fi
+}
+
+repair_writable_paths() {
+  [ "${FIX_WRITABLE_OWNERSHIP}" = "1" ] || return 0
+
+  wait_for_rrd_mount || true
+
+  repair_writable_path "${LIBRENMS_DIR}/rrd" || true
+  repair_writable_path "${LIBRENMS_DIR}/logs" || true
+  repair_writable_path "${LIBRENMS_DIR}/bootstrap/cache" || true
+  repair_writable_path "${LIBRENMS_DIR}/storage" || true
+}
+
+repair_git_rrd_placeholder() {
+  [ "${FIX_GIT_RRD_PLACEHOLDER}" = "1" ] || return 0
+  [ -d "${LIBRENMS_DIR}/.git" ] || return 0
+
+  if run_as_librenms git -C "${LIBRENMS_DIR}" status --porcelain -- rrd/.gitignore \
+    | grep -q .; then
+    log "restoring tracked rrd/.gitignore"
+    run_as_librenms git -C "${LIBRENMS_DIR}" checkout -- rrd/.gitignore >/dev/null 2>&1 || true
+  fi
+}
+
+ensure_systemd_units() {
+  systemctl daemon-reload >/dev/null 2>&1 || true
+
+  for unit in \
+    librenms.service \
+    librenms-scheduler.timer \
+    librenms-daily.timer \
+    librenms-dispatcher-ha-recover.timer; do
+    if systemctl list-unit-files "${unit}" >/dev/null 2>&1; then
+      systemctl enable --now "${unit}" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+configure_librenms_runtime() {
+  local attempt
+  local current_value
+  for attempt in $(seq 1 "${RUNTIME_RETRIES}"); do
+    current_value=$(run_as_librenms "${LIBRENMS_DIR}/lnms" config:get distributed_poller 2>/dev/null || true)
+    if echo "${current_value}" | grep -Eiq '^(true|1)$'; then
+      return 0
+    fi
+
+    if run_as_librenms "${LIBRENMS_DIR}/lnms" config:set distributed_poller true >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${RUNTIME_DELAY}"
+  done
+
+  log "could not set distributed_poller after ${RUNTIME_RETRIES} attempts"
+  return 1
+}
+
+repair_writable_paths
+repair_git_rrd_placeholder
+ensure_systemd_units
+configure_librenms_runtime || true
+
+exit 0

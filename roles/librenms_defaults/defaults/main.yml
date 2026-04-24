@@ -288,6 +288,14 @@ librenms_seed_cluster_device_poller_group: ""
 librenms_manage_dispatcher: true
 librenms_manage_scheduler: true
 librenms_manage_rrdcached: "{{ librenms_mode != 'standalone' }}"
+librenms_startup_repair_enabled: "{{ librenms_mode != 'standalone' }}"
+librenms_startup_repair_path: /usr/local/sbin/librenms-ha-startup-repair
+librenms_startup_repair_interval: 30s
+librenms_startup_repair_gluster_mount_wait: 180
+librenms_startup_repair_runtime_retries: 18
+librenms_startup_repair_runtime_delay: 10
+librenms_startup_repair_fix_git_rrd_placeholder: true
+librenms_startup_repair_fix_writable_ownership: true
 librenms_dispatcher_registration_retries: 20
 librenms_dispatcher_registration_delay: 3
 librenms_dispatcher_registration_window: 300

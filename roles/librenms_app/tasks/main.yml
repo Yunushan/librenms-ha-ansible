@@ -1912,6 +1912,39 @@
     - librenms_dispatcher_failover_recovery_enabled | bool
     - ansible_service_mgr == 'systemd'
 
+- name: Deploy LibreNMS HA startup repair script
+  template:
+    src: librenms-ha-startup-repair.sh.j2
+    dest: "{{ librenms_startup_repair_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - librenms_startup_repair_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy LibreNMS HA startup repair service
+  template:
+    src: librenms-ha-startup-repair.service.j2
+    dest: /etc/systemd/system/librenms-ha-startup-repair.service
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_startup_repair_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy LibreNMS HA startup repair timer
+  template:
+    src: librenms-ha-startup-repair.timer.j2
+    dest: /etc/systemd/system/librenms-ha-startup-repair.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_startup_repair_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
 - name: Reload systemd for LibreNMS services
   systemd:
     daemon_reload: true
@@ -1952,6 +1985,15 @@
   when:
     - librenms_manage_dispatcher | bool
     - librenms_dispatcher_failover_recovery_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Enable and start LibreNMS HA startup repair timer
+  service:
+    name: librenms-ha-startup-repair.timer
+    state: "{{ 'started' if librenms_bootstrap_completed_effective | bool else 'stopped' }}"
+    enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
+  when:
+    - librenms_startup_repair_enabled | bool
     - ansible_service_mgr == 'systemd'
 
 - name: Remove legacy cron file

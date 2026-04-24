@@ -1,0 +1,11 @@
+[Unit]
+Description=LibreNMS HA startup repair
+Wants=network-online.target remote-fs.target
+After=network-online.target remote-fs.target glusterd.service mariadb.service haproxy.service redis-server.service redis-sentinel.service
+
+[Service]
+Type=oneshot
+ExecStart={{ librenms_startup_repair_path }}
+
+[Install]
+WantedBy=multi-user.target

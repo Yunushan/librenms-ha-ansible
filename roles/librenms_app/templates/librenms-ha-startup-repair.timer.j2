@@ -1,0 +1,11 @@
+[Unit]
+Description=Run LibreNMS HA startup repair
+
+[Timer]
+OnBootSec={{ librenms_startup_repair_interval }}
+OnUnitActiveSec={{ librenms_startup_repair_interval }}
+AccuracySec=5s
+Unit=librenms-ha-startup-repair.service
+
+[Install]
+WantedBy=timers.target
