@@ -1,0 +1,104 @@
+---
+name: HA or failover failure
+description: Report VIP, Galera, Redis Sentinel, GlusterFS, dispatcher, or cold-boot HA problems.
+title: "[HA]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when one or more nodes are down, failover is slow, the VIP is
+        wrong, Redis/Galera did not converge, or the cluster did not recover
+        cleanly after maintenance or power loss.
+
+  - type: dropdown
+    id: scenario
+    attributes:
+      label: Scenario
+      options:
+        - Planned one-node maintenance
+        - Hard power-off of one node
+        - Full cluster cold boot
+        - VIP or Keepalived failover
+        - HAProxy backend failure
+        - Galera primary or bootstrap issue
+        - Redis Sentinel failover issue
+        - GlusterFS or RRD issue
+        - LibreNMS dispatcher issue
+        - Other HA issue
+    validations:
+      required: true
+
+  - type: textarea
+    id: node_state
+    attributes:
+      label: Node state
+      description: List each node, IP, whether it was intentionally down, and key services.
+      value: |
+        lnms1 / 192.168.1.116:
+          state:
+          intentionally_down:
+          haproxy:
+          keepalived:
+          mariadb:
+          redis:
+          redis-sentinel:
+          librenms:
+        lnms2 / 192.168.1.117:
+          state:
+          intentionally_down:
+        lnms3 / 192.168.1.118:
+          state:
+          intentionally_down:
+    validations:
+      required: true
+
+  - type: textarea
+    id: symptoms
+    attributes:
+      label: Symptoms
+      description: Include VIP behavior, downtime duration, slow pages, failed services, and failed tasks.
+      placeholder: VIP loaded after 2-3 minutes, /validate showed ..., task failed at ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands run
+      description: Include playbook commands, Make targets, and manual systemctl commands.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: ansible_output
+    attributes:
+      label: Failed Ansible output
+      description: Paste failed tasks, unreachable hosts, stderr, and play recap.
+      render: text
+
+  - type: textarea
+    id: service_status
+    attributes:
+      label: Service status excerpts
+      description: Paste relevant systemctl status or journal excerpts from each affected node.
+      render: text
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Attach or summarize `playbooks/status.yml`, `doctor.yml`, or `diagnostics.yml` results.
+      render: text
+
+  - type: textarea
+    id: inventory
+    attributes:
+      label: HA inventory and key variables
+      description: Redact secrets, but keep HA modes, VIP, quorum, maintenance nodes, and group membership.
+      render: yaml
+    validations:
+      required: true
+

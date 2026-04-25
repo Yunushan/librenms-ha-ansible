@@ -73,6 +73,7 @@ librenms_runtime_db_wait_delay: 5
 
 librenms_galera_cluster_name: librenms_cluster
 librenms_galera_sst_method: rsync
+librenms_galera_pc_recovery: true
 librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapped
 librenms_galera_wait_timeout: 120
 librenms_galera_auto_recover_unsafe_bootstrap: true
@@ -89,6 +90,7 @@ librenms_redis_runtime_user: redis
 librenms_redis_runtime_group: redis
 librenms_redis_data_dir: /var/lib/redis
 librenms_redis_server_binary: /usr/bin/redis-server
+librenms_redis_restart_sec: 3
 librenms_redis_custom_conf_path: "{{ librenms_redis_data_dir }}/librenms-redis.conf"
 librenms_redis_conf_path_effective: >-
   {{
@@ -130,6 +132,7 @@ librenms_redis_quorum: 2
 librenms_redis_sentinel_down_after_milliseconds: 5000
 librenms_redis_sentinel_failover_timeout: 30000
 librenms_redis_sentinel_parallel_syncs: 1
+librenms_redis_sentinel_restart_sec: 3
 librenms_redis_sentinel_enforce_configured_master: true
 librenms_redis_sentinel_write_check_retries: 6
 librenms_redis_sentinel_write_check_delay: 5
@@ -313,6 +316,52 @@ librenms_startup_repair_runtime_retries: 18
 librenms_startup_repair_runtime_delay: 10
 librenms_startup_repair_fix_git_rrd_placeholder: true
 librenms_startup_repair_fix_writable_ownership: true
+librenms_startup_repair_service_recovery_enabled: true
+librenms_startup_repair_service_recovery_timeout: 180
+librenms_startup_repair_service_recovery_delay: 5
+librenms_startup_repair_service_recovery_units:
+  - >-
+    {{
+      librenms_glusterd_service_name
+      if librenms_rrd_mode == 'glusterfs'
+      else ''
+    }}
+  - >-
+    {{
+      librenms_mariadb_service_name
+      if librenms_db_mode == 'galera'
+      else ''
+    }}
+  - >-
+    {{
+      librenms_redis_service_name
+      if librenms_redis_mode == 'sentinel'
+      else ''
+    }}
+  - >-
+    {{
+      librenms_redis_sentinel_service_name_effective
+      if librenms_redis_mode == 'sentinel'
+      else ''
+    }}
+  - >-
+    {{
+      librenms_rrdcached_service_name
+      if librenms_manage_rrdcached | bool
+      else ''
+    }}
+  - >-
+    {{
+      librenms_haproxy_service_name
+      if librenms_vip_enabled | bool
+      else ''
+    }}
+  - >-
+    {{
+      librenms_keepalived_service_name
+      if librenms_vip_enabled | bool
+      else ''
+    }}
 librenms_dispatcher_registration_retries: 20
 librenms_dispatcher_registration_delay: 3
 librenms_dispatcher_registration_window: 300

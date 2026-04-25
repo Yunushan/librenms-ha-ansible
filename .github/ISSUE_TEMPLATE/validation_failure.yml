@@ -1,0 +1,73 @@
+---
+name: LibreNMS validation failure
+description: Report `/validate` or `validate.php` failures after deployment or HA changes.
+title: "[Validate]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for LibreNMS `/validate` or `validate.php` failures. Include
+        the failing section and whether a node was intentionally offline.
+
+  - type: dropdown
+    id: validation_area
+    attributes:
+      label: Failing validation area
+      options:
+        - Database
+        - Poller
+        - Distributed Poller
+        - Scheduler
+        - Redis
+        - RRD
+        - User or permissions
+        - Updates or git state
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation_output
+    attributes:
+      label: Validation output
+      description: Paste the exact red failure lines and nearby green checks.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Recent operation
+      description: What changed immediately before validation failed?
+      placeholder: Ran cluster.yml, powered off lnms1, rebooted all nodes, upgraded OS, restored backup...
+    validations:
+      required: true
+
+  - type: textarea
+    id: node_state
+    attributes:
+      label: Node and service state
+      description: Include down nodes, maintenance nodes, and relevant service status.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: ansible_output
+    attributes:
+      label: Related Ansible output
+      description: Paste failed validation, status, post-reboot, or cluster tasks if available.
+      render: text
+
+  - type: textarea
+    id: inventory
+    attributes:
+      label: Inventory and key variables
+      description: Redact secrets, but keep topology, node IDs, DB/Redis/RRD modes, and maintenance nodes.
+      render: yaml
+    validations:
+      required: true
+

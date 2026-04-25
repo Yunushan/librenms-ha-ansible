@@ -1,7 +1,12 @@
 [Unit]
 Description=LibreNMS dispatcher HA recovery
-After=network-online.target mariadb.service haproxy.service redis-server.service librenms.service
-Wants=network-online.target
+After=network-online.target remote-fs.target
+After={{ librenms_mariadb_service_name }}.service
+After={{ librenms_haproxy_service_name }}.service
+After={{ librenms_redis_service_name }}.service
+After={{ librenms_redis_sentinel_service_name_effective }}.service
+After=librenms.service
+Wants=network-online.target remote-fs.target
 
 [Service]
 Type=oneshot

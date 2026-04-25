@@ -22,6 +22,7 @@ wsrep_provider=/usr/lib/galera/libgalera_smm.so
 
 wsrep_cluster_name="{{ librenms_galera_cluster_name }}"
 wsrep_cluster_address="gcomm://{% for host in librenms_active_db_nodes %}{{ hostvars[host].ansible_host | default(host) }}{% if not loop.last %},{% endif %}{% endfor %}"
+wsrep_provider_options="pc.recovery={{ (librenms_galera_pc_recovery | bool) | ternary('true', 'false') }}"
 
 wsrep_sst_method={{ librenms_galera_sst_method }}
 

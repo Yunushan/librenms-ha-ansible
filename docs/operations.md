@@ -376,6 +376,13 @@ services wait for the DB frontend, Redis runtime path, and Gluster-backed RRD
 mount before starting. Startup repair also re-enables the expected timers and
 restores ownership on writable LibreNMS paths.
 
+Startup repair also resets failed state and starts the expected HA units for the
+selected modes: Gluster, MariaDB/Galera, Redis, Redis Sentinel, RRDCacheD,
+HAProxy, and Keepalived. Galera configs include safe primary-component recovery
+by default, which helps clean full-cluster restarts re-form without an operator
+bootstrap when Galera has valid saved state. It does not force an unsafe Galera
+bootstrap; if no `Primary` component forms, use `galera-recover.yml`.
+
 After all nodes return, check the self-healing units before rerunning Ansible:
 
 ```bash

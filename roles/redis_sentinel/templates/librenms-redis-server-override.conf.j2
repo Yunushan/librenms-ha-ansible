@@ -1,3 +1,9 @@
+[Unit]
+After=network-online.target
+Wants=network-online.target
+
 [Service]
 ExecStart=
 ExecStart={{ librenms_redis_server_binary }} {{ librenms_redis_conf_path_effective }}
+Restart=always
+RestartSec={{ librenms_redis_restart_sec | int }}

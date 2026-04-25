@@ -1,0 +1,56 @@
+---
+name: Feature request
+description: Propose a new role, playbook, operating mode, platform, or documentation improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the operational problem or missing workflow.
+      placeholder: Operators need a safer way to ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, playbook, role, variable, or documentation you want.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact area
+      options:
+        - Standalone deployment
+        - HA deployment
+        - Galera
+        - Redis Sentinel
+        - HAProxy or Keepalived
+        - GlusterFS or RRD
+        - LibreNMS application
+        - Docker example
+        - AWX or GUI operations
+        - Documentation
+        - CI or developer tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Mention manual workarounds, existing playbooks, or why current docs are insufficient.
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety considerations
+      description: Note destructive operations, downtime risk, secrets, or HA quorum concerns.
+

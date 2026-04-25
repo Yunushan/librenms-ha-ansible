@@ -321,6 +321,14 @@ dispatcher services converge. With the managed systemd timers and service
 drop-ins from this repo, the cluster should repair normal boot drift
 automatically after the nodes are back and quorum is available.
 
+The startup repair timer also resets failed state and starts the expected HA
+units for the selected modes: Gluster, MariaDB/Galera, Redis, Redis Sentinel,
+RRDCacheD, HAProxy, and Keepalived. Galera is rendered with safe primary
+component recovery enabled by default, so a clean full-cluster restart can
+re-form when Galera still has enough saved state. The timer does not perform an
+unsafe Galera bootstrap; use `galera-recover.yml` if no Galera `Primary`
+component forms.
+
 The LibreNMS dispatcher, scheduler, and daily maintenance services can be gated
 by `/usr/local/sbin/librenms-ha-runtime-wait` so they do not start before the DB
 frontend, Redis runtime path, and Gluster-backed RRD mount are usable. This is
@@ -1146,6 +1154,7 @@ librenms_db_name: librenms
 librenms_db_user: librenms
 librenms_db_password: CHANGE_ME
 librenms_runtime_db_prefer_local_galera: false
+librenms_galera_pc_recovery: true
 ```
 
 In Galera mode, leave `librenms_db_host` empty when you want LibreNMS to use the
@@ -1210,6 +1219,8 @@ librenms_redis_sentinel_timeout: 30
 librenms_redis_sentinel_down_after_milliseconds: 5000
 librenms_redis_sentinel_failover_timeout: 30000
 librenms_redis_sentinel_parallel_syncs: 1
+librenms_redis_restart_sec: 3
+librenms_redis_sentinel_restart_sec: 3
 ```
 
 If the Redis master node disappears, Sentinel needs a short window to agree on

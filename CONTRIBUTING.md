@@ -12,6 +12,11 @@ Thank you for improving this project.
 
 ## Before opening a pull request
 
+Use the issue templates when reporting bugs, HA failures, or LibreNMS
+validation failures. They ask for the minimum context needed to reproduce
+operator problems: topology, command, failed task, node state, and relevant
+diagnostics.
+
 1. run `python scripts/ci-python-smoke.py` from Windows, or
    `python3 scripts/ci-python-smoke.py` from Linux/WSL
 2. run `yamllint .`

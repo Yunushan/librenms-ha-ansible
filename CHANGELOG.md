@@ -48,6 +48,12 @@
   documentation, operational safety, and release notes.
 - Added a documentation index with a recommended reading order and task map for
   operator and maintainer docs.
+- Added GitHub issue forms and a pull request checklist for bug reports,
+  HA/failover failures, LibreNMS validation failures, feature requests, and
+  operator-safe reviews.
+- Added cold-boot service recovery defaults so startup repair can reset failed
+  HA units and start Gluster, Galera, Redis/Sentinel, RRDCacheD, HAProxy, and
+  Keepalived before LibreNMS runtime gates evaluate the app layer.
 
 ### Changed
 
@@ -59,6 +65,9 @@
 - Added runtime dependency gating for LibreNMS dispatcher, scheduler, and daily
   maintenance units so they can wait for DB, Redis, and RRD storage after cold
   boot.
+- Enabled Galera safe primary-component recovery by default and made Redis and
+  Redis Sentinel systemd restart timing configurable for cleaner power-on
+  convergence.
 - Improved LibreNMS validation handling for Galera-backed schema consistency,
   Redis Sentinel runtime checks, poller registration convergence, and
   intentionally unavailable maintenance nodes.

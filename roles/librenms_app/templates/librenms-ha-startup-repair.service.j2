@@ -1,7 +1,12 @@
 [Unit]
 Description=LibreNMS HA startup repair
 Wants=network-online.target remote-fs.target
-After=network-online.target remote-fs.target glusterd.service mariadb.service haproxy.service redis-server.service redis-sentinel.service
+After=network-online.target remote-fs.target
+After={{ librenms_glusterd_service_name }}.service
+After={{ librenms_mariadb_service_name }}.service
+After={{ librenms_haproxy_service_name }}.service
+After={{ librenms_redis_service_name }}.service
+After={{ librenms_redis_sentinel_service_name_effective }}.service
 
 [Service]
 Type=oneshot

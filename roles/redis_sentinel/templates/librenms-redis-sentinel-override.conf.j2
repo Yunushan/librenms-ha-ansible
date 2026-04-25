@@ -8,4 +8,4 @@ ExecStart=
 ExecStart={{ librenms_redis_server_binary }} {{ librenms_redis_sentinel_conf_path_effective }} --sentinel
 WorkingDirectory={{ librenms_redis_data_dir }}
 Restart=always
-RestartSec=3
+RestartSec={{ librenms_redis_sentinel_restart_sec | int }}
