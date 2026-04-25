@@ -197,6 +197,7 @@
   run_once: true
 
 - name: Test HAProxy web backend failover
+  when: "'web_backend' in librenms_failover_test_cases"
   block:
     - name: Stop selected web backend
       service:
@@ -256,7 +257,6 @@
         seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
       when: librenms_failover_test_restore_services | bool
       run_once: true
-  when: "'web_backend' in librenms_failover_test_cases"
 
 - name: Detect VIP owner before HAProxy service failover test
   include_tasks: detect_vip_owner.yml
@@ -291,6 +291,7 @@
   run_once: true
 
 - name: Test HAProxy service failover
+  when: "'haproxy_service' in librenms_failover_test_cases"
   block:
     - name: Stop HAProxy on selected load balancer
       service:
@@ -394,9 +395,9 @@
           in librenms_failover_test_http_statuses
       changed_when: false
       run_once: true
-  when: "'haproxy_service' in librenms_failover_test_cases"
 
 - name: Test LibreNMS dispatcher service failover
+  when: "'dispatcher_service' in librenms_failover_test_cases"
   block:
     - name: Stop LibreNMS dispatcher on selected node
       service:
@@ -457,7 +458,6 @@
         seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
       when: librenms_failover_test_restore_services | bool
       run_once: true
-  when: "'dispatcher_service' in librenms_failover_test_cases"
 
 - name: Detect VIP owner before keepalived failover test
   include_tasks: detect_vip_owner.yml
@@ -483,6 +483,7 @@
   run_once: true
 
 - name: Test keepalived VIP failover
+  when: "'keepalived_vip' in librenms_failover_test_cases"
   block:
     - name: Stop keepalived on current VIP owner
       service:
@@ -577,7 +578,6 @@
           in librenms_failover_test_http_statuses
       changed_when: false
       run_once: true
-  when: "'keepalived_vip' in librenms_failover_test_cases"
 
 - name: Query Redis Sentinel master before Redis master failover
   no_log: true
@@ -630,6 +630,7 @@
   run_once: true
 
 - name: Test Redis Sentinel master failover
+  when: "'redis_master' in librenms_failover_test_cases"
   block:
     - name: Stop Redis on current master
       service:
@@ -716,7 +717,6 @@
         seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
       when: librenms_failover_test_restore_services | bool
       run_once: true
-  when: "'redis_master' in librenms_failover_test_cases"
 
 - name: Determine Galera remaining nodes for failover test
   set_fact:
@@ -729,6 +729,7 @@
   run_once: true
 
 - name: Test Galera node failover
+  when: "'galera_node' in librenms_failover_test_cases"
   block:
     - name: Stop MariaDB on selected Galera node
       service:
@@ -842,7 +843,6 @@
         - librenms_failover_test_restore_services | bool
         - librenms_failover_test_galera_host_effective | length > 0
       run_once: true
-  when: "'galera_node' in librenms_failover_test_cases"
 
 - name: Report HA failover test summary
   debug:

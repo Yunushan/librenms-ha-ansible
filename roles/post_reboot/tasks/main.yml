@@ -422,6 +422,29 @@
     - librenms_post_reboot_probe_delegate | length > 0
   run_once: true
 
+- name: Initialize post-reboot active poller node id SQL list
+  set_fact:
+    librenms_post_reboot_active_node_id_sql_values: []
+  when: librenms_manage_dispatcher | bool
+  run_once: true
+
+- name: Build post-reboot active poller node id SQL list
+  set_fact:
+    librenms_post_reboot_active_node_id_sql_values: >-
+      {{
+        librenms_post_reboot_active_node_id_sql_values
+        + [
+          "'" ~ (
+            hostvars[item].librenms_node_id
+            | default(item)
+            | regex_replace("'", "''")
+          ) ~ "'"
+        ]
+      }}
+  loop: "{{ librenms_post_reboot_active_nodes }}"
+  when: librenms_manage_dispatcher | bool
+  run_once: true
+
 - name: Wait for LibreNMS dispatcher database registrations after reboot
   community.mysql.mysql_query:
     login_host: "{{ librenms_post_reboot_db_probe_host }}"
@@ -434,10 +457,7 @@
         SELECT COUNT(*) AS active_pollers
         FROM `poller_cluster`
         WHERE `node_id` IN (
-        {% for host in librenms_post_reboot_active_nodes -%}
-        '{{ hostvars[host].librenms_node_id | default(host) | regex_replace("'", "''") }}'
-        {%- if not loop.last %},{% endif -%}
-        {%- endfor %}
+          {{ librenms_post_reboot_active_node_id_sql_values | join(',') }}
         )
         AND `last_report` >= DATE_SUB(
           NOW(),

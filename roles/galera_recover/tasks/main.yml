@@ -522,6 +522,7 @@
   run_once: true
 
 - name: Bootstrap Galera on selected recovery host
+  run_once: true
   block:
     - name: Run guarded Galera bootstrap command
       shell: |-
@@ -611,7 +612,6 @@
 
           journal:
           {{ librenms_galera_recover_bootstrap_journal.stdout | default('') }}
-  run_once: true
 
 - name: Write Galera bootstrap marker after guarded recovery
   file:

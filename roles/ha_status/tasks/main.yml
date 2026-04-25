@@ -341,19 +341,19 @@
 - name: Set LibreNMS runtime dependency state fact
   set_fact:
     librenms_status_runtime_readiness: >-
-      {% if not (librenms_dispatcher_runtime_wait_enabled | bool) -%}
-      disabled
-      {%- elif not (librenms_status_runtime_wait_probe_enabled | bool) -%}
-      not-probed
-      {%- elif not (librenms_status_runtime_wait_script.stat.exists | default(false)) -%}
-      missing-wait-script
-      {%- elif (librenms_status_runtime_wait_probe.rc | default(1) | int) == 0 -%}
-      ready
-      {%- elif (librenms_status_runtime_wait_probe.rc | default(1) | int) == 124 -%}
-      timeout
-      {%- else -%}
-      failed
-      {%- endif %}
+      {{
+        'disabled'
+        if not (librenms_dispatcher_runtime_wait_enabled | bool)
+        else 'not-probed'
+        if not (librenms_status_runtime_wait_probe_enabled | bool)
+        else 'missing-wait-script'
+        if not (librenms_status_runtime_wait_script.stat.exists | default(false))
+        else 'ready'
+        if (librenms_status_runtime_wait_probe.rc | default(1) | int) == 0
+        else 'timeout'
+        if (librenms_status_runtime_wait_probe.rc | default(1) | int) == 124
+        else 'failed'
+      }}
   when: inventory_hostname in librenms_status_active_nodes
 
 - name: Check LibreNMS startup repair timer state
@@ -385,11 +385,18 @@
 - name: Set LibreNMS startup repair timer state fact
   set_fact:
     librenms_status_startup_repair_timer: >-
-      {% if librenms_startup_repair_enabled | bool -%}
-      {{ librenms_status_startup_repair_timer_raw.stdout | default('unknown') }}/{{ librenms_status_startup_repair_timer_enabled_raw.stdout | default('unknown') }}
-      {%- else -%}
-      disabled
-      {%- endif %}
+      {{
+        (librenms_startup_repair_enabled | bool)
+        | ternary(
+          (librenms_status_startup_repair_timer_raw.stdout | default('unknown'))
+          ~ '/'
+          ~ (
+            librenms_status_startup_repair_timer_enabled_raw.stdout
+            | default('unknown')
+          ),
+          'disabled'
+        )
+      }}
   when: inventory_hostname in librenms_status_active_nodes
 
 - name: Check LibreNMS dispatcher recovery timer state
@@ -421,11 +428,21 @@
 - name: Set LibreNMS dispatcher recovery timer state fact
   set_fact:
     librenms_status_dispatcher_recover_timer: >-
-      {% if librenms_dispatcher_failover_recovery_enabled | bool -%}
-      {{ librenms_status_dispatcher_recover_timer_raw.stdout | default('unknown') }}/{{ librenms_status_dispatcher_recover_timer_enabled_raw.stdout | default('unknown') }}
-      {%- else -%}
-      disabled
-      {%- endif %}
+      {{
+        (librenms_dispatcher_failover_recovery_enabled | bool)
+        | ternary(
+          (
+            librenms_status_dispatcher_recover_timer_raw.stdout
+            | default('unknown')
+          )
+          ~ '/'
+          ~ (
+            librenms_status_dispatcher_recover_timer_enabled_raw.stdout
+            | default('unknown')
+          ),
+          'disabled'
+        )
+      }}
   when: inventory_hostname in librenms_status_active_nodes
 
 - name: Check HAProxy service state
@@ -1066,22 +1083,41 @@
 
       Load balancers:
       {% for host in librenms_status_active_lb_nodes %}
-        - {{ host }}: haproxy={{ hostvars[host].librenms_status_haproxy_state | default('unknown') }}, keepalived={{ hostvars[host].librenms_status_keepalived_state | default('unknown') }}
+        - {{ host }}:
+            haproxy: {{ hostvars[host].librenms_status_haproxy_state | default('unknown') }}
+            keepalived: {{ hostvars[host].librenms_status_keepalived_state | default('unknown') }}
       {% endfor %}
 
       LibreNMS application nodes:
       {% for host in librenms_status_active_nodes %}
-        - {{ host }}: dispatcher={{ hostvars[host].librenms_status_dispatcher_state | default('unknown') }}, scheduler={{ hostvars[host].librenms_status_scheduler_state | default('unknown') }}, runtime={{ hostvars[host].librenms_status_runtime_readiness | default('unknown') }}, startup_repair={{ hostvars[host].librenms_status_startup_repair_timer | default('unknown') }}, dispatcher_recover={{ hostvars[host].librenms_status_dispatcher_recover_timer | default('unknown') }}
+        - {{ host }}:
+            dispatcher: {{ hostvars[host].librenms_status_dispatcher_state | default('unknown') }}
+            scheduler: {{ hostvars[host].librenms_status_scheduler_state | default('unknown') }}
+            runtime: {{ hostvars[host].librenms_status_runtime_readiness | default('unknown') }}
+            startup_repair: {{ hostvars[host].librenms_status_startup_repair_timer | default('unknown') }}
+            dispatcher_recover: {{ hostvars[host].librenms_status_dispatcher_recover_timer | default('unknown') }}
       {% endfor %}
 
       Systemd drift:
       {% for host in librenms_status_managed_hosts %}
-        - {{ host }}: {{ hostvars[host].librenms_status_systemd_unit_drift.stdout_lines | default([]) | join('; ') | default('none', true) }}
+        - {{ host }}:
+            {{
+              hostvars[host].librenms_status_systemd_unit_drift.stdout_lines
+              | default([])
+              | join('; ')
+              | default('none', true)
+            }}
       {% endfor %}
 
       Writable path drift:
       {% for host in librenms_status_active_nodes %}
-        - {{ host }}: {{ hostvars[host].librenms_status_writable_path_drift.stdout_lines | default([]) | join('; ') | default('none', true) }}
+        - {{ host }}:
+            {{
+              hostvars[host].librenms_status_writable_path_drift.stdout_lines
+              | default([])
+              | join('; ')
+              | default('none', true)
+            }}
       {% endfor %}
 
       Maintenance nodes:
@@ -1095,7 +1131,11 @@
         query_state: {{ librenms_status_dispatcher_db_query_state | default('not-probed') }}
         db_endpoint: {{ librenms_status_db_probe_host | default('unknown') }}:{{ librenms_db_port }}
       {% for row in librenms_status_dispatcher_db_rows | default([]) %}
-        - {{ row.node_id }}: active={{ row.active }}, age={{ row.age_seconds }}s, frequency={{ row.poller_frequency }}s, last_report={{ row.last_report }}
+        - {{ row.node_id }}:
+            active: {{ row.active }}
+            age_seconds: {{ row.age_seconds }}
+            frequency: {{ row.poller_frequency }}
+            last_report: {{ row.last_report }}
       {% else %}
         - none
       {% endfor %}
@@ -1111,7 +1151,15 @@
       {% endfor %}
 
       Gluster:
-        {{ hostvars[(librenms_status_active_gluster_nodes | first | default(inventory_hostname))].librenms_status_gluster | default(['not-checked']) | join('\n        ') }}
+        {{
+          hostvars[
+            librenms_status_active_gluster_nodes
+            | first
+            | default(inventory_hostname)
+          ].librenms_status_gluster
+          | default(['not-checked'])
+          | join('\n        ')
+        }}
 
       Degradation:
         status: {{ librenms_status_alert_payload.status }}

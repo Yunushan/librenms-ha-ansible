@@ -29,7 +29,13 @@
 
 - name: Start target Redis Sentinel after maintenance
   service:
-    name: "{{ hostvars[librenms_maintenance_target].librenms_redis_sentinel_service_name_effective | default(librenms_redis_sentinel_service_name_effective) }}"
+    name: >-
+      {{
+        hostvars[librenms_maintenance_target][
+          'librenms_redis_sentinel_service_name_effective'
+        ]
+        | default(librenms_redis_sentinel_service_name_effective)
+      }}
     state: started
   delegate_to: "{{ librenms_maintenance_target }}"
   when:
@@ -145,7 +151,11 @@
       - >-
         SELECT COUNT(*) AS active_pollers
         FROM `poller_cluster`
-        WHERE `node_id` = '{{ hostvars[librenms_maintenance_target].librenms_node_id | default(librenms_maintenance_target) | regex_replace("'", "''") }}'
+        WHERE `node_id` = '{{
+          hostvars[librenms_maintenance_target].librenms_node_id
+          | default(librenms_maintenance_target)
+          | regex_replace("'", "''")
+        }}'
         AND `last_report` >= DATE_SUB(
           NOW(),
           INTERVAL COALESCE(

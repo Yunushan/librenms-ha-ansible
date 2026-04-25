@@ -15,17 +15,20 @@
     librenms_diagnostics_run_id_seed: "{{ ansible_date_time.iso8601_basic_short }}"
   run_once: true
 
-- name: Set diagnostics paths
+- name: Set diagnostics run id fact
   set_fact:
     librenms_diagnostics_run_id_effective: >-
       {{
         hostvars[(ansible_play_hosts | first)].librenms_diagnostics_run_id_seed
         | default(ansible_date_time.iso8601_basic_short)
       }}
+
+- name: Set diagnostics paths
+  set_fact:
     librenms_diagnostics_host_dir: >-
-      {{ librenms_diagnostics_remote_base_dir }}/{{ hostvars[(ansible_play_hosts | first)].librenms_diagnostics_run_id_seed | default(ansible_date_time.iso8601_basic_short) }}/{{ inventory_hostname }}
+      {{ librenms_diagnostics_remote_base_dir }}/{{ librenms_diagnostics_run_id_effective }}/{{ inventory_hostname }}
     librenms_diagnostics_remote_archive: >-
-      {{ librenms_diagnostics_remote_base_dir }}/{{ hostvars[(ansible_play_hosts | first)].librenms_diagnostics_run_id_seed | default(ansible_date_time.iso8601_basic_short) }}-{{ inventory_hostname }}.tar.gz
+      {{ librenms_diagnostics_remote_base_dir }}/{{ librenms_diagnostics_run_id_effective }}-{{ inventory_hostname }}.tar.gz
 
 - name: Create diagnostics directories
   file:
@@ -108,7 +111,11 @@
   shell: |
     set +e
     {
-      for unit in {% for unit in librenms_diagnostics_service_units | reject('equalto', '') | unique | list %}{{ unit | quote }} {% endfor %}; do
+      for unit in \
+      {% for unit in librenms_diagnostics_service_units | reject('equalto', '') | unique | list %}
+        {{ unit | quote }} \
+      {% endfor %}
+      ; do
         echo "### ${unit}"
         systemctl status "${unit}" --no-pager -l || true
         echo
@@ -128,7 +135,11 @@
   shell: |
     set +e
     {
-      for unit in {% for unit in librenms_diagnostics_service_units | reject('equalto', '') | unique | list %}{{ unit | quote }} {% endfor %}; do
+      for unit in \
+      {% for unit in librenms_diagnostics_service_units | reject('equalto', '') | unique | list %}
+        {{ unit | quote }} \
+      {% endfor %}
+      ; do
         echo "### ${unit}"
         systemctl cat "${unit}" --no-pager || true
         echo
@@ -162,7 +173,11 @@
         {
           line = $0
           lower = tolower(line)
-          if (lower ~ /(password|passwd|secret|token|app_key|auth_pass|authpass|priv_pass|privpass|community|requirepass|masterauth|rediscli_auth|private_key|certificate_key)/) {
+          if (
+            lower ~ /(password|passwd|secret|token|app_key|auth_pass|authpass)/
+            || lower ~ /(priv_pass|privpass|community|requirepass)/
+            || lower ~ /(masterauth|rediscli_auth|private_key|certificate_key)/
+          ) {
             if (line ~ /=/) {
               sub(/=.*/, "=REDACTED", line)
             } else if (line ~ /:/) {
@@ -175,7 +190,11 @@
         }
       ' "$1"
     }
-    for file in {% for path in librenms_diagnostics_config_files | reject('equalto', '') | unique | list %}{{ path | quote }} {% endfor %}; do
+    for file in \
+    {% for path in librenms_diagnostics_config_files | reject('equalto', '') | unique | list %}
+      {{ path | quote }} \
+    {% endfor %}
+    ; do
       [ -r "${file}" ] || continue
       safe_name="$(printf '%s' "${file}" | sed 's#^/##; s#[^A-Za-z0-9_.-]#_#g')"
       {
@@ -234,7 +253,9 @@
     owner: root
     group: root
     mode: "0640"
-    content: "{{ librenms_diagnostics_validate_output.stdout | default('validate.php was not run') }}\n{{ librenms_diagnostics_validate_output.stderr | default('') }}"
+    content: |
+      {{ librenms_diagnostics_validate_output.stdout | default('validate.php was not run') }}
+      {{ librenms_diagnostics_validate_output.stderr | default('') }}
   when: librenms_diagnostics_collect_validate | bool
 
 - name: Collect Galera state
@@ -260,10 +281,18 @@
     set +e
     {
       echo "$ redis PING"
-      redis-cli -h 127.0.0.1 -p 6379 {% if librenms_redis_username | length > 0 %}--user {{ librenms_redis_username | quote }}{% endif %} PING || true
+      redis-cli -h 127.0.0.1 -p 6379 \
+      {% if librenms_redis_username | length > 0 %}
+        --user {{ librenms_redis_username | quote }} \
+      {% endif %}
+        PING || true
       echo
       echo "$ redis INFO replication"
-      redis-cli -h 127.0.0.1 -p 6379 {% if librenms_redis_username | length > 0 %}--user {{ librenms_redis_username | quote }}{% endif %} INFO replication || true
+      redis-cli -h 127.0.0.1 -p 6379 \
+      {% if librenms_redis_username | length > 0 %}
+        --user {{ librenms_redis_username | quote }} \
+      {% endif %}
+        INFO replication || true
     } > {{ (librenms_diagnostics_host_dir ~ '/commands/redis-state.txt') | quote }} 2>&1
     exit 0
   args:
@@ -281,13 +310,28 @@
     {
       echo
       echo "$ sentinel master"
-      redis-cli -h 127.0.0.1 -p 26379 {% if librenms_redis_sentinel_username | length > 0 %}--user {{ librenms_redis_sentinel_username | quote }}{% endif %} SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }} || true
+      redis-cli -h 127.0.0.1 -p 26379 \
+      {% if librenms_redis_sentinel_username | length > 0 %}
+        --user {{ librenms_redis_sentinel_username | quote }} \
+      {% endif %}
+        SENTINEL get-master-addr-by-name \
+        {{ librenms_redis_sentinel_service | quote }} || true
       echo
       echo "$ sentinel sentinels"
-      redis-cli -h 127.0.0.1 -p 26379 {% if librenms_redis_sentinel_username | length > 0 %}--user {{ librenms_redis_sentinel_username | quote }}{% endif %} SENTINEL sentinels {{ librenms_redis_sentinel_service | quote }} || true
+      redis-cli -h 127.0.0.1 -p 26379 \
+      {% if librenms_redis_sentinel_username | length > 0 %}
+        --user {{ librenms_redis_sentinel_username | quote }} \
+      {% endif %}
+        SENTINEL sentinels \
+        {{ librenms_redis_sentinel_service | quote }} || true
       echo
       echo "$ sentinel replicas"
-      redis-cli -h 127.0.0.1 -p 26379 {% if librenms_redis_sentinel_username | length > 0 %}--user {{ librenms_redis_sentinel_username | quote }}{% endif %} SENTINEL replicas {{ librenms_redis_sentinel_service | quote }} || true
+      redis-cli -h 127.0.0.1 -p 26379 \
+      {% if librenms_redis_sentinel_username | length > 0 %}
+        --user {{ librenms_redis_sentinel_username | quote }} \
+      {% endif %}
+        SENTINEL replicas \
+        {{ librenms_redis_sentinel_service | quote }} || true
     } > {{ (librenms_diagnostics_host_dir ~ '/commands/redis-sentinel-state.txt') | quote }} 2>&1
     exit 0
   args:

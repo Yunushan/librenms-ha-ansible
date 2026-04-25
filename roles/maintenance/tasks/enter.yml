@@ -123,7 +123,13 @@
 
 - name: Stop target Redis Sentinel before maintenance
   service:
-    name: "{{ hostvars[librenms_maintenance_target].librenms_redis_sentinel_service_name_effective | default(librenms_redis_sentinel_service_name_effective) }}"
+    name: >-
+      {{
+        hostvars[librenms_maintenance_target][
+          'librenms_redis_sentinel_service_name_effective'
+        ]
+        | default(librenms_redis_sentinel_service_name_effective)
+      }}
     state: stopped
   delegate_to: "{{ librenms_maintenance_target }}"
   when:
