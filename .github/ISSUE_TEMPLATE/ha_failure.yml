@@ -11,7 +11,6 @@ body:
         Use this when one or more nodes are down, failover is slow, the VIP is
         wrong, Redis/Galera did not converge, or the cluster did not recover
         cleanly after maintenance or power loss.
-
   - type: dropdown
     id: scenario
     attributes:
@@ -29,7 +28,6 @@ body:
         - Other HA issue
     validations:
       required: true
-
   - type: textarea
     id: node_state
     attributes:
@@ -53,7 +51,6 @@ body:
           intentionally_down:
     validations:
       required: true
-
   - type: textarea
     id: symptoms
     attributes:
@@ -62,7 +59,6 @@ body:
       placeholder: VIP loaded after 2-3 minutes, /validate showed ..., task failed at ...
     validations:
       required: true
-
   - type: textarea
     id: commands
     attributes:
@@ -71,28 +67,24 @@ body:
       render: shell
     validations:
       required: true
-
   - type: textarea
     id: ansible_output
     attributes:
       label: Failed Ansible output
       description: Paste failed tasks, unreachable hosts, stderr, and play recap.
       render: text
-
   - type: textarea
     id: service_status
     attributes:
       label: Service status excerpts
       description: Paste relevant systemctl status or journal excerpts from each affected node.
       render: text
-
   - type: textarea
     id: diagnostics
     attributes:
       label: Diagnostics
       description: Attach or summarize `playbooks/status.yml`, `doctor.yml`, or `diagnostics.yml` results.
       render: text
-
   - type: textarea
     id: inventory
     attributes:
@@ -101,4 +93,3 @@ body:
       render: yaml
     validations:
       required: true
-

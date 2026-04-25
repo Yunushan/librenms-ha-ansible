@@ -10,7 +10,6 @@ body:
       value: |
         Use this for LibreNMS `/validate` or `validate.php` failures. Include
         the failing section and whether a node was intentionally offline.
-
   - type: dropdown
     id: validation_area
     attributes:
@@ -27,7 +26,6 @@ body:
         - Other
     validations:
       required: true
-
   - type: textarea
     id: validation_output
     attributes:
@@ -36,7 +34,6 @@ body:
       render: text
     validations:
       required: true
-
   - type: textarea
     id: context
     attributes:
@@ -45,7 +42,6 @@ body:
       placeholder: Ran cluster.yml, powered off lnms1, rebooted all nodes, upgraded OS, restored backup...
     validations:
       required: true
-
   - type: textarea
     id: node_state
     attributes:
@@ -54,14 +50,12 @@ body:
       render: text
     validations:
       required: true
-
   - type: textarea
     id: ansible_output
     attributes:
       label: Related Ansible output
       description: Paste failed validation, status, post-reboot, or cluster tasks if available.
       render: text
-
   - type: textarea
     id: inventory
     attributes:
@@ -70,4 +64,3 @@ body:
       render: yaml
     validations:
       required: true
-

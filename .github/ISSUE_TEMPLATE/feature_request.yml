@@ -13,7 +13,6 @@ body:
       placeholder: Operators need a safer way to ...
     validations:
       required: true
-
   - type: textarea
     id: proposal
     attributes:
@@ -21,7 +20,6 @@ body:
       description: Describe the behavior, playbook, role, variable, or documentation you want.
     validations:
       required: true
-
   - type: dropdown
     id: impact
     attributes:
@@ -41,16 +39,13 @@ body:
         - Other
     validations:
       required: true
-
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
       description: Mention manual workarounds, existing playbooks, or why current docs are insufficient.
-
   - type: textarea
     id: safety
     attributes:
       label: Safety considerations
       description: Note destructive operations, downtime risk, secrets, or HA quorum concerns.
-
