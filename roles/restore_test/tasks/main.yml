@@ -1,0 +1,225 @@
+---
+- name: Build active host lists for restore test
+  set_fact:
+    librenms_restore_test_active_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_restore_test_active_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+  run_once: true
+
+- name: Determine restore test manifest host
+  set_fact:
+    librenms_restore_test_host_effective: >-
+      {{
+        librenms_restore_test_host
+        if librenms_restore_test_host | length > 0
+        else (
+          librenms_restore_test_active_db_nodes
+          | first
+          | default(librenms_restore_test_active_nodes | first | default(''))
+        )
+      }}
+  run_once: true
+
+- name: Validate restore test inputs
+  assert:
+    that:
+      - librenms_restore_test_backup_dir | length > 0
+      - librenms_restore_test_host_effective | length > 0
+    fail_msg: >-
+      Set librenms_restore_test_backup_dir to a backup directory created by
+      playbooks/backup.yml. Optionally set librenms_restore_test_host when the
+      manifest is not on the default DB host.
+  run_once: true
+
+- name: Check backup manifest exists
+  stat:
+    path: >-
+      {{
+        librenms_restore_test_backup_dir ~ '/'
+        ~ librenms_restore_test_manifest_filename
+      }}
+  delegate_to: "{{ librenms_restore_test_host_effective }}"
+  register: librenms_restore_test_manifest_stat
+  run_once: true
+
+- name: Validate backup manifest exists
+  assert:
+    that:
+      - librenms_restore_test_manifest_stat.stat.exists | default(false)
+    fail_msg: >-
+      Backup manifest was not found on {{ librenms_restore_test_host_effective }}
+      under {{ librenms_restore_test_backup_dir }}.
+  run_once: true
+
+- name: Read backup manifest
+  slurp:
+    src: >-
+      {{
+        librenms_restore_test_backup_dir ~ '/'
+        ~ librenms_restore_test_manifest_filename
+      }}
+  delegate_to: "{{ librenms_restore_test_host_effective }}"
+  register: librenms_restore_test_manifest_raw
+  run_once: true
+
+- name: Parse backup manifest
+  set_fact:
+    librenms_restore_test_manifest: >-
+      {{
+        librenms_restore_test_manifest_raw.content
+        | b64decode
+        | from_yaml
+      }}
+  run_once: true
+
+- name: Determine backup artifact locations
+  set_fact:
+    librenms_restore_test_database_host: >-
+      {{
+        librenms_restore_test_manifest.database.host
+        | default(librenms_restore_test_host_effective)
+      }}
+    librenms_restore_test_database_path: >-
+      {{
+        librenms_restore_test_backup_dir ~ '/'
+        ~ (librenms_restore_test_manifest.database.file | default(''))
+      }}
+    librenms_restore_test_config_host: >-
+      {{
+        librenms_restore_test_manifest.config.host
+        | default(librenms_restore_test_host_effective)
+      }}
+    librenms_restore_test_config_path: >-
+      {{
+        librenms_restore_test_backup_dir ~ '/'
+        ~ (librenms_restore_test_manifest.config.file | default(''))
+      }}
+    librenms_restore_test_rrd_host: >-
+      {{
+        librenms_restore_test_manifest.rrd.host
+        | default(librenms_restore_test_host_effective)
+      }}
+    librenms_restore_test_rrd_path: >-
+      {{
+        librenms_restore_test_backup_dir ~ '/'
+        ~ (librenms_restore_test_manifest.rrd.file | default(''))
+      }}
+  run_once: true
+
+- name: Check database dump exists
+  stat:
+    path: "{{ librenms_restore_test_database_path }}"
+  delegate_to: "{{ librenms_restore_test_database_host }}"
+  register: librenms_restore_test_database_stat
+  when:
+    - librenms_restore_test_require_database | bool
+    - librenms_restore_test_manifest.database.included | default(false) | bool
+  run_once: true
+
+- name: Verify database dump gzip integrity
+  command:
+    argv:
+      - gzip
+      - -t
+      - "{{ librenms_restore_test_database_path }}"
+  delegate_to: "{{ librenms_restore_test_database_host }}"
+  register: librenms_restore_test_database_gzip
+  changed_when: false
+  when:
+    - librenms_restore_test_require_database | bool
+    - librenms_restore_test_manifest.database.included | default(false) | bool
+    - librenms_restore_test_database_stat.stat.exists | default(false)
+    - librenms_restore_test_database_path is match('.*\\.gz$')
+  run_once: true
+
+- name: Check config archive exists
+  stat:
+    path: "{{ librenms_restore_test_config_path }}"
+  delegate_to: "{{ librenms_restore_test_config_host }}"
+  register: librenms_restore_test_config_stat
+  when:
+    - librenms_restore_test_require_config | bool
+    - librenms_restore_test_manifest.config.included | default(false) | bool
+  run_once: true
+
+- name: Verify config archive can be listed
+  command:
+    argv:
+      - tar
+      - -tzf
+      - "{{ librenms_restore_test_config_path }}"
+  delegate_to: "{{ librenms_restore_test_config_host }}"
+  register: librenms_restore_test_config_tar
+  changed_when: false
+  when:
+    - librenms_restore_test_require_config | bool
+    - librenms_restore_test_manifest.config.included | default(false) | bool
+    - librenms_restore_test_config_stat.stat.exists | default(false)
+  run_once: true
+
+- name: Check RRD archive exists
+  stat:
+    path: "{{ librenms_restore_test_rrd_path }}"
+  delegate_to: "{{ librenms_restore_test_rrd_host }}"
+  register: librenms_restore_test_rrd_stat
+  when:
+    - librenms_restore_test_require_rrd | bool
+    - librenms_restore_test_manifest.rrd.included | default(false) | bool
+  run_once: true
+
+- name: Verify RRD archive can be listed
+  command:
+    argv:
+      - tar
+      - -tzf
+      - "{{ librenms_restore_test_rrd_path }}"
+  delegate_to: "{{ librenms_restore_test_rrd_host }}"
+  register: librenms_restore_test_rrd_tar
+  changed_when: false
+  when:
+    - librenms_restore_test_require_rrd | bool
+    - librenms_restore_test_manifest.rrd.included | default(false) | bool
+    - librenms_restore_test_rrd_stat.stat.exists | default(false)
+  run_once: true
+
+- name: Validate required backup artifacts
+  assert:
+    that:
+      - >-
+        (not librenms_restore_test_require_database | bool)
+        or (
+          librenms_restore_test_manifest.database.included | default(false) | bool
+          and librenms_restore_test_database_stat.stat.exists | default(false)
+        )
+      - >-
+        (not librenms_restore_test_require_config | bool)
+        or (
+          librenms_restore_test_manifest.config.included | default(false) | bool
+          and librenms_restore_test_config_stat.stat.exists | default(false)
+        )
+      - >-
+        (not librenms_restore_test_require_rrd | bool)
+        or (
+          librenms_restore_test_manifest.rrd.included | default(false) | bool
+          and librenms_restore_test_rrd_stat.stat.exists | default(false)
+        )
+    fail_msg: >-
+      One or more required backup artifacts are missing or were not included in
+      the manifest. Check backup directory {{ librenms_restore_test_backup_dir }}.
+  run_once: true
+
+- name: Report restore test summary
+  debug:
+    msg: >-
+      Restore test passed for {{ librenms_restore_test_backup_dir }}.
+      Database host={{ librenms_restore_test_database_host }},
+      config host={{ librenms_restore_test_config_host }},
+      rrd host={{ librenms_restore_test_rrd_host }}.
+  run_once: true

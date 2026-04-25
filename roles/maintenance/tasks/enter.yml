@@ -1,0 +1,217 @@
+---
+- name: Ensure maintenance marker directory exists on target
+  file:
+    path: "{{ librenms_maintenance_marker_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  delegate_to: "{{ librenms_maintenance_target }}"
+  run_once: true
+
+- name: Create maintenance marker on target
+  copy:
+    dest: "{{ librenms_maintenance_marker_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      target={{ librenms_maintenance_target }}
+      action=enter
+      timestamp={{ ansible_date_time.iso8601 }}
+  delegate_to: "{{ librenms_maintenance_target }}"
+  run_once: true
+
+- name: Probe VIP before maintenance drain
+  uri:
+    url: "{{ librenms_maintenance_vip_url }}"
+    headers:
+      Host: "{{ librenms_maintenance_http_host }}"
+    method: GET
+    return_content: false
+    status_code: "{{ librenms_maintenance_http_statuses }}"
+    timeout: "{{ librenms_maintenance_http_timeout | int }}"
+    validate_certs: "{{ librenms_maintenance_validate_certs | bool }}"
+  delegate_to: "{{ librenms_maintenance_probe_delegate }}"
+  register: librenms_maintenance_baseline_vip
+  retries: "{{ librenms_maintenance_probe_retries | int }}"
+  delay: "{{ librenms_maintenance_probe_delay | int }}"
+  until:
+    - >-
+      (librenms_maintenance_baseline_vip.status | default(0) | int)
+      in (librenms_maintenance_http_statuses | map('int') | list)
+  changed_when: false
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_maintenance_probe_delegate | length > 0
+  run_once: true
+
+- name: Move VIP away from target
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_keepalived_service_name | default(librenms_keepalived_service_name) }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_keepalived | bool
+    - librenms_vip_enabled | bool
+    - librenms_maintenance_target in librenms_maintenance_lb_nodes
+  run_once: true
+
+- name: Stop target web frontend
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_nginx_service_name | default(librenms_nginx_service_name) }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_application_services | bool
+    - librenms_manage_nginx | bool
+    - librenms_maintenance_target in librenms_maintenance_web_nodes
+  run_once: true
+
+- name: Stop target LibreNMS workers and timers
+  shell: |
+    set -eu
+    for unit in \
+      librenms-scheduler.timer \
+      librenms-scheduler.service \
+      librenms-daily.timer \
+      librenms-daily.service \
+      librenms.service
+    do
+      if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        if systemctl is-active --quiet "$unit"; then
+          systemctl stop "$unit"
+        fi
+      fi
+    done
+  args:
+    executable: /bin/sh
+  delegate_to: "{{ librenms_maintenance_target }}"
+  changed_when: false
+  when:
+    - librenms_maintenance_stop_application_services | bool
+    - librenms_maintenance_target in librenms_maintenance_app_nodes
+  run_once: true
+
+- name: Stop target RRDCacheD
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_rrdcached | bool
+    - librenms_manage_rrdcached | bool
+    - librenms_maintenance_target in librenms_maintenance_app_nodes
+  run_once: true
+
+- name: Stop target Redis before maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_redis_service_name | default(librenms_redis_service_name) }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_data_services | bool
+    - librenms_redis_mode == 'sentinel'
+    - librenms_maintenance_target in librenms_maintenance_redis_nodes
+  run_once: true
+
+- name: Wait for remaining Redis Sentinels to expose a writable master
+  include_tasks: redis_write_check.yml
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_maintenance_remaining_redis_nodes | length > 0
+
+- name: Stop target Redis Sentinel before maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_redis_sentinel_service_name_effective | default(librenms_redis_sentinel_service_name_effective) }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_data_services | bool
+    - librenms_redis_mode == 'sentinel'
+    - librenms_maintenance_target in librenms_maintenance_redis_nodes
+  run_once: true
+
+- name: Stop target MariaDB before maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_mariadb_service_name | default(librenms_mariadb_service_name) }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_data_services | bool
+    - librenms_db_mode == 'galera'
+    - librenms_maintenance_target in librenms_maintenance_db_nodes
+  run_once: true
+
+- name: Verify remaining Galera nodes stay primary
+  include_tasks: galera_check.yml
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_maintenance_remaining_db_nodes | length > 0
+
+- name: Verify VIP is reachable after target drain
+  uri:
+    url: "{{ librenms_maintenance_vip_url }}"
+    headers:
+      Host: "{{ librenms_maintenance_http_host }}"
+    method: GET
+    return_content: false
+    status_code: "{{ librenms_maintenance_http_statuses }}"
+    timeout: "{{ librenms_maintenance_http_timeout | int }}"
+    validate_certs: "{{ librenms_maintenance_validate_certs | bool }}"
+  delegate_to: "{{ librenms_maintenance_probe_delegate }}"
+  register: librenms_maintenance_drained_vip
+  retries: "{{ librenms_maintenance_probe_retries | int }}"
+  delay: "{{ librenms_maintenance_probe_delay | int }}"
+  until:
+    - >-
+      (librenms_maintenance_drained_vip.status | default(0) | int)
+      in (librenms_maintenance_http_statuses | map('int') | list)
+  changed_when: false
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_maintenance_probe_delegate | length > 0
+  run_once: true
+
+- name: Verify remaining LibreNMS dispatchers
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_maintenance_remaining_app_nodes }}"
+  register: librenms_maintenance_remaining_dispatchers
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_maintenance_remaining_app_nodes | length > 0
+  run_once: true
+
+- name: Assert at least one remaining dispatcher is active
+  assert:
+    that:
+      - >-
+        (
+          librenms_maintenance_remaining_dispatchers.results
+          | default([])
+          | selectattr('stdout', 'equalto', 'active')
+          | list
+          | length
+        ) >= 1
+    fail_msg: >-
+      No remaining LibreNMS dispatcher is active after draining
+      {{ librenms_maintenance_target }}.
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_maintenance_remaining_app_nodes | length > 0
+  run_once: true
+
+- name: Report maintenance-enter result
+  debug:
+    msg: |-
+      {{ librenms_maintenance_target }} has been drained for planned maintenance.
+      If it will remain powered off, add it to inventory group maintenance_nodes
+      before running cluster.yml, status.yml, validate.yml, or post-reboot.yml.
+  run_once: true

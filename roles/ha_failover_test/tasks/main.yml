@@ -15,17 +15,27 @@
     librenms_failover_test_active_nodes: >-
       {{
         groups.get('librenms_nodes', [])
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
     librenms_failover_test_active_web_nodes: >-
       {{
         groups.get('librenms_web', groups.get('librenms_nodes', []))
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
     librenms_failover_test_active_lb_nodes: >-
       {{
         groups.get('lb_nodes', [])
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_failover_test_active_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_failover_test_active_redis_nodes: >-
+      {{
+        groups.get('librenms_redis', [])
+        | difference(librenms_inactive_inventory_nodes)
       }}
   run_once: true
 
@@ -46,6 +56,24 @@
           | first
           | default(librenms_failover_test_active_nodes | first | default(''))
         )
+      }}
+    librenms_failover_test_dispatcher_host_effective: >-
+      {{
+        librenms_failover_test_dispatcher_host
+        if librenms_failover_test_dispatcher_host | length > 0
+        else (librenms_failover_test_active_nodes | first | default(''))
+      }}
+    librenms_failover_test_redis_query_host_effective: >-
+      {{
+        librenms_failover_test_redis_query_host
+        if librenms_failover_test_redis_query_host | length > 0
+        else (librenms_failover_test_active_redis_nodes | first | default(''))
+      }}
+    librenms_failover_test_galera_host_effective: >-
+      {{
+        librenms_failover_test_galera_host
+        if librenms_failover_test_galera_host | length > 0
+        else (librenms_failover_test_active_db_nodes | first | default(''))
       }}
     librenms_failover_test_vip_url: >-
       {{
@@ -78,6 +106,50 @@
       }}
   run_once: true
 
+- name: Validate HAProxy service failover inventory
+  assert:
+    that:
+      - (librenms_failover_test_active_lb_nodes | length) >= 2
+    fail_msg: "HAProxy service failover testing requires at least two active load balancer nodes."
+  when: "'haproxy_service' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Validate dispatcher service failover inventory
+  assert:
+    that:
+      - (librenms_failover_test_active_nodes | length) >= 2
+      - librenms_failover_test_dispatcher_host_effective | length > 0
+      - librenms_failover_test_dispatcher_host_effective in librenms_failover_test_active_nodes
+    fail_msg: "Dispatcher service failover testing requires at least two active LibreNMS nodes."
+  when: "'dispatcher_service' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Validate Redis master failover inventory
+  assert:
+    that:
+      - librenms_redis_mode == 'sentinel'
+      - (librenms_failover_test_active_redis_nodes | length) >= 3
+      - librenms_failover_test_redis_query_host_effective | length > 0
+      - librenms_failover_test_redis_query_host_effective in librenms_failover_test_active_redis_nodes
+    fail_msg: >-
+      Redis master failover testing requires Redis Sentinel mode and at least
+      three active Redis nodes.
+  when: "'redis_master' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Validate Galera node failover inventory
+  assert:
+    that:
+      - librenms_db_mode == 'galera'
+      - (librenms_failover_test_active_db_nodes | length) >= 3
+      - librenms_failover_test_galera_host_effective | length > 0
+      - librenms_failover_test_galera_host_effective in librenms_failover_test_active_db_nodes
+    fail_msg: >-
+      Galera node failover testing requires Galera mode and at least three
+      active database nodes.
+  when: "'galera_node' in librenms_failover_test_cases"
+  run_once: true
+
 - name: Require explicit confirmation before disruptive failover tests
   assert:
     that:
@@ -96,6 +168,7 @@
       - (librenms_failover_test_active_web_nodes | length) >= 2
       - (librenms_failover_test_active_lb_nodes | length) >= 2
       - librenms_failover_test_web_backend_host_effective | length > 0
+      - librenms_failover_test_web_backend_host_effective in librenms_failover_test_active_web_nodes
       - librenms_failover_test_probe_delegate_effective | length > 0
     fail_msg: >-
       Controlled failover testing requires HA mode, a configured VIP, at least
@@ -184,6 +257,207 @@
       when: librenms_failover_test_restore_services | bool
       run_once: true
   when: "'web_backend' in librenms_failover_test_cases"
+
+- name: Detect VIP owner before HAProxy service failover test
+  include_tasks: detect_vip_owner.yml
+  when: "'haproxy_service' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Determine HAProxy service failover target
+  set_fact:
+    librenms_failover_test_haproxy_host_effective: >-
+      {{
+        librenms_failover_test_haproxy_host
+        if librenms_failover_test_haproxy_host | length > 0
+        else (
+          (librenms_failover_test_detected_vip_owner | default(''))
+          if (librenms_failover_test_detected_vip_owner | default('') | length) > 0
+          else (librenms_failover_test_active_lb_nodes | first | default(''))
+        )
+      }}
+    librenms_failover_test_haproxy_original_vip_owner: >-
+      {{ librenms_failover_test_detected_vip_owner | default('') }}
+  when: "'haproxy_service' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Validate HAProxy service failover target
+  assert:
+    that:
+      - librenms_failover_test_haproxy_host_effective | length > 0
+      - librenms_failover_test_haproxy_host_effective in librenms_failover_test_active_lb_nodes
+    fail_msg: >-
+      HAProxy service failover target must be an active load balancer node.
+  when: "'haproxy_service' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Test HAProxy service failover
+  block:
+    - name: Stop HAProxy on selected load balancer
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_haproxy_host_effective
+            ].librenms_haproxy_service_name
+            | default(librenms_haproxy_service_name)
+          }}
+        state: stopped
+      delegate_to: "{{ librenms_failover_test_haproxy_host_effective }}"
+      run_once: true
+
+    - name: Wait briefly for keepalived tracking to react to HAProxy stop
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_stop | int }}"
+      run_once: true
+
+    - name: Verify VIP stays reachable after HAProxy stop
+      uri:
+        url: "{{ librenms_failover_test_vip_url }}"
+        headers:
+          Host: "{{ librenms_failover_test_http_host }}"
+        method: GET
+        return_content: false
+        status_code: "{{ librenms_failover_test_http_statuses }}"
+        timeout: "{{ librenms_failover_test_http_timeout }}"
+        validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
+      delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+      register: librenms_failover_test_haproxy_probe
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - >-
+          (librenms_failover_test_haproxy_probe.status | default(0) | int)
+          in librenms_failover_test_http_statuses
+      changed_when: false
+      run_once: true
+
+    - name: Detect VIP owner after HAProxy stop
+      include_tasks: detect_vip_owner.yml
+      run_once: true
+
+    - name: Validate VIP moved away from HAProxy outage host when applicable
+      assert:
+        that:
+          - librenms_failover_test_detected_vip_owner | length > 0
+          - >-
+            librenms_failover_test_detected_vip_owner
+            != librenms_failover_test_haproxy_host_effective
+        fail_msg: >-
+          VIP still appears to be on {{ librenms_failover_test_haproxy_host_effective }}
+          after HAProxy was stopped there.
+      when:
+        - librenms_failover_test_haproxy_original_vip_owner | length > 0
+        - >-
+          librenms_failover_test_haproxy_original_vip_owner
+          == librenms_failover_test_haproxy_host_effective
+      run_once: true
+  always:
+    - name: Restore HAProxy on selected load balancer
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_haproxy_host_effective
+            ].librenms_haproxy_service_name
+            | default(librenms_haproxy_service_name)
+          }}
+        state: started
+      delegate_to: "{{ librenms_failover_test_haproxy_host_effective }}"
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_failover_test_haproxy_host_effective | length > 0
+      run_once: true
+
+    - name: Wait briefly after HAProxy restore
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
+      when: librenms_failover_test_restore_services | bool
+      run_once: true
+
+    - name: Verify VIP is reachable after HAProxy restore
+      uri:
+        url: "{{ librenms_failover_test_vip_url }}"
+        headers:
+          Host: "{{ librenms_failover_test_http_host }}"
+        method: GET
+        return_content: false
+        status_code: "{{ librenms_failover_test_http_statuses }}"
+        timeout: "{{ librenms_failover_test_http_timeout }}"
+        validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
+      delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+      register: librenms_failover_test_haproxy_restored_probe
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - >-
+          (librenms_failover_test_haproxy_restored_probe.status | default(0) | int)
+          in librenms_failover_test_http_statuses
+      changed_when: false
+      run_once: true
+  when: "'haproxy_service' in librenms_failover_test_cases"
+
+- name: Test LibreNMS dispatcher service failover
+  block:
+    - name: Stop LibreNMS dispatcher on selected node
+      service:
+        name: librenms
+        state: stopped
+      delegate_to: "{{ librenms_failover_test_dispatcher_host_effective }}"
+      run_once: true
+
+    - name: Wait briefly after dispatcher stop
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_stop | int }}"
+      run_once: true
+
+    - name: Check remaining dispatcher service states
+      command:
+        argv:
+          - systemctl
+          - is-active
+          - librenms
+      delegate_to: "{{ item }}"
+      loop: >-
+        {{
+          librenms_failover_test_active_nodes
+          | difference([librenms_failover_test_dispatcher_host_effective])
+        }}
+      register: librenms_failover_test_remaining_dispatchers
+      changed_when: false
+      failed_when: false
+      run_once: true
+
+    - name: Validate at least one remaining dispatcher is active
+      assert:
+        that:
+          - >-
+            (
+              librenms_failover_test_remaining_dispatchers.results
+              | selectattr('stdout', 'equalto', 'active')
+              | list
+              | length
+            ) >= 1
+        fail_msg: >-
+          No remaining LibreNMS dispatcher service stayed active after stopping
+          {{ librenms_failover_test_dispatcher_host_effective }}.
+      run_once: true
+  always:
+    - name: Restore LibreNMS dispatcher on selected node
+      service:
+        name: librenms
+        state: started
+      delegate_to: "{{ librenms_failover_test_dispatcher_host_effective }}"
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_failover_test_dispatcher_host_effective | length > 0
+      run_once: true
+
+    - name: Wait briefly after dispatcher restore
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
+      when: librenms_failover_test_restore_services | bool
+      run_once: true
+  when: "'dispatcher_service' in librenms_failover_test_cases"
 
 - name: Detect VIP owner before keepalived failover test
   include_tasks: detect_vip_owner.yml
@@ -304,6 +578,271 @@
       changed_when: false
       run_once: true
   when: "'keepalived_vip' in librenms_failover_test_cases"
+
+- name: Query Redis Sentinel master before Redis master failover
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 26379
+    {% if librenms_redis_sentinel_username | length > 0 %}
+    --user {{ librenms_redis_sentinel_username | quote }}
+    {% endif %}
+    SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }}
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+  delegate_to: "{{ librenms_failover_test_redis_query_host_effective }}"
+  register: librenms_failover_test_redis_master_before
+  changed_when: false
+  failed_when: >-
+    librenms_failover_test_redis_master_before.rc != 0
+    or (librenms_failover_test_redis_master_before.stdout_lines | length) < 2
+  when: "'redis_master' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Record Redis master endpoint before failover
+  set_fact:
+    librenms_failover_test_redis_master_host: >-
+      {{ librenms_failover_test_redis_master_before.stdout_lines[0] }}
+    librenms_failover_test_redis_master_port: >-
+      {{ librenms_failover_test_redis_master_before.stdout_lines[1] }}
+    librenms_failover_test_redis_master_inventory_host: ""
+  when: "'redis_master' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Match Redis master endpoint to inventory host
+  set_fact:
+    librenms_failover_test_redis_master_inventory_host: "{{ item }}"
+  loop: "{{ librenms_failover_test_active_redis_nodes }}"
+  when:
+    - "'redis_master' in librenms_failover_test_cases"
+    - >-
+      (hostvars[item].ansible_host | default(item)) == librenms_failover_test_redis_master_host
+      or item == librenms_failover_test_redis_master_host
+  run_once: true
+
+- name: Validate Redis master maps to an inventory host
+  assert:
+    that:
+      - librenms_failover_test_redis_master_inventory_host | length > 0
+    fail_msg: >-
+      Redis Sentinel reported master {{ librenms_failover_test_redis_master_host }}
+      but it did not match an active inventory host.
+  when: "'redis_master' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Test Redis Sentinel master failover
+  block:
+    - name: Stop Redis on current master
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_redis_master_inventory_host
+            ].librenms_redis_service_name
+            | default(librenms_redis_service_name)
+          }}
+        state: stopped
+      delegate_to: "{{ librenms_failover_test_redis_master_inventory_host }}"
+      run_once: true
+
+    - name: Wait for Redis Sentinel to report a new master
+      no_log: true
+      command: >-
+        redis-cli -h 127.0.0.1 -p 26379
+        {% if librenms_redis_sentinel_username | length > 0 %}
+        --user {{ librenms_redis_sentinel_username | quote }}
+        {% endif %}
+        SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }}
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+      delegate_to: "{{ librenms_failover_test_redis_query_host_effective }}"
+      register: librenms_failover_test_redis_master_after
+      changed_when: false
+      retries: "{{ librenms_failover_test_redis_failover_retries | int }}"
+      delay: "{{ librenms_failover_test_redis_failover_delay | int }}"
+      until:
+        - librenms_failover_test_redis_master_after.rc == 0
+        - (librenms_failover_test_redis_master_after.stdout_lines | length) >= 2
+        - >-
+          librenms_failover_test_redis_master_after.stdout_lines[0]
+          != librenms_failover_test_redis_master_host
+      run_once: true
+
+    - name: Record Redis master endpoint after failover
+      set_fact:
+        librenms_failover_test_redis_new_master_host: >-
+          {{ librenms_failover_test_redis_master_after.stdout_lines[0] }}
+        librenms_failover_test_redis_new_master_port: >-
+          {{ librenms_failover_test_redis_master_after.stdout_lines[1] }}
+      run_once: true
+
+    - name: Verify new Redis master accepts writes
+      no_log: true
+      command: >-
+        redis-cli
+        -h {{ librenms_failover_test_redis_new_master_host | quote }}
+        -p {{ librenms_failover_test_redis_new_master_port | quote }}
+        {% if librenms_redis_username | length > 0 %}
+        --user {{ librenms_redis_username | quote }}
+        {% endif %}
+        SET librenms:ansible:failover-test:redis-master ok EX 30
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_password }}"
+      register: librenms_failover_test_redis_write_check
+      changed_when: false
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - (librenms_failover_test_redis_write_check.stdout | trim) == 'OK'
+      run_once: true
+  always:
+    - name: Restore Redis on original master host
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_redis_master_inventory_host
+            ].librenms_redis_service_name
+            | default(librenms_redis_service_name)
+          }}
+        state: started
+      delegate_to: "{{ librenms_failover_test_redis_master_inventory_host }}"
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_failover_test_redis_master_inventory_host | length > 0
+      run_once: true
+
+    - name: Wait briefly after Redis restore
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_restore | int }}"
+      when: librenms_failover_test_restore_services | bool
+      run_once: true
+  when: "'redis_master' in librenms_failover_test_cases"
+
+- name: Determine Galera remaining nodes for failover test
+  set_fact:
+    librenms_failover_test_galera_remaining_nodes: >-
+      {{
+        librenms_failover_test_active_db_nodes
+        | difference([librenms_failover_test_galera_host_effective])
+      }}
+  when: "'galera_node' in librenms_failover_test_cases"
+  run_once: true
+
+- name: Test Galera node failover
+  block:
+    - name: Stop MariaDB on selected Galera node
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_galera_host_effective
+            ].librenms_mariadb_service_name
+            | default(librenms_mariadb_service_name)
+          }}
+        state: stopped
+      delegate_to: "{{ librenms_failover_test_galera_host_effective }}"
+      run_once: true
+
+    - name: Wait briefly for HAProxy and Galera to react to MariaDB stop
+      pause:
+        seconds: "{{ librenms_failover_test_wait_after_stop | int }}"
+      run_once: true
+
+    - name: Verify remaining Galera nodes stay primary and ready
+      command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - "--socket={{ hostvars[item].librenms_mariadb_socket | default(librenms_mariadb_socket) }}"
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+      delegate_to: "{{ item }}"
+      loop: "{{ librenms_failover_test_galera_remaining_nodes }}"
+      register: librenms_failover_test_galera_remaining_status
+      changed_when: false
+      retries: "{{ librenms_failover_test_galera_recovery_retries | int }}"
+      delay: "{{ librenms_failover_test_galera_recovery_delay | int }}"
+      until:
+        - librenms_failover_test_galera_remaining_status.rc == 0
+        - "'wsrep_cluster_status' in librenms_failover_test_galera_remaining_status.stdout"
+        - "'Primary' in librenms_failover_test_galera_remaining_status.stdout"
+        - "'wsrep_ready' in librenms_failover_test_galera_remaining_status.stdout"
+        - "'ON' in librenms_failover_test_galera_remaining_status.stdout"
+      run_once: true
+
+    - name: Verify HAProxy database frontend accepts SQL
+      no_log: true
+      command:
+        argv:
+          - mysql
+          - -h
+          - "{{ librenms_vip_ip }}"
+          - -P
+          - "{{ librenms_haproxy_db_port | string }}"
+          - -u
+          - "{{ librenms_db_user }}"
+          - "{{ librenms_db_name }}"
+          - -Nse
+          - SELECT 1;
+      environment:
+        MYSQL_PWD: "{{ librenms_db_password }}"
+      delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+      register: librenms_failover_test_galera_vip_sql
+      changed_when: false
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - (librenms_failover_test_galera_vip_sql.stdout | trim) == '1'
+      when: librenms_vip_enabled | bool
+      run_once: true
+  always:
+    - name: Restore MariaDB on selected Galera node
+      service:
+        name: >-
+          {{
+            hostvars[
+              librenms_failover_test_galera_host_effective
+            ].librenms_mariadb_service_name
+            | default(librenms_mariadb_service_name)
+          }}
+        state: started
+      delegate_to: "{{ librenms_failover_test_galera_host_effective }}"
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_failover_test_galera_host_effective | length > 0
+      run_once: true
+
+    - name: Wait for restored Galera node to become ready
+      command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - >-
+            --socket={{
+              hostvars[
+                librenms_failover_test_galera_host_effective
+              ].librenms_mariadb_socket | default(librenms_mariadb_socket)
+            }}
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+      delegate_to: "{{ librenms_failover_test_galera_host_effective }}"
+      register: librenms_failover_test_galera_restored_status
+      changed_when: false
+      retries: "{{ librenms_failover_test_galera_recovery_retries | int }}"
+      delay: "{{ librenms_failover_test_galera_recovery_delay | int }}"
+      until:
+        - librenms_failover_test_galera_restored_status.rc == 0
+        - "'wsrep_ready' in librenms_failover_test_galera_restored_status.stdout"
+        - "'ON' in librenms_failover_test_galera_restored_status.stdout"
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_failover_test_galera_host_effective | length > 0
+      run_once: true
+  when: "'galera_node' in librenms_failover_test_cases"
 
 - name: Report HA failover test summary
   debug:

@@ -41,6 +41,62 @@ librenms_manage_local_snmpd: true
 # Auto-add hosts in librenms_nodes as monitored LibreNMS devices after bootstrap.
 librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 
+# Operational runbook toggles and examples.
+# Leave these commented until you need the specific workflow.
+
+# Enable live TCP listener checks for the HA network matrix during doctor runs:
+# ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml \
+#   --ask-become-pass \
+#   -e librenms_doctor_network_tcp_checks_enabled=true
+#
+# librenms_doctor_network_tcp_checks_enabled: false
+# librenms_doctor_network_check_gluster_brick_ports: false
+
+# Fail the HA status playbook when any HA layer is degraded. This is useful for
+# AWX schedules, monitoring hooks, and pre-maintenance gates.
+#
+# librenms_status_alert_fail_on_degraded: true
+# librenms_status_alerts_enabled: false
+# librenms_status_alert_webhook_url: ""
+# librenms_status_alert_webhook_headers: {}
+
+# Target optional failover drills. Empty values let the role choose safe
+# defaults from the current inventory.
+#
+# librenms_failover_test_cases:
+#   - web_backend
+#   - keepalived_vip
+#   - haproxy_service
+#   - dispatcher_service
+# librenms_failover_test_web_backend_host: lnms2
+# librenms_failover_test_haproxy_host: lnms2
+# librenms_failover_test_dispatcher_host: lnms2
+# librenms_failover_test_redis_query_host: lnms2
+# librenms_failover_test_galera_host: lnms3
+
+# Diagnostics bundle tuning for incident capture. Keep fetch enabled for normal
+# controller-side archives; use keep_remote when controller fetch is unreliable.
+#
+# librenms_diagnostics_local_dir: diagnostics
+# librenms_diagnostics_journal_lines: 500
+# librenms_diagnostics_log_lines: 1000
+# librenms_diagnostics_keep_remote: false
+# librenms_diagnostics_fetch: true
+
+# Restore-test input. Set this to a backup directory created by backup.yml when
+# running playbooks/restore-test.yml.
+#
+# librenms_restore_test_backup_dir: /var/backups/librenms-ha/<timestamp>
+# librenms_restore_test_host: ""
+# librenms_restore_test_require_rrd: false
+
+# Galera recovery guard. Set both values only when there is no Galera Primary
+# component and galera-recover.yml has reported the selected bootstrap host.
+#
+# librenms_galera_recover_confirm: false
+# librenms_galera_recover_bootstrap_host: lnms2
+# librenms_galera_recover_tie_breaker: manual
+
 # Optional AWX controller deployment. See docs/awx-controller.md.
 awx_controller_enabled: false
 

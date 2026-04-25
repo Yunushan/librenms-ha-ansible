@@ -4,32 +4,32 @@
     librenms_doctor_active_nodes: >-
       {{
         groups.get('librenms_nodes', [])
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
     librenms_doctor_active_web_nodes: >-
       {{
         groups.get('librenms_web', groups.get('librenms_nodes', []))
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
     librenms_doctor_active_db_nodes: >-
       {{
         groups.get('librenms_db', [])
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
     librenms_doctor_active_redis_nodes: >-
       {{
         groups.get('librenms_redis', [])
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
     librenms_doctor_active_lb_nodes: >-
       {{
         groups.get('lb_nodes', [])
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
     librenms_doctor_active_gluster_nodes: >-
       {{
         groups.get('gluster_nodes', [])
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
 
 - name: Build unique managed host list for doctor
@@ -469,6 +469,220 @@
   when:
     - librenms_vip_enabled | bool
     - inventory_hostname in librenms_doctor_active_lb_nodes
+
+- name: Report skipped live TCP network checks
+  debug:
+    msg: >-
+      Doctor route checks are enabled, but live TCP port checks are disabled.
+      Run doctor with -e librenms_doctor_network_tcp_checks_enabled=true after
+      services are installed to validate firewall/listener reachability.
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - not (librenms_doctor_network_tcp_checks_enabled | bool)
+  run_once: true
+
+- name: Check routed paths from load balancers to web backends
+  include_tasks: network_route_matrix.yml
+  vars:
+    librenms_doctor_network_route_name: load balancer to LibreNMS web backend
+    librenms_doctor_network_route_sources: "{{ librenms_doctor_active_lb_nodes }}"
+    librenms_doctor_network_route_destinations: "{{ librenms_doctor_active_web_nodes }}"
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - librenms_mode == 'ha'
+    - (librenms_doctor_active_lb_nodes | length) > 0
+    - (librenms_doctor_active_web_nodes | length) > 0
+  run_once: true
+
+- name: Check routed paths between load balancers for VRRP
+  include_tasks: network_route_matrix.yml
+  vars:
+    librenms_doctor_network_route_name: load balancer VRRP peer path
+    librenms_doctor_network_route_sources: "{{ librenms_doctor_active_lb_nodes }}"
+    librenms_doctor_network_route_destinations: "{{ librenms_doctor_active_lb_nodes }}"
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - librenms_mode == 'ha'
+    - librenms_vip_enabled | bool
+    - (librenms_doctor_active_lb_nodes | length) > 1
+  run_once: true
+
+- name: Determine database frontend target for doctor network checks
+  set_fact:
+    librenms_doctor_db_frontend_host: >-
+      {{
+        librenms_db_host | default('')
+        if librenms_db_host | default('') | length > 0
+        else (
+          librenms_vip_ip
+          if librenms_vip_enabled | bool
+          else (
+            hostvars[(librenms_doctor_active_db_nodes | first)].ansible_host
+            | default(librenms_doctor_active_db_nodes | first)
+          )
+        )
+      }}
+  when:
+    - librenms_db_mode != 'local'
+    - (librenms_doctor_active_db_nodes | length) > 0
+  run_once: true
+
+- name: Check routed paths from LibreNMS nodes to database frontend
+  include_tasks: network_route_matrix.yml
+  vars:
+    librenms_doctor_network_route_name: LibreNMS to database frontend
+    librenms_doctor_network_route_sources: "{{ librenms_doctor_active_nodes }}"
+    librenms_doctor_network_route_destinations: "{{ [librenms_doctor_db_frontend_host] }}"
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - librenms_db_mode != 'local'
+    - librenms_doctor_db_frontend_host | default('') | length > 0
+    - (librenms_doctor_active_nodes | length) > 0
+  run_once: true
+
+- name: Check routed paths between Galera nodes
+  include_tasks: network_route_matrix.yml
+  vars:
+    librenms_doctor_network_route_name: Galera node mesh
+    librenms_doctor_network_route_sources: "{{ librenms_doctor_active_db_nodes }}"
+    librenms_doctor_network_route_destinations: "{{ librenms_doctor_active_db_nodes }}"
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - librenms_db_mode == 'galera'
+    - (librenms_doctor_active_db_nodes | length) > 1
+  run_once: true
+
+- name: Check routed paths from LibreNMS nodes to Redis Sentinel nodes
+  include_tasks: network_route_matrix.yml
+  vars:
+    librenms_doctor_network_route_name: LibreNMS to Redis Sentinel
+    librenms_doctor_network_route_sources: "{{ librenms_doctor_active_nodes }}"
+    librenms_doctor_network_route_destinations: "{{ librenms_doctor_active_redis_nodes }}"
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - librenms_redis_mode == 'sentinel'
+    - (librenms_doctor_active_nodes | length) > 0
+    - (librenms_doctor_active_redis_nodes | length) > 0
+  run_once: true
+
+- name: Check routed paths between Redis Sentinel nodes
+  include_tasks: network_route_matrix.yml
+  vars:
+    librenms_doctor_network_route_name: Redis Sentinel node mesh
+    librenms_doctor_network_route_sources: "{{ librenms_doctor_active_redis_nodes }}"
+    librenms_doctor_network_route_destinations: "{{ librenms_doctor_active_redis_nodes }}"
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - librenms_redis_mode == 'sentinel'
+    - (librenms_doctor_active_redis_nodes | length) > 1
+  run_once: true
+
+- name: Check routed paths from LibreNMS nodes to Gluster nodes
+  include_tasks: network_route_matrix.yml
+  vars:
+    librenms_doctor_network_route_name: LibreNMS to GlusterFS
+    librenms_doctor_network_route_sources: "{{ (librenms_doctor_active_nodes + librenms_doctor_active_gluster_nodes) | unique | list }}"
+    librenms_doctor_network_route_destinations: "{{ librenms_doctor_active_gluster_nodes }}"
+  when:
+    - librenms_doctor_network_route_checks_enabled | bool
+    - librenms_rrd_mode == 'glusterfs'
+    - (librenms_doctor_active_nodes | length) > 0
+    - (librenms_doctor_active_gluster_nodes | length) > 0
+  run_once: true
+
+- name: Check TCP paths from load balancers to web backends
+  include_tasks: network_tcp_matrix.yml
+  vars:
+    librenms_doctor_network_tcp_name: load balancer to LibreNMS web backend
+    librenms_doctor_network_tcp_port: "{{ librenms_doctor_network_web_backend_port }}"
+    librenms_doctor_network_tcp_sources: "{{ librenms_doctor_active_lb_nodes }}"
+    librenms_doctor_network_tcp_destinations: "{{ librenms_doctor_active_web_nodes }}"
+  when:
+    - librenms_doctor_network_tcp_checks_enabled | bool
+    - librenms_mode == 'ha'
+    - (librenms_doctor_active_lb_nodes | length) > 0
+    - (librenms_doctor_active_web_nodes | length) > 0
+  run_once: true
+
+- name: Check TCP paths from LibreNMS nodes to database frontend
+  include_tasks: network_tcp_matrix.yml
+  vars:
+    librenms_doctor_network_tcp_name: LibreNMS to database frontend
+    librenms_doctor_network_tcp_port: "{{ librenms_db_port | default(3306) }}"
+    librenms_doctor_network_tcp_sources: "{{ librenms_doctor_active_nodes }}"
+    librenms_doctor_network_tcp_destinations: "{{ [librenms_doctor_db_frontend_host] }}"
+  when:
+    - librenms_doctor_network_tcp_checks_enabled | bool
+    - librenms_db_mode != 'local'
+    - librenms_doctor_db_frontend_host | default('') | length > 0
+    - (librenms_doctor_active_nodes | length) > 0
+  run_once: true
+
+- name: Check Galera TCP firewall matrix
+  include_tasks: network_tcp_matrix.yml
+  loop: "{{ librenms_doctor_network_galera_tcp_ports }}"
+  loop_control:
+    loop_var: librenms_doctor_network_tcp_probe_port
+  vars:
+    librenms_doctor_network_tcp_name: "Galera TCP {{ librenms_doctor_network_tcp_probe_port }}"
+    librenms_doctor_network_tcp_port: "{{ librenms_doctor_network_tcp_probe_port }}"
+    librenms_doctor_network_tcp_sources: "{{ librenms_doctor_active_db_nodes }}"
+    librenms_doctor_network_tcp_destinations: "{{ librenms_doctor_active_db_nodes }}"
+  when:
+    - librenms_doctor_network_tcp_checks_enabled | bool
+    - librenms_db_mode == 'galera'
+    - (librenms_doctor_active_db_nodes | length) > 1
+  run_once: true
+
+- name: Check Redis Sentinel TCP firewall matrix
+  include_tasks: network_tcp_matrix.yml
+  loop: "{{ librenms_doctor_network_redis_tcp_ports }}"
+  loop_control:
+    loop_var: librenms_doctor_network_tcp_probe_port
+  vars:
+    librenms_doctor_network_tcp_name: "Redis TCP {{ librenms_doctor_network_tcp_probe_port }}"
+    librenms_doctor_network_tcp_port: "{{ librenms_doctor_network_tcp_probe_port }}"
+    librenms_doctor_network_tcp_sources: "{{ (librenms_doctor_active_nodes + librenms_doctor_active_redis_nodes) | unique | list }}"
+    librenms_doctor_network_tcp_destinations: "{{ librenms_doctor_active_redis_nodes }}"
+  when:
+    - librenms_doctor_network_tcp_checks_enabled | bool
+    - librenms_redis_mode == 'sentinel'
+    - (librenms_doctor_active_redis_nodes | length) > 0
+  run_once: true
+
+- name: Build Gluster TCP doctor port list
+  set_fact:
+    librenms_doctor_network_gluster_tcp_probe_ports: >-
+      {{
+        (
+          librenms_doctor_network_gluster_tcp_ports
+          + (
+            librenms_doctor_network_gluster_brick_probe_ports
+            if librenms_doctor_network_check_gluster_brick_ports | bool
+            else []
+          )
+        )
+        | unique
+        | list
+      }}
+  when: librenms_rrd_mode == 'glusterfs'
+  run_once: true
+
+- name: Check Gluster TCP firewall matrix
+  include_tasks: network_tcp_matrix.yml
+  loop: "{{ librenms_doctor_network_gluster_tcp_probe_ports | default([]) }}"
+  loop_control:
+    loop_var: librenms_doctor_network_tcp_probe_port
+  vars:
+    librenms_doctor_network_tcp_name: "GlusterFS TCP {{ librenms_doctor_network_tcp_probe_port }}"
+    librenms_doctor_network_tcp_port: "{{ librenms_doctor_network_tcp_probe_port }}"
+    librenms_doctor_network_tcp_sources: "{{ (librenms_doctor_active_nodes + librenms_doctor_active_gluster_nodes) | unique | list }}"
+    librenms_doctor_network_tcp_destinations: "{{ librenms_doctor_active_gluster_nodes }}"
+  when:
+    - librenms_doctor_network_tcp_checks_enabled | bool
+    - librenms_rrd_mode == 'glusterfs'
+    - (librenms_doctor_active_gluster_nodes | length) > 0
+  run_once: true
 
 - name: Check Gluster brick parent path
   stat:

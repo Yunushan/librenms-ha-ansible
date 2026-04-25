@@ -1,0 +1,24 @@
+---
+librenms_maintenance_action: enter
+librenms_maintenance_target: ""
+librenms_maintenance_confirm: false
+librenms_maintenance_marker_path: /var/lib/librenms-ha-ansible/maintenance
+librenms_maintenance_stop_application_services: true
+librenms_maintenance_stop_data_services: true
+librenms_maintenance_stop_keepalived: true
+librenms_maintenance_stop_rrdcached: true
+librenms_maintenance_fail_on_degraded_after_exit: true
+librenms_maintenance_probe_retries: 24
+librenms_maintenance_probe_delay: 3
+librenms_maintenance_service_retries: 24
+librenms_maintenance_service_delay: 3
+librenms_maintenance_galera_retries: 30
+librenms_maintenance_galera_delay: 3
+librenms_maintenance_redis_retries: 30
+librenms_maintenance_redis_delay: 3
+librenms_maintenance_dispatcher_retries: 30
+librenms_maintenance_dispatcher_delay: 3
+librenms_maintenance_http_path: "{{ librenms_app_probe_path }}"
+librenms_maintenance_http_statuses: "{{ librenms_app_probe_success_statuses }}"
+librenms_maintenance_http_timeout: "{{ librenms_app_probe_timeout }}"
+librenms_maintenance_validate_certs: "{{ librenms_vip_app_probe_validate_certs }}"

@@ -1,0 +1,42 @@
+---
+librenms_diagnostics_local_dir: diagnostics
+librenms_diagnostics_remote_base_dir: /tmp/librenms-ha-diagnostics
+librenms_diagnostics_keep_remote: false
+librenms_diagnostics_fetch: true
+librenms_diagnostics_journal_lines: 300
+librenms_diagnostics_log_lines: 500
+librenms_diagnostics_command_timeout: 30
+librenms_diagnostics_collect_validate: true
+librenms_diagnostics_collect_haproxy_runtime: true
+librenms_diagnostics_collect_config_snippets: true
+librenms_diagnostics_service_units:
+  - librenms.service
+  - librenms-scheduler.timer
+  - librenms-scheduler.service
+  - librenms-daily.timer
+  - librenms-daily.service
+  - librenms-ha-startup-repair.timer
+  - librenms-ha-startup-repair.service
+  - librenms-dispatcher-ha-recover.timer
+  - librenms-dispatcher-ha-recover.service
+  - "{{ librenms_nginx_service_name }}"
+  - "{{ librenms_php_fpm_service_name }}"
+  - "{{ librenms_haproxy_service_name }}"
+  - "{{ librenms_keepalived_service_name }}"
+  - "{{ librenms_mariadb_service_name }}"
+  - "{{ librenms_redis_service_name }}"
+  - "{{ librenms_redis_sentinel_service_name_effective }}"
+  - "{{ librenms_rrdcached_service_name }}"
+  - "{{ librenms_glusterd_service_name }}"
+librenms_diagnostics_config_files:
+  - /etc/haproxy/haproxy.cfg
+  - /etc/keepalived/keepalived.conf
+  - "{{ librenms_nginx_conf_path }}"
+  - "{{ librenms_php_fpm_ini_path }}"
+  - "{{ librenms_mariadb_tuning_conf }}"
+  - "{{ librenms_galera_conf_path }}"
+  - "{{ librenms_redis_conf_path_effective }}"
+  - "{{ librenms_redis_sentinel_conf_path_effective }}"
+  - "{{ librenms_rrdcached_default_config_path }}"
+  - "{{ librenms_install_dir }}/.env"
+  - "{{ librenms_install_dir }}/config.php"

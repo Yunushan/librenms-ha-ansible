@@ -12,6 +12,11 @@ librenms_daily_maintenance_bootstrap_marker: /var/lib/librenms-ha-ansible/daily_
 
 librenms_mode: standalone
 librenms_install_profile: full
+librenms_inactive_inventory_nodes: >-
+  {{
+    groups.get('decommission_nodes', [])
+    + groups.get('maintenance_nodes', [])
+  }}
 
 librenms_install_dir: /opt/librenms
 librenms_user: librenms
@@ -278,7 +283,7 @@ librenms_seed_cluster_devices_required: false
 librenms_seed_cluster_device_hosts: >-
   {{
     groups.get('librenms_nodes', [])
-    | difference(groups.get('decommission_nodes', []))
+    | difference(librenms_inactive_inventory_nodes)
   }}
 librenms_seed_cluster_device_snmp_version: auto
 librenms_seed_cluster_device_transport: udp
@@ -288,6 +293,18 @@ librenms_seed_cluster_device_poller_group: ""
 librenms_manage_dispatcher: true
 librenms_manage_scheduler: true
 librenms_manage_rrdcached: "{{ librenms_mode != 'standalone' }}"
+librenms_dispatcher_runtime_wait_enabled: "{{ librenms_mode != 'standalone' }}"
+librenms_dispatcher_runtime_wait_path: /usr/local/sbin/librenms-ha-runtime-wait
+librenms_dispatcher_runtime_wait_timeout: 240
+librenms_dispatcher_runtime_wait_delay: 5
+librenms_dispatcher_runtime_wait_command_timeout: 4
+librenms_dispatcher_runtime_wait_db: true
+librenms_dispatcher_runtime_wait_redis: true
+librenms_dispatcher_runtime_wait_rrd: true
+librenms_dispatcher_restart_sec: 15
+librenms_dispatcher_systemd_override_dir: /etc/systemd/system/librenms.service.d
+librenms_dispatcher_systemd_override_path: >-
+  {{ librenms_dispatcher_systemd_override_dir }}/librenms-ha.conf
 librenms_startup_repair_enabled: "{{ librenms_mode != 'standalone' }}"
 librenms_startup_repair_path: /usr/local/sbin/librenms-ha-startup-repair
 librenms_startup_repair_interval: 30s
@@ -314,7 +331,7 @@ librenms_dispatcher_registration_nodes: >-
   {{
     librenms_active_web_nodes
     | default(groups.get('librenms_nodes', []))
-    | difference(groups.get('decommission_nodes', []))
+    | difference(librenms_inactive_inventory_nodes)
   }}
 librenms_rrdcached_bind_port: 42217
 librenms_rrdcached_daemon_path: /usr/bin/rrdcached

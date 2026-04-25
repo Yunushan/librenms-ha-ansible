@@ -77,8 +77,9 @@ def var_int(value: Any, default: int = 0) -> int:
 
 
 def active_hosts(inventory: dict[str, Any], group: str) -> list[str]:
-    decommissioned = set(group_hosts(inventory, "decommission_nodes"))
-    return [host for host in group_hosts(inventory, group) if host not in decommissioned]
+    inactive = set(group_hosts(inventory, "decommission_nodes"))
+    inactive.update(group_hosts(inventory, "maintenance_nodes"))
+    return [host for host in group_hosts(inventory, group) if host not in inactive]
 
 
 def managed_hosts(inventory: dict[str, Any]) -> list[str]:
@@ -202,13 +203,14 @@ def validate_inventory(
     if vrid < 1 or vrid > 255:
         errors.append("librenms_keepalived_vrid must be between 1 and 255")
 
-    auth_pass = str(vars_data.get("librenms_keepalived_auth_pass", ""))
-    skip_placeholder_length = allow_placeholders and has_placeholder(
-        auth_pass,
-        DEFAULT_PLACEHOLDERS,
-    )
-    if not skip_placeholder_length and (len(auth_pass) < 1 or len(auth_pass) > 8):
-        errors.append("librenms_keepalived_auth_pass must be 1-8 characters")
+    if vip_enabled:
+        auth_pass = str(vars_data.get("librenms_keepalived_auth_pass", ""))
+        skip_placeholder_length = allow_placeholders and has_placeholder(
+            auth_pass,
+            DEFAULT_PLACEHOLDERS,
+        )
+        if not skip_placeholder_length and (len(auth_pass) < 1 or len(auth_pass) > 8):
+            errors.append("librenms_keepalived_auth_pass must be 1-8 characters")
 
     add_placeholder_errors(errors, vars_data, allow_placeholders)
     return errors

@@ -1,0 +1,7 @@
+---
+- name: Guarded Galera disaster recovery
+  hosts: librenms_db:!decommission_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: galera_recover

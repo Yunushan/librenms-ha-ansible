@@ -1,0 +1,213 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_maintenance_common_vars_lookup) }}"
+  vars:
+    librenms_maintenance_common_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Build maintenance host lists
+  set_fact:
+    librenms_maintenance_decommission_nodes: "{{ groups.get('decommission_nodes', []) }}"
+    librenms_maintenance_app_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_maintenance_web_nodes: >-
+      {{
+        groups.get('librenms_web', groups.get('librenms_nodes', []))
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_maintenance_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_maintenance_redis_nodes: >-
+      {{
+        groups.get('librenms_redis', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_maintenance_lb_nodes: >-
+      {{
+        groups.get('lb_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+    librenms_maintenance_gluster_nodes: >-
+      {{
+        groups.get('gluster_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+      }}
+  run_once: true
+
+- name: Derive maintenance target membership
+  set_fact:
+    librenms_maintenance_managed_nodes: >-
+      {{
+        (
+          librenms_maintenance_app_nodes
+          + librenms_maintenance_db_nodes
+          + librenms_maintenance_redis_nodes
+          + librenms_maintenance_lb_nodes
+          + librenms_maintenance_gluster_nodes
+        )
+        | unique
+      }}
+    librenms_maintenance_remaining_app_nodes: >-
+      {{ librenms_maintenance_app_nodes | difference([librenms_maintenance_target]) }}
+    librenms_maintenance_remaining_web_nodes: >-
+      {{ librenms_maintenance_web_nodes | difference([librenms_maintenance_target]) }}
+    librenms_maintenance_remaining_db_nodes: >-
+      {{ librenms_maintenance_db_nodes | difference([librenms_maintenance_target]) }}
+    librenms_maintenance_remaining_redis_nodes: >-
+      {{ librenms_maintenance_redis_nodes | difference([librenms_maintenance_target]) }}
+    librenms_maintenance_remaining_lb_nodes: >-
+      {{ librenms_maintenance_lb_nodes | difference([librenms_maintenance_target]) }}
+    librenms_maintenance_remaining_gluster_nodes: >-
+      {{ librenms_maintenance_gluster_nodes | difference([librenms_maintenance_target]) }}
+  run_once: true
+
+- name: Determine maintenance probe endpoints
+  set_fact:
+    librenms_maintenance_probe_delegate: >-
+      {{
+        librenms_maintenance_remaining_lb_nodes
+        | first
+        | default(
+            librenms_maintenance_remaining_app_nodes
+            | first
+            | default(inventory_hostname)
+          )
+      }}
+    librenms_maintenance_redis_probe_delegate: >-
+      {{
+        librenms_maintenance_remaining_redis_nodes
+        | first
+        | default(librenms_maintenance_redis_nodes | first | default(''))
+      }}
+    librenms_maintenance_app_probe_delegate: >-
+      {{
+        librenms_maintenance_remaining_app_nodes
+        | first
+        | default(librenms_maintenance_app_nodes | first | default(''))
+      }}
+    librenms_maintenance_db_probe_host: >-
+      {{
+        librenms_db_host
+        if librenms_db_host | length > 0
+        else
+        (
+          '127.0.0.1'
+          if librenms_db_mode == 'local'
+          else
+          (
+            librenms_vip_ip
+            if librenms_vip_enabled | bool and librenms_vip_ip | length > 0
+            else
+            (
+              hostvars[(librenms_maintenance_remaining_db_nodes | first)].ansible_host
+              | default(librenms_maintenance_remaining_db_nodes | first)
+              if (librenms_maintenance_remaining_db_nodes | length > 0)
+              else '127.0.0.1'
+            )
+          )
+        )
+      }}
+    librenms_maintenance_vip_url: >-
+      {{
+        ('https' if librenms_haproxy_tls_enabled | bool else 'http')
+        ~ '://'
+        ~ librenms_vip_ip
+        ~ (
+          ':' ~ (librenms_haproxy_https_port | string)
+          if librenms_haproxy_tls_enabled | bool
+          and librenms_haproxy_https_port | int != 443
+          else (
+            ':' ~ (librenms_haproxy_web_port | string)
+            if not librenms_haproxy_tls_enabled | bool
+            and librenms_haproxy_web_port | int != 80
+            else ''
+          )
+        )
+        ~ librenms_maintenance_http_path
+      }}
+    librenms_maintenance_http_host: >-
+      {{
+        librenms_haproxy_web_check_host
+        if librenms_haproxy_web_check_host | length > 0
+        else (
+          librenms_fqdn
+          if librenms_fqdn | length > 0
+          and librenms_fqdn != librenms_default_fqdn_placeholder
+          else librenms_vip_ip
+        )
+      }}
+  run_once: true
+
+- name: Validate maintenance request
+  assert:
+    that:
+      - librenms_mode == 'ha'
+      - librenms_maintenance_action in ['enter', 'exit']
+      - librenms_maintenance_target | length > 0
+      - librenms_maintenance_target in librenms_maintenance_managed_nodes
+      - librenms_maintenance_target not in librenms_maintenance_decommission_nodes
+      - librenms_maintenance_confirm | bool
+    fail_msg: >-
+      Set librenms_maintenance_target to a managed node and confirm the guarded
+      maintenance action with -e librenms_maintenance_confirm=true.
+  run_once: true
+
+- name: Require target to be active in inventory before maintenance exit
+  assert:
+    that:
+      - librenms_maintenance_target not in groups.get('maintenance_nodes', [])
+    fail_msg: >-
+      Remove {{ librenms_maintenance_target }} from maintenance_nodes before
+      running maintenance-exit.yml so the final HA status check includes it.
+  when: librenms_maintenance_action == 'exit'
+  run_once: true
+
+- name: Validate remaining HA capacity before entering maintenance
+  assert:
+    that:
+      - >-
+        librenms_maintenance_target not in librenms_maintenance_web_nodes
+        or (librenms_maintenance_remaining_web_nodes | length) >= 1
+      - >-
+        librenms_maintenance_target not in librenms_maintenance_lb_nodes
+        or not (librenms_vip_enabled | bool)
+        or (librenms_maintenance_remaining_lb_nodes | length) >= 1
+      - >-
+        librenms_maintenance_target not in librenms_maintenance_db_nodes
+        or librenms_db_mode != 'galera'
+        or (librenms_maintenance_remaining_db_nodes | length) >= 2
+      - >-
+        librenms_maintenance_target not in librenms_maintenance_redis_nodes
+        or librenms_redis_mode != 'sentinel'
+        or (librenms_maintenance_remaining_redis_nodes | length) >= (librenms_redis_quorum | int)
+      - >-
+        librenms_maintenance_target not in librenms_maintenance_gluster_nodes
+        or librenms_rrd_mode != 'glusterfs'
+        or (librenms_maintenance_remaining_gluster_nodes | length) >= 2
+    fail_msg: >-
+      Taking {{ librenms_maintenance_target }} down would leave too little HA
+      capacity. Check remaining web, load-balancer, Galera, Redis Sentinel, and
+      Gluster nodes before proceeding.
+  when: librenms_maintenance_action == 'enter'
+  run_once: true
+
+- name: Run maintenance enter workflow
+  include_tasks: enter.yml
+  when: librenms_maintenance_action == 'enter'
+  run_once: true
+
+- name: Run maintenance exit workflow
+  include_tasks: exit.yml
+  when: librenms_maintenance_action == 'exit'
+  run_once: true

@@ -1,0 +1,220 @@
+---
+- name: Start target MariaDB after maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_mariadb_service_name | default(librenms_mariadb_service_name) }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_maintenance_target in librenms_maintenance_db_nodes
+  run_once: true
+
+- name: Verify Galera after target rejoin
+  include_tasks: galera_check.yml
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_maintenance_db_nodes | length > 0
+  vars:
+    librenms_maintenance_remaining_db_nodes: "{{ librenms_maintenance_db_nodes }}"
+
+- name: Start target Redis after maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_redis_service_name | default(librenms_redis_service_name) }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_maintenance_target in librenms_maintenance_redis_nodes
+  run_once: true
+
+- name: Start target Redis Sentinel after maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_redis_sentinel_service_name_effective | default(librenms_redis_sentinel_service_name_effective) }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_maintenance_target in librenms_maintenance_redis_nodes
+  run_once: true
+
+- name: Verify Redis Sentinel writable master after target rejoin
+  include_tasks: redis_write_check.yml
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - librenms_maintenance_redis_nodes | length > 0
+  vars:
+    librenms_maintenance_redis_probe_delegate: >-
+      {{
+        librenms_maintenance_redis_nodes
+        | first
+        | default('')
+      }}
+
+- name: Start target glusterd after maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_glusterd_service_name | default(librenms_glusterd_service_name) }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_maintenance_target in librenms_maintenance_gluster_nodes
+  run_once: true
+
+- name: Start target RRDCacheD after maintenance
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_manage_rrdcached | bool
+    - librenms_maintenance_target in librenms_maintenance_app_nodes
+  run_once: true
+
+- name: Start target web frontend after maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_nginx_service_name | default(librenms_nginx_service_name) }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_maintenance_target in librenms_maintenance_web_nodes
+  run_once: true
+
+- name: Start target LibreNMS timers and dispatcher after maintenance
+  shell: |
+    set -eu
+    for unit in \
+      librenms-daily.timer \
+      librenms-scheduler.timer \
+      librenms.service
+    do
+      if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        systemctl start "$unit"
+      fi
+    done
+  args:
+    executable: /bin/sh
+  delegate_to: "{{ librenms_maintenance_target }}"
+  changed_when: false
+  when: librenms_maintenance_target in librenms_maintenance_app_nodes
+  run_once: true
+
+- name: Start target HAProxy after maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_haproxy_service_name | default(librenms_haproxy_service_name) }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when: librenms_maintenance_target in librenms_maintenance_lb_nodes
+  run_once: true
+
+- name: Start target keepalived after maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_keepalived_service_name | default(librenms_keepalived_service_name) }}"
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_maintenance_target in librenms_maintenance_lb_nodes
+  run_once: true
+
+- name: Wait for target dispatcher service after maintenance
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms
+  delegate_to: "{{ librenms_maintenance_target }}"
+  register: librenms_maintenance_target_dispatcher
+  changed_when: false
+  until: librenms_maintenance_target_dispatcher.stdout == 'active'
+  retries: "{{ librenms_maintenance_service_retries | int }}"
+  delay: "{{ librenms_maintenance_service_delay | int }}"
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_maintenance_target in librenms_maintenance_app_nodes
+  run_once: true
+
+- name: Wait for target dispatcher database registration
+  community.mysql.mysql_query:
+    login_host: "{{ librenms_maintenance_db_probe_host }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - >-
+        SELECT COUNT(*) AS active_pollers
+        FROM `poller_cluster`
+        WHERE `node_id` = '{{ hostvars[librenms_maintenance_target].librenms_node_id | default(librenms_maintenance_target) | regex_replace("'", "''") }}'
+        AND `last_report` >= DATE_SUB(
+          NOW(),
+          INTERVAL COALESCE(
+            `poller_frequency`,
+            {{ librenms_dispatcher_poller_frequency | int }}
+          ) SECOND
+        )
+  delegate_to: "{{ librenms_maintenance_app_probe_delegate }}"
+  register: librenms_maintenance_target_dispatcher_row
+  changed_when: false
+  failed_when: false
+  no_log: true
+  until: >-
+    (
+      not (librenms_maintenance_target_dispatcher_row.failed | default(false))
+    )
+    and
+    (
+      (
+        (
+          librenms_maintenance_target_dispatcher_row.query_result
+          | default([[{'active_pollers': 0}]])
+        )[0][0].active_pollers
+        | default(0)
+        | int
+      ) >= 1
+    )
+  retries: "{{ librenms_maintenance_dispatcher_retries | int }}"
+  delay: "{{ librenms_maintenance_dispatcher_delay | int }}"
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_maintenance_target in librenms_maintenance_app_nodes
+    - librenms_maintenance_app_probe_delegate | length > 0
+  run_once: true
+
+- name: Verify VIP is reachable after maintenance exit
+  uri:
+    url: "{{ librenms_maintenance_vip_url }}"
+    headers:
+      Host: "{{ librenms_maintenance_http_host }}"
+    method: GET
+    return_content: false
+    status_code: "{{ librenms_maintenance_http_statuses }}"
+    timeout: "{{ librenms_maintenance_http_timeout | int }}"
+    validate_certs: "{{ librenms_maintenance_validate_certs | bool }}"
+  delegate_to: "{{ librenms_maintenance_probe_delegate }}"
+  register: librenms_maintenance_exit_vip
+  retries: "{{ librenms_maintenance_probe_retries | int }}"
+  delay: "{{ librenms_maintenance_probe_delay | int }}"
+  until:
+    - >-
+      (librenms_maintenance_exit_vip.status | default(0) | int)
+      in (librenms_maintenance_http_statuses | map('int') | list)
+  changed_when: false
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_maintenance_probe_delegate | length > 0
+  run_once: true
+
+- name: Remove maintenance marker from target
+  file:
+    path: "{{ librenms_maintenance_marker_path }}"
+    state: absent
+  delegate_to: "{{ librenms_maintenance_target }}"
+  run_once: true
+
+- name: Report maintenance-exit result
+  debug:
+    msg: >-
+      {{ librenms_maintenance_target }} has rejoined the HA cluster. The
+      ha_status role will now verify cluster-wide health.
+  run_once: true

@@ -21,6 +21,9 @@ The English README is the canonical version. The links below point to full trans
 
 Quick Start • Topology Modes • Support Matrix • Network and Access Matrix • Inventory Model • Variables • Add / Remove Nodes • Security • Contributing
 
+See [CHANGELOG.md](CHANGELOG.md) for operator-facing release notes before
+applying a newer revision to an existing cluster.
+
 ---
 
 ## Why This Exists
@@ -136,10 +139,54 @@ This repository is built to support the distributions you asked for, but it does
 Upstream LibreNMS documentation currently provides package/install examples for **Ubuntu 24.04**, **Ubuntu 22.04**, **Debian 12**, **Debian 13**, and **CentOS 8**. This repo extends beyond that with override-friendly family mappings, but you should lab-test non-primary distros before production.
 
 See also:
-- [docs/support-matrix.md](docs/support-matrix.md)
-- [docs/architecture.md](docs/architecture.md)
-- [docs/operations.md](docs/operations.md)
+- [docs/README.md](docs/README.md) for the full documentation index and
+  recommended reading order
+- [docs/support-matrix.md](docs/support-matrix.md) for distro tiers,
+  production readiness gates, expected HA behavior, and known limits
 - [examples/docker-ha/README.md](examples/docker-ha/README.md)
+
+---
+
+## Recommended HA Command Order
+
+For production HA work, use the staged runbook in
+[docs/operations.md](docs/operations.md). It separates first deployment,
+post-bootstrap convergence, live firewall checks, validation, backup/restore
+testing, planned maintenance, full cluster restart, failover drills, and major
+OS upgrades.
+
+The short version for an already-installed healthy cluster before maintenance is:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml \
+  --ask-become-pass \
+  -e librenms_doctor_network_tcp_checks_enabled=true
+ansible-playbook -i inventories/ha/hosts.yml playbooks/status.yml \
+  --ask-become-pass \
+  -e librenms_status_alert_fail_on_degraded=true
+ansible-playbook -i inventories/ha/hosts.yml playbooks/backup.yml --ask-become-pass
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml --ask-become-pass
+```
+
+The same sequence is available as a Make target:
+
+```bash
+make pre-maintenance PLAYBOOK_FLAGS=--ask-become-pass
+```
+
+Docker wrappers are also available, for example:
+
+```bash
+make docker-pre-maintenance PLAYBOOK_FLAGS=--ask-become-pass
+```
+
+When a runtime check fails, collect a diagnostics bundle before making a second
+change. It preserves the service, journal, HAProxy, Galera, Redis, Gluster, and
+LibreNMS state that usually disappears during repeated retries:
+
+```bash
+make diagnostics PLAYBOOK_FLAGS=--ask-become-pass
+```
 
 ---
 
@@ -270,11 +317,32 @@ service-name overrides in inventory before continuing to the next node.
 
 After a complete power-off, some LibreNMS validation checks can be temporarily
 red while Galera, Redis Sentinel, GlusterFS, HAProxy, Keepalived, scheduler, and
-dispatcher services converge. With the managed systemd timers from this repo,
-the cluster should repair normal boot drift automatically after the nodes are
-back and quorum is available. If validation is still failing several minutes
-after all nodes are up, run the cluster playbook and inspect the failing service
-journals.
+dispatcher services converge. With the managed systemd timers and service
+drop-ins from this repo, the cluster should repair normal boot drift
+automatically after the nodes are back and quorum is available.
+
+The LibreNMS dispatcher, scheduler, and daily maintenance services can be gated
+by `/usr/local/sbin/librenms-ha-runtime-wait` so they do not start before the DB
+frontend, Redis runtime path, and Gluster-backed RRD mount are usable. This is
+enabled for clustered deployments by default through
+`librenms_dispatcher_runtime_wait_enabled`. Tune
+`librenms_dispatcher_runtime_wait_timeout` and
+`librenms_dispatcher_runtime_wait_delay` if your lab or storage layer needs more
+time after a cold boot.
+
+If validation is still failing several minutes after all nodes are up, run the
+cluster playbook and inspect the failing service journals.
+
+For a quick cluster-wide view before running the full validation playbook:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/status.yml --ask-become-pass
+```
+
+The status report includes the VIP owner, HAProxy/Keepalived state, Galera,
+Redis Sentinel, Gluster, the dispatcher and scheduler service states, the
+runtime dependency gate result for each LibreNMS node, and current dispatcher
+database rows.
 
 ---
 
@@ -286,8 +354,16 @@ journals.
 ├── Dockerfile
 ├── compose.yaml
 ├── docs/
+│   ├── README.md
 │   ├── architecture.md
 │   ├── operations.md
+│   ├── command-map.md
+│   ├── operator-checklists.md
+│   ├── failure-scenarios.md
+│   ├── release-checklist.md
+│   ├── support-matrix.md
+│   ├── scaling.md
+│   ├── awx-controller.md
 │   └── docker.md
 ├── examples/
 │   └── docker-ha/
@@ -299,10 +375,19 @@ journals.
 │   ├── cluster.yml
 │   ├── standalone.yml
 │   ├── doctor.yml
+│   ├── status.yml
+│   ├── post-reboot.yml
+│   ├── maintenance-enter.yml
+│   ├── maintenance-exit.yml
+│   ├── galera-recover.yml
 │   ├── ha-failover-test.yml
 │   ├── backup.yml
+│   ├── restore-test.yml
 │   ├── add-node.yml
 │   ├── remove-node.yml
+│   ├── diagnostics.yml
+│   ├── awx-controller.yml
+│   ├── awx-bootstrap.yml
 │   └── validate.yml
 ├── roles/
 │   ├── common/
@@ -314,11 +399,23 @@ journals.
 │   ├── librenms_app/
 │   ├── snmpd/
 │   ├── doctor/
+│   ├── ha_status/
+│   ├── post_reboot/
+│   ├── maintenance/
+│   ├── galera_recover/
 │   ├── ha_failover_test/
 │   ├── backup/
+│   ├── restore_test/
 │   ├── remove_node/
+│   ├── diagnostics/
+│   ├── awx_controller/
+│   ├── awx_bootstrap/
 │   └── validate/
 ├── scripts/
+│   ├── ci-ansible-syntax-check.py
+│   ├── ci-check-markdown-links.py
+│   ├── ci-parse-yaml.py
+│   ├── ci-python-smoke.py
 │   ├── generate-secrets.py
 │   └── validate-inventory.py
 ├── ansible.cfg
@@ -383,7 +480,18 @@ make awx-controller
 
 The optional AWX role can install k3s on the controller VM or use an existing Kubernetes cluster. It is deliberately separate from the main LibreNMS deployment because AWX has its own Kubernetes, PostgreSQL, credential, backup, and upgrade lifecycle.
 
-See [docs/awx-controller.md](docs/awx-controller.md).
+After AWX is reachable, `awx-bootstrap.yml` can create the baseline AWX
+Project, Inventory, SCM inventory source, and recommended Job Templates:
+
+```bash
+make awx-bootstrap \
+  ANSIBLE_EXTRA_ARGS="-e awx_bootstrap_api_url=http://awx.example.com \
+  -e awx_bootstrap_project_scm_url=https://github.com/example/librenms-ha-ansible.git"
+```
+
+See [docs/awx-controller.md](docs/awx-controller.md) for deployment settings,
+recommended Job Templates, operator surveys, schedules, workflows, and RBAC
+boundaries.
 
 ### 2) Generate secrets
 
@@ -497,6 +605,7 @@ It checks:
 - memory and filesystem free space
 - required base commands
 - time synchronization
+- routed paths for the HA network flows in the inventory
 - Gluster brick parent/device prerequisites
 
 Strictness can be tuned in inventory:
@@ -509,9 +618,277 @@ librenms_doctor_min_root_free_mb: 5120
 librenms_doctor_min_librenms_free_mb: 10240
 ```
 
+Route checks are enabled by default and are safe before the first deployment
+because they only verify that the source host has a route to the destination
+node address. After services are installed, you can also validate live firewall
+and listener reachability:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml \
+  --ask-become-pass \
+  -e librenms_doctor_network_tcp_checks_enabled=true
+```
+
+The live TCP checks cover the Web backend path, Galera ports, Redis/Sentinel
+ports, and GlusterFS management ports. Gluster brick range probing is disabled
+by default because brick port allocation can vary; enable a representative
+low/high probe with:
+
+```yaml
+librenms_doctor_network_check_gluster_brick_ports: true
+```
+
 `doctor.yml` is not a replacement for `validate.yml`. Use `doctor.yml` before
 or around maintenance; use `validate.yml` after deployment to check the running
 LibreNMS, Galera, Redis Sentinel, and Gluster services.
+
+---
+
+## Local Quality Gates
+
+The GitHub Actions workflow runs the same checks you can run locally:
+
+```bash
+make ci
+```
+
+Or run individual gates:
+
+```bash
+make python-smoke
+make yaml-parse
+make docs-check
+make lint
+make inventory-check
+make syntax-check
+```
+
+For a Python-only smoke check that works on Windows, WSL, Linux, or the project
+Docker image without `ansible-playbook`:
+
+```bash
+python scripts/ci-python-smoke.py    # Windows
+python3 scripts/ci-python-smoke.py   # Linux or WSL
+make python-smoke                    # when Make is available
+```
+
+The same Python smoke check is wired into pre-commit as a local hook. Install
+the hooks on development machines with:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+The gates cover:
+
+- YAML parsing with Ansible/Vault tag tolerance
+- local Markdown link and anchor validation
+- Python helper script compilation
+- `yamllint`
+- `ansible-lint`
+- sample HA and standalone inventory validation
+- `ansible-playbook --syntax-check` for every playbook
+
+`make syntax-check` requires Ansible to be installed on the controller. If you
+are working from a Windows workstation without Ansible, run the checks from WSL,
+a Linux control node, or the project Docker image.
+
+---
+
+## HA Runtime Status Report
+
+Use `status.yml` when you need one read-only snapshot of the HA layer:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/status.yml --ask-become-pass
+```
+
+It reports the VIP owner and probe status, HAProxy/Keepalived service state,
+LibreNMS dispatcher and scheduler state, Galera state, Redis Sentinel master
+reports, Gluster volume status, expected systemd unit drift, LibreNMS writable
+path ownership drift, and whether any host listed in `maintenance_nodes` is
+still running HA or application services.
+
+It can also act as a lightweight HA alert source. By default it only reports
+degraded conditions. Enable failure or webhook delivery explicitly:
+
+```yaml
+librenms_status_alert_fail_on_degraded: true
+librenms_status_alerts_enabled: true
+librenms_status_alert_webhook_url: https://hooks.example.com/librenms-ha
+librenms_status_alert_webhook_headers:
+  Authorization: "Bearer CHANGE_ME"
+```
+
+The alert payload includes `status`, `reasons`, VIP state, Redis Sentinel
+masters, the dispatcher DB query state, drift check metadata, and dispatcher
+rows. Webhooks are sent from the Ansible controller by default; override
+`librenms_status_alert_webhook_delegate` only when the webhook is reachable from
+a specific managed host instead.
+
+Runtime drift checks can be disabled individually if you intentionally manage a
+layer outside this repo:
+
+```yaml
+librenms_status_unit_drift_enabled: false
+librenms_status_writable_path_drift_enabled: false
+librenms_status_maintenance_drift_enabled: false
+```
+
+---
+
+## Diagnostics Bundle
+
+Use `diagnostics.yml` after a failed `validate.yml`, `status.yml`, failover
+test, maintenance exit, or post-reboot convergence check:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/diagnostics.yml --ask-become-pass
+```
+
+The same workflow is available through Make:
+
+```bash
+make diagnostics PLAYBOOK_FLAGS=--ask-become-pass
+make docker-diagnostics PLAYBOOK_FLAGS=--ask-become-pass
+```
+
+The playbook collects per-host tarballs under `diagnostics/<run-id>/` on the
+Ansible controller. Each bundle includes command output, systemd status,
+journals, selected sanitized config snippets, LibreNMS logs, `validate.php`,
+Galera state, Redis/Sentinel state, Gluster state, and HAProxy runtime output
+when available.
+
+Obvious secrets are redacted from collected config snippets, but logs and
+command output can still contain operationally sensitive data. Treat bundles as
+private incident artifacts.
+
+Useful overrides:
+
+```yaml
+librenms_diagnostics_keep_remote: true
+librenms_diagnostics_fetch: false
+librenms_diagnostics_log_lines: 1000
+librenms_diagnostics_journal_lines: 500
+```
+
+---
+
+## Post-Reboot Convergence
+
+Use `post-reboot.yml` after a full cluster shutdown, hypervisor maintenance, or
+any event where all HA services came up at the same time:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/post-reboot.yml --ask-become-pass
+```
+
+The playbook waits for SSH, then waits for HAProxy/Keepalived, MariaDB/Galera,
+Redis Sentinel with a writable master, Gluster, LibreNMS dispatcher and
+scheduler timers, the runtime dependency gate, the VIP HTTP endpoint, and active
+dispatcher rows in `poller_cluster`. It finishes by running `status.yml` with
+degraded status treated as a failure.
+
+This is a convergence check, not a redeploy. If the cluster booted cleanly and
+no inventory or role changes were made, a successful `post-reboot.yml` run means
+you do not need to rerun `cluster.yml` just to recover from power-on order. If a
+node is intentionally offline, put it in `maintenance_nodes` before running this
+playbook.
+
+---
+
+## Planned Node Maintenance
+
+Use `maintenance-enter.yml` before an intentional one-node shutdown. It drains
+the target in HA-safe order: moves the VIP away if needed, removes the web
+backend, stops LibreNMS workers, fails Redis over when the target is a Redis
+member, stops MariaDB when the target is a Galera member, then verifies the VIP,
+remaining Galera nodes, Redis Sentinel writes, and remaining dispatchers.
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/maintenance-enter.yml \
+  --ask-become-pass \
+  -e librenms_maintenance_target=lnms1 \
+  -e librenms_maintenance_confirm=true
+```
+
+If the node will remain powered off, add it to `maintenance_nodes` before
+running `cluster.yml`, `status.yml`, `validate.yml`, or `post-reboot.yml`.
+Remove it from `maintenance_nodes` before rejoining it.
+
+After the node is back online, run:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/maintenance-exit.yml \
+  --ask-become-pass \
+  -e librenms_maintenance_target=lnms1 \
+  -e librenms_maintenance_confirm=true
+```
+
+The exit playbook starts data services first, then Redis/Sentinel, Gluster,
+RRDCacheD, web, LibreNMS workers, HAProxy, and keepalived. It waits for the
+target dispatcher to register in `poller_cluster`, verifies the VIP, and then
+runs the HA status role with degraded state treated as a failure.
+
+Make targets are available:
+
+```bash
+make maintenance-enter MAINTENANCE_TARGET=lnms1
+make maintenance-exit MAINTENANCE_TARGET=lnms1
+```
+
+---
+
+## Guarded Galera Recovery
+
+Use `galera-recover.yml` only when the Galera cluster has no `Primary`
+component after a full outage. If any DB node still has a live primary
+component, use `cluster.yml` or `post-reboot.yml` instead.
+
+First run it without confirmation to collect non-destructive evidence from
+`grastate.dat`:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml --ask-become-pass
+```
+
+If no node has `safe_to_bootstrap: 1`, Galera requires stopped MariaDB data
+directories before `galera_recovery` can report recovered positions. The guarded
+playbook therefore requires explicit confirmation before stopping MariaDB:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
+  --ask-become-pass \
+  -e librenms_galera_recover_confirm=true
+```
+
+That run stops MariaDB on reachable Galera nodes, runs `galera_recovery`, ranks
+candidates by highest recovered `seqno`, reports the selected bootstrap host,
+and still refuses to bootstrap until you name that same host explicitly:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
+  --ask-become-pass \
+  -e librenms_galera_recover_confirm=true \
+  -e librenms_galera_recover_bootstrap_host=lnms2
+```
+
+Tied recovered seqno values are not selected by default. Choose a policy only
+after reviewing the evidence:
+
+```yaml
+librenms_galera_recover_tie_breaker: manual
+# or: configured_bootstrap
+# or: first
+```
+
+After a successful recovery, run:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/post-reboot.yml --ask-become-pass
+ansible-playbook -i inventories/ha/hosts.yml playbooks/validate.yml --ask-become-pass
+```
 
 ---
 
@@ -524,6 +901,17 @@ deliberately guarded because it stops services during the test. By default it:
 - stops keepalived on the current VIP owner and verifies the VIP moves to another
   load balancer
 - starts any service it stopped before exiting
+
+Additional opt-in cases are available for harder service-loss drills:
+
+- `haproxy_service` stops HAProxy on one load balancer and verifies the VIP
+  remains reachable from another load balancer
+- `dispatcher_service` stops one LibreNMS dispatcher and verifies another
+  dispatcher is still active
+- `redis_master` stops the current Redis master and verifies Sentinel elects a
+  different writable master
+- `galera_node` stops MariaDB on one Galera member and verifies the remaining
+  database nodes stay `Primary` and reachable through the VIP
 
 Run it only after `doctor.yml`, `cluster.yml`, and `validate.yml` are clean:
 
@@ -539,9 +927,24 @@ Optional tuning:
 librenms_failover_test_cases:
   - web_backend
   - keepalived_vip
+  - haproxy_service
+  - dispatcher_service
 librenms_failover_test_web_backend_host: lnms2
+librenms_failover_test_haproxy_host: lnms2
+librenms_failover_test_dispatcher_host: lnms2
 librenms_failover_test_probe_retries: 20
 librenms_failover_test_probe_delay: 2
+```
+
+Run the data-layer cases only during a maintenance window and after a recent
+backup:
+
+```yaml
+librenms_failover_test_cases:
+  - redis_master
+  - galera_node
+librenms_failover_test_redis_query_host: lnms2
+librenms_failover_test_galera_host: lnms3
 ```
 
 This is a controlled service failover test, not a hard power-off test. Hard
@@ -587,6 +990,17 @@ Keep at least one recent backup outside the cluster. Backups stored only on the
 same three nodes are useful for operator mistakes, but they do not protect you
 from storage loss, accidental VM deletion, or a failed upgrade that corrupts all
 members.
+
+Validate a backup before relying on it:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
+  --ask-become-pass \
+  -e librenms_restore_test_backup_dir=/var/backups/librenms-ha/<timestamp>
+```
+
+This does not restore data. It checks the manifest and verifies the database,
+config, and optional RRD archives can be read.
 
 ---
 
@@ -660,6 +1074,10 @@ If a host has multiple roles, it needs the union of the rows that apply to those
 
 ### Firewall notes
 
+- `playbooks/doctor.yml` validates routed paths for the HA network flows by
+  default. On an installed cluster, add
+  `-e librenms_doctor_network_tcp_checks_enabled=true` to verify that the TCP
+  ports in the table are reachable from the expected source nodes.
 - `librenms_db_bind_address` defaults to `0.0.0.0`, so restrict `3306/tcp` with host or network firewalls if you do not want broad exposure.
 - Keep Galera, Redis, GlusterFS, and VRRP limited to the cluster management subnet. None of those services should be exposed to general client networks.
 - Keepalived VRRP usually requires the `lb_nodes` to be on the same L2 segment or VLAN, with firewalls allowing protocol `112` and multicast to `224.0.0.18`.
@@ -687,6 +1105,8 @@ This repo uses inventory groups instead of hard-coded assumptions.
 
 - `new_nodes` — nodes you are adding
 - `decommission_nodes` — nodes being removed
+- `maintenance_nodes` — nodes intentionally unavailable during planned
+  maintenance or hard power-off tests
 
 ---
 
@@ -1043,6 +1463,9 @@ See:
 ## Known Boundaries
 
 This project is intentionally honest about the hard parts.
+
+For the full production readiness checklist and expected behavior during node
+loss, see [docs/support-matrix.md](docs/support-matrix.md).
 
 ### Fully comfortable to automate
 - package install

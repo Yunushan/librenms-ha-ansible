@@ -1,13 +1,13 @@
 ---
 - name: Common preparation on managed hosts
-  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes
   become: true
   gather_facts: true
   roles:
     - role: common
 
 - name: Configure database hosts
-  hosts: librenms_db
+  hosts: librenms_db:!maintenance_nodes
   become: true
   gather_facts: true
   serial: 1
@@ -18,7 +18,7 @@
       when: librenms_db_mode == 'galera'
 
 - name: Configure Redis hosts
-  hosts: librenms_redis
+  hosts: librenms_redis:!maintenance_nodes
   become: true
   gather_facts: true
   serial: 1
@@ -27,7 +27,7 @@
       when: librenms_redis_mode in ['local', 'sentinel', 'external']
 
 - name: Configure Gluster-backed RRD storage
-  hosts: gluster_nodes
+  hosts: gluster_nodes:!maintenance_nodes
   become: true
   gather_facts: true
   roles:
@@ -35,7 +35,7 @@
       when: librenms_rrd_mode == 'glusterfs'
 
 - name: Configure local SNMP agents
-  hosts: librenms_nodes
+  hosts: librenms_nodes:!maintenance_nodes
   become: true
   gather_facts: true
   roles:
@@ -43,7 +43,7 @@
       when: librenms_manage_local_snmpd | bool
 
 - name: Configure LibreNMS application nodes
-  hosts: librenms_nodes
+  hosts: librenms_nodes:!maintenance_nodes
   become: true
   gather_facts: true
   serial: 1
@@ -51,7 +51,7 @@
     - role: librenms_app
 
 - name: Configure load balancer and VIP hosts
-  hosts: lb_nodes
+  hosts: lb_nodes:!maintenance_nodes
   become: true
   gather_facts: true
   roles:

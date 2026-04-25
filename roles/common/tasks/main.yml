@@ -31,12 +31,28 @@
     librenms_active_web_nodes: >-
       {{
         groups.get('librenms_web', groups.get('librenms_nodes', []))
-        | difference(groups.get('decommission_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
       }}
-    librenms_active_db_nodes: "{{ groups.get('librenms_db', []) | difference(groups.get('decommission_nodes', [])) }}"
-    librenms_active_redis_nodes: "{{ groups.get('librenms_redis', []) | difference(groups.get('decommission_nodes', [])) }}"
-    librenms_active_lb_nodes: "{{ groups.get('lb_nodes', []) | difference(groups.get('decommission_nodes', [])) }}"
-    librenms_active_gluster_nodes: "{{ groups.get('gluster_nodes', []) | difference(groups.get('decommission_nodes', [])) }}"
+    librenms_active_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_active_redis_nodes: >-
+      {{
+        groups.get('librenms_redis', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_active_lb_nodes: >-
+      {{
+        groups.get('lb_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_active_gluster_nodes: >-
+      {{
+        groups.get('gluster_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
 
 - name: Determine effective HAProxy web health-check host
   set_fact:

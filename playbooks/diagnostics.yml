@@ -1,0 +1,8 @@
+---
+- name: Collect LibreNMS HA diagnostics bundle
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!decommission_nodes
+  become: true
+  gather_facts: true
+  ignore_unreachable: true
+  roles:
+    - role: diagnostics

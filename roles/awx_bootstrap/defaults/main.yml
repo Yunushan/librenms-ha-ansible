@@ -1,0 +1,120 @@
+---
+awx_bootstrap_api_url: ""
+awx_bootstrap_validate_certs: true
+awx_bootstrap_request_timeout: 30
+
+# Use either a token or username/password.
+awx_bootstrap_oauth_token: ""
+awx_bootstrap_username: admin
+awx_bootstrap_password: ""
+
+awx_bootstrap_organization: Default
+awx_bootstrap_create_organization: true
+
+awx_bootstrap_project_name: LibreNMS HA Ansible
+awx_bootstrap_project_description: LibreNMS HA Ansible playbooks
+awx_bootstrap_project_scm_type: git
+awx_bootstrap_project_scm_url: ""
+awx_bootstrap_project_scm_branch: main
+awx_bootstrap_project_update_on_launch: true
+awx_bootstrap_project_clean: true
+awx_bootstrap_project_delete_on_update: false
+
+awx_bootstrap_inventory_name: LibreNMS HA
+awx_bootstrap_inventory_description: LibreNMS HA inventory imported from SCM
+awx_bootstrap_inventory_source_name: LibreNMS HA inventory source
+awx_bootstrap_inventory_source_path: inventories/ha/hosts.yml
+awx_bootstrap_inventory_source_update_on_launch: true
+awx_bootstrap_inventory_source_overwrite: true
+awx_bootstrap_inventory_source_overwrite_vars: true
+
+# Existing AWX credential names to attach to job templates.
+# Leave empty to make templates prompt for credentials at launch.
+awx_bootstrap_job_template_credential_names: []
+awx_bootstrap_fail_on_missing_credentials: true
+
+awx_bootstrap_execution_environment_name: ""
+awx_bootstrap_fail_on_missing_execution_environment: true
+
+awx_bootstrap_job_template_defaults:
+  job_type: run
+  verbosity: 0
+  ask_variables_on_launch: true
+  ask_credential_on_launch: true
+  ask_inventory_on_launch: false
+
+awx_bootstrap_job_templates:
+  - name: LibreNMS HA - Status Strict
+    playbook: playbooks/status.yml
+    description: Read-only HA health gate with degraded status treated as failure.
+    ask_variables_on_launch: false
+    extra_vars:
+      librenms_status_alert_fail_on_degraded: true
+
+  - name: LibreNMS HA - Diagnostics
+    playbook: playbooks/diagnostics.yml
+    description: Collect per-host troubleshooting bundles after a failed HA check.
+    ask_variables_on_launch: true
+
+  - name: LibreNMS HA - Validate
+    playbook: playbooks/validate.yml
+    description: Validate the running LibreNMS application and HA services.
+    ask_variables_on_launch: false
+
+  - name: LibreNMS HA - Backup
+    playbook: playbooks/backup.yml
+    description: Create database and configuration backups before maintenance.
+    ask_variables_on_launch: true
+
+  - name: LibreNMS HA - Restore Test
+    playbook: playbooks/restore-test.yml
+    description: Verify a backup manifest and archives without restoring data.
+    ask_variables_on_launch: true
+
+  - name: LibreNMS HA - Cluster Converge
+    playbook: playbooks/cluster.yml
+    description: Re-converge HA configuration after intentional inventory or role changes.
+    ask_variables_on_launch: false
+
+  - name: LibreNMS HA - Post Reboot
+    playbook: playbooks/post-reboot.yml
+    description: Wait for a restarted cluster to settle and run strict HA status checks.
+    ask_variables_on_launch: false
+
+  - name: LibreNMS HA - Maintenance Enter
+    playbook: playbooks/maintenance-enter.yml
+    description: Drain one node before planned shutdown, reboot, or OS work.
+    ask_variables_on_launch: true
+    extra_vars:
+      librenms_maintenance_confirm: false
+
+  - name: LibreNMS HA - Maintenance Exit
+    playbook: playbooks/maintenance-exit.yml
+    description: Rejoin one node after planned shutdown, reboot, or OS work.
+    ask_variables_on_launch: true
+    extra_vars:
+      librenms_maintenance_confirm: false
+
+  - name: LibreNMS HA - Failover Drill
+    playbook: playbooks/ha-failover-test.yml
+    description: Run guarded service failover tests during a maintenance window.
+    ask_variables_on_launch: true
+    extra_vars:
+      librenms_failover_test_confirm: false
+
+  - name: LibreNMS HA - Galera Recovery
+    playbook: playbooks/galera-recover.yml
+    description: Emergency guarded recovery when Galera has no Primary component.
+    ask_variables_on_launch: true
+    extra_vars:
+      librenms_galera_recover_confirm: false
+
+  - name: LibreNMS HA - Add Node
+    playbook: playbooks/add-node.yml
+    description: Add a reviewed node after inventory has been updated.
+    ask_variables_on_launch: true
+
+  - name: LibreNMS HA - Remove Node
+    playbook: playbooks/remove-node.yml
+    description: Remove a reviewed node after inventory has been updated.
+    ask_variables_on_launch: true

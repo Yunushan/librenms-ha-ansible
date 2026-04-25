@@ -1,0 +1,111 @@
+---
+- name: Build effective AWX job template settings
+  ansible.builtin.set_fact:
+    awx_bootstrap_job_template_effective: >-
+      {{
+        awx_bootstrap_job_template_defaults
+        | combine(awx_bootstrap_job_template, recursive=True)
+      }}
+
+- name: Build AWX job template payload
+  ansible.builtin.set_fact:
+    awx_bootstrap_job_template_body_base:
+      name: "{{ awx_bootstrap_job_template_effective.name }}"
+      description: "{{ awx_bootstrap_job_template_effective.description | default('') }}"
+      job_type: "{{ awx_bootstrap_job_template_effective.job_type }}"
+      inventory: "{{ awx_bootstrap_inventory_id }}"
+      project: "{{ awx_bootstrap_project_id }}"
+      playbook: "{{ awx_bootstrap_job_template_effective.playbook }}"
+      verbosity: "{{ awx_bootstrap_job_template_effective.verbosity | int }}"
+      ask_variables_on_launch: "{{ awx_bootstrap_job_template_effective.ask_variables_on_launch | bool }}"
+      ask_credential_on_launch: >-
+        {{
+          (
+            awx_bootstrap_job_template_effective.ask_credential_on_launch
+            | bool
+          )
+          if awx_bootstrap_credential_ids | length == 0
+          else false
+        }}
+      ask_inventory_on_launch: "{{ awx_bootstrap_job_template_effective.ask_inventory_on_launch | bool }}"
+      extra_vars: "{{ (awx_bootstrap_job_template_effective.extra_vars | default({})) | to_nice_yaml }}"
+
+- name: Add credentials to AWX job template payload
+  ansible.builtin.set_fact:
+    awx_bootstrap_job_template_body_base: >-
+      {{
+        awx_bootstrap_job_template_body_base
+        | combine({'credentials': awx_bootstrap_credential_ids})
+      }}
+  when: awx_bootstrap_credential_ids | length > 0
+
+- name: Add execution environment to AWX job template payload
+  ansible.builtin.set_fact:
+    awx_bootstrap_job_template_body: >-
+      {{
+        awx_bootstrap_job_template_body_base
+        | combine({'execution_environment': awx_bootstrap_execution_environment_id | int})
+      }}
+  when: awx_bootstrap_execution_environment_id | int > 0
+
+- name: Record AWX job template payload without execution environment
+  ansible.builtin.set_fact:
+    awx_bootstrap_job_template_body: "{{ awx_bootstrap_job_template_body_base }}"
+  when: awx_bootstrap_execution_environment_id | int == 0
+
+- name: Query AWX job template
+  ansible.builtin.uri:
+    url: >-
+      {{ awx_bootstrap_api_base }}/job_templates/?name={{
+      awx_bootstrap_job_template_effective.name | urlencode }}
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  register: awx_bootstrap_job_template_query
+  changed_when: false
+
+- name: Record matching AWX job templates
+  ansible.builtin.set_fact:
+    awx_bootstrap_job_template_matches: >-
+      {{
+        awx_bootstrap_job_template_query.json.results
+        | selectattr('name', 'equalto', awx_bootstrap_job_template_effective.name)
+        | list
+      }}
+
+- name: Create AWX job template
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/job_templates/"
+    method: POST
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_job_template_body }}"
+    status_code: 201
+  changed_when: true
+  when: awx_bootstrap_job_template_matches | length == 0
+
+- name: Update AWX job template
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/job_templates/{{ awx_bootstrap_job_template_matches[0].id }}/"
+    method: PATCH
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_job_template_body }}"
+    status_code: 200
+  changed_when: true
+  when: awx_bootstrap_job_template_matches | length > 0

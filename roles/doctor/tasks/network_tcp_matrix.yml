@@ -1,0 +1,27 @@
+---
+- name: "Check TCP matrix - {{ librenms_doctor_network_tcp_name }}"
+  ansible.builtin.wait_for:
+    host: "{{ (hostvars[item.1] | default({})).ansible_host | default(item.1) }}"
+    port: "{{ librenms_doctor_network_tcp_port | int }}"
+    state: started
+    timeout: "{{ librenms_doctor_network_check_timeout | int }}"
+  delegate_to: "{{ item.0 }}"
+  loop: "{{ librenms_doctor_network_tcp_sources | product(librenms_doctor_network_tcp_destinations) | list }}"
+  register: librenms_doctor_network_tcp_matrix_result
+  changed_when: false
+  failed_when: false
+  run_once: true
+
+- name: "Validate TCP matrix - {{ librenms_doctor_network_tcp_name }}"
+  ansible.builtin.assert:
+    that:
+      - (item.state | default('')) == 'started'
+    fail_msg: >-
+      TCP check failed for {{ librenms_doctor_network_tcp_name }} from
+      {{ item.item.0 }} to {{ item.item.1 }}
+      ({{ (hostvars[item.item.1] | default({})).ansible_host | default(item.item.1) }}:{{ librenms_doctor_network_tcp_port }}).
+      msg={{ item.msg | default('') }}
+  loop: "{{ librenms_doctor_network_tcp_matrix_result.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.0 }} -> {{ item.item.1 }}:{{ librenms_doctor_network_tcp_port }}"
+  run_once: true

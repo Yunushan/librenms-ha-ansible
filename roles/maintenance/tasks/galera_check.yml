@@ -1,0 +1,23 @@
+---
+- name: Wait for Galera nodes to be Primary and Synced
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ hostvars[item].librenms_mariadb_socket | default(librenms_mariadb_socket) }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_maintenance_remaining_db_nodes }}"
+  register: librenms_maintenance_galera_state
+  changed_when: false
+  until:
+    - librenms_maintenance_galera_state.rc == 0
+    - librenms_maintenance_galera_state.stdout is search('wsrep_cluster_status[ \t]+Primary')
+    - librenms_maintenance_galera_state.stdout is search('wsrep_ready[ \t]+ON')
+    - librenms_maintenance_galera_state.stdout is search('wsrep_local_state_comment[ \t]+Synced')
+  retries: "{{ librenms_maintenance_galera_retries | int }}"
+  delay: "{{ librenms_maintenance_galera_delay | int }}"
+  run_once: true

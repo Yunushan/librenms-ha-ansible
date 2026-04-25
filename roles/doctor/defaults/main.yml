@@ -27,6 +27,27 @@ librenms_doctor_required_commands:
 librenms_doctor_required_systemd_commands:
   - systemctl
   - timedatectl
+
+librenms_doctor_network_route_checks_enabled: true
+librenms_doctor_network_tcp_checks_enabled: false
+librenms_doctor_network_check_timeout: 3
+librenms_doctor_network_web_backend_port: 80
+librenms_doctor_network_galera_tcp_ports:
+  - 3306
+  - 4444
+  - 4567
+  - 4568
+librenms_doctor_network_redis_tcp_ports:
+  - 6379
+  - 26379
+librenms_doctor_network_gluster_tcp_ports:
+  - 24007
+  - 24008
+librenms_doctor_network_check_gluster_brick_ports: false
+librenms_doctor_network_gluster_brick_probe_ports:
+  - 49152
+  - 49251
+
 librenms_doctor_ha_required_lb_nodes: 2
 librenms_doctor_ha_required_app_nodes: 2
 librenms_doctor_ha_required_db_nodes: 3

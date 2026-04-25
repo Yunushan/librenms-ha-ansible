@@ -1,0 +1,447 @@
+---
+- name: Validate AWX bootstrap options
+  ansible.builtin.assert:
+    that:
+      - awx_bootstrap_api_url | length > 0
+      - awx_bootstrap_oauth_token | length > 0 or awx_bootstrap_password | length > 0
+      - awx_bootstrap_oauth_token | length > 0 or awx_bootstrap_username | length > 0
+      - awx_bootstrap_organization | length > 0
+      - awx_bootstrap_project_name | length > 0
+      - awx_bootstrap_project_scm_type | length > 0
+      - awx_bootstrap_project_scm_type == 'manual' or awx_bootstrap_project_scm_url | length > 0
+      - awx_bootstrap_inventory_name | length > 0
+    fail_msg: >-
+      Invalid AWX bootstrap settings. Set awx_bootstrap_api_url and either
+      awx_bootstrap_oauth_token or awx_bootstrap_username/awx_bootstrap_password.
+
+- name: Build AWX API request defaults
+  ansible.builtin.set_fact:
+    awx_bootstrap_api_base: "{{ awx_bootstrap_api_url | regex_replace('/+$', '') }}/api/v2"
+    awx_bootstrap_api_headers: >-
+      {{
+        {'Content-Type': 'application/json'}
+        | combine(
+            {'Authorization': 'Bearer ' ~ awx_bootstrap_oauth_token}
+            if awx_bootstrap_oauth_token | length > 0
+            else {}
+          )
+      }}
+    awx_bootstrap_credential_ids: []
+    awx_bootstrap_execution_environment_id: 0
+
+- name: Verify AWX API authentication
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/me/"
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  changed_when: false
+
+- name: Query AWX organization
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/organizations/?name={{ awx_bootstrap_organization | urlencode }}"
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  register: awx_bootstrap_organization_query
+  changed_when: false
+
+- name: Record matching AWX organizations
+  ansible.builtin.set_fact:
+    awx_bootstrap_organization_matches: >-
+      {{
+        awx_bootstrap_organization_query.json.results
+        | selectattr('name', 'equalto', awx_bootstrap_organization)
+        | list
+      }}
+
+- name: Fail when AWX organization is absent and creation is disabled
+  ansible.builtin.assert:
+    that:
+      - awx_bootstrap_organization_matches | length > 0
+    fail_msg: >-
+      AWX organization {{ awx_bootstrap_organization }} does not exist and
+      awx_bootstrap_create_organization is false.
+  when: not awx_bootstrap_create_organization | bool
+
+- name: Create AWX organization
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/organizations/"
+    method: POST
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body:
+      name: "{{ awx_bootstrap_organization }}"
+    status_code: 201
+  register: awx_bootstrap_organization_create
+  changed_when: true
+  when:
+    - awx_bootstrap_organization_matches | length == 0
+    - awx_bootstrap_create_organization | bool
+
+- name: Record AWX organization id
+  ansible.builtin.set_fact:
+    awx_bootstrap_organization_id: >-
+      {{
+        (
+          awx_bootstrap_organization_create.json.id
+          if awx_bootstrap_organization_matches | length == 0
+          else awx_bootstrap_organization_matches[0].id
+        ) | int
+      }}
+
+- name: Build AWX project payload
+  ansible.builtin.set_fact:
+    awx_bootstrap_project_body:
+      name: "{{ awx_bootstrap_project_name }}"
+      description: "{{ awx_bootstrap_project_description }}"
+      organization: "{{ awx_bootstrap_organization_id }}"
+      scm_type: "{{ awx_bootstrap_project_scm_type }}"
+      scm_url: "{{ awx_bootstrap_project_scm_url }}"
+      scm_branch: "{{ awx_bootstrap_project_scm_branch }}"
+      scm_clean: "{{ awx_bootstrap_project_clean | bool }}"
+      scm_delete_on_update: "{{ awx_bootstrap_project_delete_on_update | bool }}"
+      scm_update_on_launch: "{{ awx_bootstrap_project_update_on_launch | bool }}"
+
+- name: Query AWX project
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/projects/?name={{ awx_bootstrap_project_name | urlencode }}"
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  register: awx_bootstrap_project_query
+  changed_when: false
+
+- name: Record matching AWX projects
+  ansible.builtin.set_fact:
+    awx_bootstrap_project_matches: >-
+      {{
+        awx_bootstrap_project_query.json.results
+        | selectattr('name', 'equalto', awx_bootstrap_project_name)
+        | list
+      }}
+
+- name: Create AWX project
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/projects/"
+    method: POST
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_project_body }}"
+    status_code: 201
+  register: awx_bootstrap_project_create
+  changed_when: true
+  when: awx_bootstrap_project_matches | length == 0
+
+- name: Update AWX project
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/projects/{{ awx_bootstrap_project_matches[0].id }}/"
+    method: PATCH
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_project_body }}"
+    status_code: 200
+  changed_when: true
+  when: awx_bootstrap_project_matches | length > 0
+
+- name: Record AWX project id
+  ansible.builtin.set_fact:
+    awx_bootstrap_project_id: >-
+      {{
+        (
+          awx_bootstrap_project_create.json.id
+          if awx_bootstrap_project_matches | length == 0
+          else awx_bootstrap_project_matches[0].id
+        ) | int
+      }}
+
+- name: Build AWX inventory payload
+  ansible.builtin.set_fact:
+    awx_bootstrap_inventory_body:
+      name: "{{ awx_bootstrap_inventory_name }}"
+      description: "{{ awx_bootstrap_inventory_description }}"
+      organization: "{{ awx_bootstrap_organization_id }}"
+
+- name: Query AWX inventory
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/inventories/?name={{ awx_bootstrap_inventory_name | urlencode }}"
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  register: awx_bootstrap_inventory_query
+  changed_when: false
+
+- name: Record matching AWX inventories
+  ansible.builtin.set_fact:
+    awx_bootstrap_inventory_matches: >-
+      {{
+        awx_bootstrap_inventory_query.json.results
+        | selectattr('name', 'equalto', awx_bootstrap_inventory_name)
+        | list
+      }}
+
+- name: Create AWX inventory
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/inventories/"
+    method: POST
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_inventory_body }}"
+    status_code: 201
+  register: awx_bootstrap_inventory_create
+  changed_when: true
+  when: awx_bootstrap_inventory_matches | length == 0
+
+- name: Update AWX inventory
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/inventories/{{ awx_bootstrap_inventory_matches[0].id }}/"
+    method: PATCH
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_inventory_body }}"
+    status_code: 200
+  changed_when: true
+  when: awx_bootstrap_inventory_matches | length > 0
+
+- name: Record AWX inventory id
+  ansible.builtin.set_fact:
+    awx_bootstrap_inventory_id: >-
+      {{
+        (
+          awx_bootstrap_inventory_create.json.id
+          if awx_bootstrap_inventory_matches | length == 0
+          else awx_bootstrap_inventory_matches[0].id
+        ) | int
+      }}
+
+- name: Build AWX inventory source payload
+  ansible.builtin.set_fact:
+    awx_bootstrap_inventory_source_body:
+      name: "{{ awx_bootstrap_inventory_source_name }}"
+      inventory: "{{ awx_bootstrap_inventory_id }}"
+      source: scm
+      source_project: "{{ awx_bootstrap_project_id }}"
+      source_path: "{{ awx_bootstrap_inventory_source_path }}"
+      update_on_launch: "{{ awx_bootstrap_inventory_source_update_on_launch | bool }}"
+      overwrite: "{{ awx_bootstrap_inventory_source_overwrite | bool }}"
+      overwrite_vars: "{{ awx_bootstrap_inventory_source_overwrite_vars | bool }}"
+  when: awx_bootstrap_inventory_source_path | length > 0
+
+- name: Query AWX inventory source
+  ansible.builtin.uri:
+    url: >-
+      {{ awx_bootstrap_api_base }}/inventories/{{ awx_bootstrap_inventory_id
+      }}/inventory_sources/?name={{ awx_bootstrap_inventory_source_name | urlencode }}
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  register: awx_bootstrap_inventory_source_query
+  changed_when: false
+  when: awx_bootstrap_inventory_source_path | length > 0
+
+- name: Record matching AWX inventory sources
+  ansible.builtin.set_fact:
+    awx_bootstrap_inventory_source_matches: >-
+      {{
+        awx_bootstrap_inventory_source_query.json.results
+        | selectattr('name', 'equalto', awx_bootstrap_inventory_source_name)
+        | list
+      }}
+  when: awx_bootstrap_inventory_source_path | length > 0
+
+- name: Create AWX inventory source
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/inventories/{{ awx_bootstrap_inventory_id }}/inventory_sources/"
+    method: POST
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_inventory_source_body }}"
+    status_code: 201
+  changed_when: true
+  when:
+    - awx_bootstrap_inventory_source_path | length > 0
+    - awx_bootstrap_inventory_source_matches | length == 0
+
+- name: Update AWX inventory source
+  ansible.builtin.uri:
+    url: >-
+      {{ awx_bootstrap_api_base }}/inventory_sources/{{
+      awx_bootstrap_inventory_source_matches[0].id }}/
+    method: PATCH
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_inventory_source_body }}"
+    status_code: 200
+  changed_when: true
+  when:
+    - awx_bootstrap_inventory_source_path | length > 0
+    - awx_bootstrap_inventory_source_matches | length > 0
+
+- name: Query AWX credentials
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/credentials/?name={{ item | urlencode }}"
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  loop: "{{ awx_bootstrap_job_template_credential_names }}"
+  register: awx_bootstrap_credential_queries
+  changed_when: false
+  when: awx_bootstrap_job_template_credential_names | length > 0
+
+- name: Fail when requested AWX credentials are missing
+  ansible.builtin.assert:
+    that:
+      - item.json.results | selectattr('name', 'equalto', item.item) | list | length > 0
+    fail_msg: "AWX credential {{ item.item }} was not found."
+  loop: "{{ awx_bootstrap_credential_queries.results | default([]) }}"
+  when:
+    - awx_bootstrap_job_template_credential_names | length > 0
+    - awx_bootstrap_fail_on_missing_credentials | bool
+
+- name: Record AWX credential ids
+  ansible.builtin.set_fact:
+    awx_bootstrap_credential_ids: >-
+      {{
+        awx_bootstrap_credential_ids
+        + [
+            (
+              item.json.results
+              | selectattr('name', 'equalto', item.item)
+              | list
+            )[0].id
+          ]
+      }}
+  loop: "{{ awx_bootstrap_credential_queries.results | default([]) }}"
+  when:
+    - awx_bootstrap_job_template_credential_names | length > 0
+    - item.json.results | selectattr('name', 'equalto', item.item) | list | length > 0
+
+- name: Query AWX execution environment
+  ansible.builtin.uri:
+    url: >-
+      {{ awx_bootstrap_api_base }}/execution_environments/?name={{
+      awx_bootstrap_execution_environment_name | urlencode }}
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  register: awx_bootstrap_execution_environment_query
+  changed_when: false
+  when: awx_bootstrap_execution_environment_name | length > 0
+
+- name: Fail when requested AWX execution environment is missing
+  ansible.builtin.assert:
+    that:
+      - >-
+        awx_bootstrap_execution_environment_query.json.results
+        | selectattr('name', 'equalto', awx_bootstrap_execution_environment_name)
+        | list
+        | length > 0
+    fail_msg: >-
+      AWX execution environment {{ awx_bootstrap_execution_environment_name }}
+      was not found.
+  when:
+    - awx_bootstrap_execution_environment_name | length > 0
+    - awx_bootstrap_fail_on_missing_execution_environment | bool
+
+- name: Record AWX execution environment id
+  ansible.builtin.set_fact:
+    awx_bootstrap_execution_environment_id: >-
+      {{
+        (
+          awx_bootstrap_execution_environment_query.json.results
+          | selectattr('name', 'equalto', awx_bootstrap_execution_environment_name)
+          | list
+        )[0].id
+      }}
+  when:
+    - awx_bootstrap_execution_environment_name | length > 0
+    - >-
+      awx_bootstrap_execution_environment_query.json.results
+      | selectattr('name', 'equalto', awx_bootstrap_execution_environment_name)
+      | list
+      | length > 0
+
+- name: Ensure AWX job templates
+  ansible.builtin.include_tasks: job_template.yml
+  loop: "{{ awx_bootstrap_job_templates }}"
+  loop_control:
+    loop_var: awx_bootstrap_job_template
+    label: "{{ awx_bootstrap_job_template.name }}"
+
+- name: Show AWX bootstrap summary
+  ansible.builtin.debug:
+    msg:
+      - "AWX organization: {{ awx_bootstrap_organization }} (id {{ awx_bootstrap_organization_id }})"
+      - "AWX project: {{ awx_bootstrap_project_name }} (id {{ awx_bootstrap_project_id }})"
+      - "AWX inventory: {{ awx_bootstrap_inventory_name }} (id {{ awx_bootstrap_inventory_id }})"
+      - "AWX job templates requested: {{ awx_bootstrap_job_templates | length }}"

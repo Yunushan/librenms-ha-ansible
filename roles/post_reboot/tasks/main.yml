@@ -1,0 +1,484 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_post_reboot_common_vars_lookup) }}"
+  vars:
+    librenms_post_reboot_common_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Build active host lists for post-reboot convergence
+  set_fact:
+    librenms_post_reboot_active_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_post_reboot_active_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_post_reboot_active_redis_nodes: >-
+      {{
+        groups.get('librenms_redis', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_post_reboot_active_lb_nodes: >-
+      {{
+        groups.get('lb_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_post_reboot_active_gluster_nodes: >-
+      {{
+        groups.get('gluster_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+  run_once: true
+
+- name: Determine post-reboot probe delegates
+  set_fact:
+    librenms_post_reboot_app_probe_delegate: >-
+      {{
+        librenms_post_reboot_active_nodes
+        | first
+        | default(inventory_hostname)
+      }}
+    librenms_post_reboot_probe_delegate: >-
+      {{
+        librenms_post_reboot_active_lb_nodes
+        | first
+        | default(
+            librenms_post_reboot_active_nodes
+            | first
+            | default(inventory_hostname)
+          )
+      }}
+  run_once: true
+
+- name: Determine post-reboot database probe endpoint
+  set_fact:
+    librenms_post_reboot_db_probe_host: >-
+      {{
+        librenms_db_host
+        if librenms_db_host | length > 0
+        else
+        (
+          '127.0.0.1'
+          if librenms_db_mode == 'local'
+          else
+          (
+            librenms_vip_ip
+            if librenms_vip_enabled | bool and librenms_vip_ip | length > 0
+            else
+            (
+              hostvars[(librenms_post_reboot_active_lb_nodes | first)].ansible_host
+              | default(librenms_post_reboot_active_lb_nodes | first)
+              if (librenms_post_reboot_active_lb_nodes | length > 0)
+              else
+              (
+                hostvars[(librenms_post_reboot_active_db_nodes | first)].ansible_host
+                | default(librenms_post_reboot_active_db_nodes | first)
+                if (librenms_post_reboot_active_db_nodes | length > 0)
+                else '127.0.0.1'
+              )
+            )
+          )
+        )
+      }}
+  run_once: true
+
+- name: Wait for HAProxy after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_haproxy_service_name }}"
+  register: librenms_post_reboot_haproxy_state
+  changed_when: false
+  until: librenms_post_reboot_haproxy_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when: inventory_hostname in librenms_post_reboot_active_lb_nodes
+
+- name: Wait for keepalived after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_keepalived_service_name }}"
+  register: librenms_post_reboot_keepalived_state
+  changed_when: false
+  until: librenms_post_reboot_keepalived_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_vip_enabled | bool
+    - inventory_hostname in librenms_post_reboot_active_lb_nodes
+
+- name: Wait for MariaDB after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_mariadb_service_name }}"
+  register: librenms_post_reboot_mariadb_state
+  changed_when: false
+  until: librenms_post_reboot_mariadb_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - inventory_hostname in librenms_post_reboot_active_db_nodes
+
+- name: Wait for Galera Primary and Synced state
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+  register: librenms_post_reboot_galera_state
+  changed_when: false
+  until:
+    - librenms_post_reboot_galera_state.stdout is search('wsrep_cluster_status[ \t]+Primary')
+    - librenms_post_reboot_galera_state.stdout is search('wsrep_ready[ \t]+ON')
+    - librenms_post_reboot_galera_state.stdout is search('wsrep_local_state_comment[ \t]+Synced')
+  retries: "{{ librenms_post_reboot_galera_retries | int }}"
+  delay: "{{ librenms_post_reboot_galera_delay | int }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname in librenms_post_reboot_active_db_nodes
+
+- name: Wait for Redis after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_redis_service_name }}"
+  register: librenms_post_reboot_redis_state
+  changed_when: false
+  until: librenms_post_reboot_redis_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - inventory_hostname in librenms_post_reboot_active_redis_nodes
+
+- name: Wait for Redis Sentinel after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_redis_sentinel_service_name_effective }}"
+  register: librenms_post_reboot_sentinel_state
+  changed_when: false
+  until: librenms_post_reboot_sentinel_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname in librenms_post_reboot_active_redis_nodes
+
+- name: Wait for Redis Sentinel writable master
+  no_log: true
+  shell: |
+    set -eu
+    sentinel_user_args=""
+    redis_user_args=""
+    if [ -n "$LIBRENMS_SENTINEL_USERNAME" ]; then
+      sentinel_user_args="--user $LIBRENMS_SENTINEL_USERNAME"
+    fi
+    if [ -n "$LIBRENMS_REDIS_USERNAME" ]; then
+      redis_user_args="--user $LIBRENMS_REDIS_USERNAME"
+    fi
+
+    master="$(
+      REDISCLI_AUTH="$LIBRENMS_SENTINEL_PASSWORD" redis-cli \
+        -h 127.0.0.1 \
+        -p 26379 \
+        ${sentinel_user_args} \
+        SENTINEL get-master-addr-by-name "$LIBRENMS_SENTINEL_SERVICE"
+    )"
+    master_host="$(printf '%s\n' "$master" | awk 'NR == 1 { print }')"
+    master_port="$(printf '%s\n' "$master" | awk 'NR == 2 { print }')"
+    test -n "$master_host"
+    test -n "$master_port"
+
+    node_name="$(hostname)"
+    key="librenms:ansible:post-reboot:${node_name}:$$"
+    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+      -h "$master_host" \
+      -p "$master_port" \
+      -n "$LIBRENMS_REDIS_CACHE_DB" \
+      ${redis_user_args} \
+      SET "$key" ok EX 30 >/dev/null
+    value="$(
+      REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+        -h "$master_host" \
+        -p "$master_port" \
+        -n "$LIBRENMS_REDIS_CACHE_DB" \
+        ${redis_user_args} \
+        GET "$key"
+    )"
+    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+      -h "$master_host" \
+      -p "$master_port" \
+      -n "$LIBRENMS_REDIS_CACHE_DB" \
+      ${redis_user_args} \
+      DEL "$key" >/dev/null
+    test "$value" = ok
+    printf '%s:%s\n' "$master_host" "$master_port"
+  args:
+    executable: /bin/sh
+  environment:
+    LIBRENMS_SENTINEL_USERNAME: "{{ librenms_redis_sentinel_username }}"
+    LIBRENMS_SENTINEL_PASSWORD: "{{ librenms_redis_sentinel_password }}"
+    LIBRENMS_SENTINEL_SERVICE: "{{ librenms_redis_sentinel_service }}"
+    LIBRENMS_REDIS_USERNAME: "{{ librenms_redis_username }}"
+    LIBRENMS_REDIS_PASSWORD: "{{ librenms_redis_password }}"
+    LIBRENMS_REDIS_CACHE_DB: "{{ librenms_redis_cache_db | string }}"
+  register: librenms_post_reboot_redis_write_check
+  changed_when: false
+  until: librenms_post_reboot_redis_write_check.rc == 0
+  retries: "{{ librenms_post_reboot_redis_retries | int }}"
+  delay: "{{ librenms_post_reboot_redis_delay | int }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname in librenms_post_reboot_active_redis_nodes
+
+- name: Wait for glusterd after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_glusterd_service_name }}"
+  register: librenms_post_reboot_glusterd_state
+  changed_when: false
+  until: librenms_post_reboot_glusterd_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_gluster_nodes
+
+- name: Wait for Gluster volume status after reboot
+  command:
+    argv:
+      - gluster
+      - volume
+      - status
+      - "{{ librenms_gluster_volume_name }}"
+  register: librenms_post_reboot_gluster_status
+  changed_when: false
+  until: librenms_post_reboot_gluster_status.rc == 0
+  retries: "{{ librenms_post_reboot_gluster_retries | int }}"
+  delay: "{{ librenms_post_reboot_gluster_delay | int }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == (librenms_post_reboot_active_gluster_nodes | first | default(''))
+
+- name: Wait for LibreNMS dispatcher after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms
+  register: librenms_post_reboot_dispatcher_state
+  changed_when: false
+  until: librenms_post_reboot_dispatcher_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_manage_dispatcher | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Wait for LibreNMS scheduler after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms-scheduler.timer
+  register: librenms_post_reboot_scheduler_state
+  changed_when: false
+  until: librenms_post_reboot_scheduler_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_manage_scheduler | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Wait for LibreNMS startup repair timer after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms-ha-startup-repair.timer
+  register: librenms_post_reboot_startup_repair_state
+  changed_when: false
+  until: librenms_post_reboot_startup_repair_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_startup_repair_enabled | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Wait for LibreNMS dispatcher recovery timer after reboot
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms-dispatcher-ha-recover.timer
+  register: librenms_post_reboot_dispatcher_recovery_state
+  changed_when: false
+  until: librenms_post_reboot_dispatcher_recovery_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_dispatcher_failover_recovery_enabled | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Check LibreNMS runtime wait script after reboot
+  stat:
+    path: "{{ librenms_dispatcher_runtime_wait_path }}"
+  register: librenms_post_reboot_runtime_wait_script
+  when:
+    - librenms_dispatcher_runtime_wait_enabled | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Fail when LibreNMS runtime wait script is missing
+  assert:
+    that:
+      - librenms_post_reboot_runtime_wait_script.stat.exists | default(false)
+    fail_msg: >-
+      {{ librenms_dispatcher_runtime_wait_path }} is missing on {{ inventory_hostname }}.
+      Run cluster.yml to deploy the HA runtime gate.
+  when:
+    - librenms_dispatcher_runtime_wait_enabled | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Wait for LibreNMS runtime dependencies after reboot
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_status_runtime_wait_probe_timeout | default(20) | string }}"
+      - "{{ librenms_dispatcher_runtime_wait_path }}"
+  register: librenms_post_reboot_runtime_wait
+  changed_when: false
+  until: librenms_post_reboot_runtime_wait.rc == 0
+  retries: "{{ librenms_post_reboot_runtime_retries | int }}"
+  delay: "{{ librenms_post_reboot_runtime_delay | int }}"
+  when:
+    - librenms_dispatcher_runtime_wait_enabled | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Determine post-reboot VIP probe endpoint
+  set_fact:
+    librenms_post_reboot_vip_url: >-
+      {{
+        ('https' if librenms_haproxy_tls_enabled | bool else 'http')
+        ~ '://'
+        ~ librenms_vip_ip
+        ~ (
+          ':' ~ (librenms_haproxy_https_port | string)
+          if librenms_haproxy_tls_enabled | bool
+          and librenms_haproxy_https_port | int != 443
+          else (
+            ':' ~ (librenms_haproxy_web_port | string)
+            if not librenms_haproxy_tls_enabled | bool
+            and librenms_haproxy_web_port | int != 80
+            else ''
+          )
+        )
+        ~ librenms_post_reboot_vip_probe_path
+      }}
+  when: librenms_vip_enabled | bool
+  run_once: true
+
+- name: Wait for LibreNMS VIP endpoint after reboot
+  uri:
+    url: "{{ librenms_post_reboot_vip_url }}"
+    method: GET
+    return_content: false
+    timeout: "{{ librenms_post_reboot_vip_probe_timeout | int }}"
+    validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
+  delegate_to: "{{ librenms_post_reboot_probe_delegate }}"
+  register: librenms_post_reboot_vip_probe
+  changed_when: false
+  failed_when: false
+  until: >-
+    (librenms_post_reboot_vip_probe.status | default(0) | int)
+    in (librenms_post_reboot_vip_probe_statuses | map('int') | list)
+  retries: "{{ librenms_post_reboot_vip_retries | int }}"
+  delay: "{{ librenms_post_reboot_vip_delay | int }}"
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_post_reboot_probe_delegate | length > 0
+  run_once: true
+
+- name: Wait for LibreNMS dispatcher database registrations after reboot
+  community.mysql.mysql_query:
+    login_host: "{{ librenms_post_reboot_db_probe_host }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - >-
+        SELECT COUNT(*) AS active_pollers
+        FROM `poller_cluster`
+        WHERE `node_id` IN (
+        {% for host in librenms_post_reboot_active_nodes -%}
+        '{{ hostvars[host].librenms_node_id | default(host) | regex_replace("'", "''") }}'
+        {%- if not loop.last %},{% endif -%}
+        {%- endfor %}
+        )
+        AND `last_report` >= DATE_SUB(
+          NOW(),
+          INTERVAL COALESCE(
+            `poller_frequency`,
+            {{ librenms_dispatcher_poller_frequency | int }}
+          ) SECOND
+        )
+  delegate_to: "{{ librenms_post_reboot_app_probe_delegate }}"
+  register: librenms_post_reboot_dispatcher_rows
+  changed_when: false
+  failed_when: false
+  no_log: true
+  until: >-
+    (
+      not (librenms_post_reboot_dispatcher_rows.failed | default(false))
+    )
+    and
+    (
+      (
+        (
+          librenms_post_reboot_dispatcher_rows.query_result
+          | default([[{'active_pollers': 0}]])
+        )[0][0].active_pollers
+        | default(0)
+        | int
+      )
+      >= (librenms_post_reboot_active_nodes | length | int)
+    )
+  retries: "{{ librenms_post_reboot_dispatcher_db_retries | int }}"
+  delay: "{{ librenms_post_reboot_dispatcher_db_delay | int }}"
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_post_reboot_active_nodes | length > 0
+    - librenms_post_reboot_app_probe_delegate | length > 0
+  run_once: true
+
+- name: Report post-reboot convergence
+  debug:
+    msg: >-
+      Post-reboot convergence checks passed. The HA status role will now report
+      the final VIP, Galera, Redis Sentinel, Gluster, dispatcher, and scheduler
+      state.
+  run_once: true

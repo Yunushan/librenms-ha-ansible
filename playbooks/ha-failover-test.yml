@@ -1,6 +1,6 @@
 ---
 - name: Run controlled LibreNMS HA failover tests
-  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:!maintenance_nodes
   become: true
   gather_facts: true
   roles:

@@ -1,0 +1,1156 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_status_common_vars_lookup) }}"
+  vars:
+    librenms_status_common_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Build active host lists for status
+  set_fact:
+    librenms_status_active_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_status_active_web_nodes: >-
+      {{
+        groups.get('librenms_web', groups.get('librenms_nodes', []))
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_status_active_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_status_active_redis_nodes: >-
+      {{
+        groups.get('librenms_redis', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_status_active_lb_nodes: >-
+      {{
+        groups.get('lb_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+    librenms_status_active_gluster_nodes: >-
+      {{
+        groups.get('gluster_nodes', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+  run_once: true
+
+- name: Build status managed and maintenance host lists
+  set_fact:
+    librenms_status_managed_hosts: >-
+      {{
+        (
+          librenms_status_active_nodes
+          + librenms_status_active_web_nodes
+          + librenms_status_active_db_nodes
+          + librenms_status_active_redis_nodes
+          + librenms_status_active_lb_nodes
+          + librenms_status_active_gluster_nodes
+        )
+        | unique
+        | list
+      }}
+    librenms_status_maintenance_nodes: "{{ groups.get('maintenance_nodes', []) }}"
+  run_once: true
+
+- name: Build expected systemd unit list for this host
+  set_fact:
+    librenms_status_expected_systemd_units: >-
+      {{
+        (
+          []
+          + (
+            ['librenms.service']
+            if inventory_hostname in librenms_status_active_nodes
+            and librenms_manage_dispatcher | bool
+            else []
+          )
+          + (
+            ['librenms-scheduler.timer']
+            if inventory_hostname in librenms_status_active_nodes
+            and librenms_manage_scheduler | bool
+            else []
+          )
+          + (
+            ['librenms-daily.timer']
+            if inventory_hostname in librenms_status_active_nodes
+            and librenms_manage_daily_maintenance | bool
+            else []
+          )
+          + (
+            ['librenms-ha-startup-repair.timer']
+            if inventory_hostname in librenms_status_active_nodes
+            and librenms_startup_repair_enabled | bool
+            else []
+          )
+          + (
+            ['librenms-dispatcher-ha-recover.timer']
+            if inventory_hostname in librenms_status_active_nodes
+            and librenms_dispatcher_failover_recovery_enabled | bool
+            else []
+          )
+          + (
+            [librenms_nginx_service_name]
+            if inventory_hostname in librenms_status_active_web_nodes
+            else []
+          )
+          + (
+            [librenms_rrdcached_service_name]
+            if inventory_hostname in librenms_status_active_nodes
+            and librenms_manage_rrdcached | bool
+            and (
+              librenms_rrdcached_scope == 'all'
+              or (
+                librenms_rrdcached_scope == 'primary'
+                and inventory_hostname == (librenms_status_active_nodes | first | default(''))
+              )
+            )
+            else []
+          )
+          + (
+            [librenms_haproxy_service_name, librenms_keepalived_service_name]
+            if inventory_hostname in librenms_status_active_lb_nodes
+            else []
+          )
+          + (
+            [librenms_mariadb_service_name]
+            if (
+              librenms_db_mode == 'galera'
+              and inventory_hostname in librenms_status_active_db_nodes
+            )
+            or (
+              librenms_db_mode == 'local'
+              and inventory_hostname in librenms_status_active_nodes
+            )
+            else []
+          )
+          + (
+            [librenms_redis_service_name]
+            if (
+              librenms_redis_mode == 'sentinel'
+              and inventory_hostname in librenms_status_active_redis_nodes
+            )
+            or (
+              librenms_redis_mode == 'local'
+              and inventory_hostname in librenms_status_active_nodes
+            )
+            else []
+          )
+          + (
+            [librenms_redis_sentinel_service_name_effective]
+            if librenms_redis_mode == 'sentinel'
+            and inventory_hostname in librenms_status_active_redis_nodes
+            else []
+          )
+          + (
+            [librenms_glusterd_service_name]
+            if librenms_rrd_mode == 'glusterfs'
+            and inventory_hostname in librenms_status_active_gluster_nodes
+            else []
+          )
+        )
+        | unique
+        | list
+      }}
+  when:
+    - ansible_service_mgr == 'systemd'
+    - librenms_status_unit_drift_enabled | bool
+
+- name: Check expected systemd unit drift
+  shell: |
+    set -u
+    for unit in {% for unit in librenms_status_expected_systemd_units | default([]) %}{{ unit | quote }} {% endfor %}; do
+      active="$(systemctl is-active "${unit}" 2>/dev/null || true)"
+      enabled="$(systemctl is-enabled "${unit}" 2>/dev/null || true)"
+      case " {{ librenms_status_expected_unit_enabled_states | join(' ') }} " in
+        *" ${enabled} "*) enabled_ok=1 ;;
+        *) enabled_ok=0 ;;
+      esac
+      if [ "${active}" != "active" ] || [ "${enabled_ok}" != "1" ]; then
+        printf '%s active=%s enabled=%s\n' "${unit}" "${active}" "${enabled}"
+      fi
+    done
+  args:
+    executable: /bin/sh
+  register: librenms_status_systemd_unit_drift
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_service_mgr == 'systemd'
+    - librenms_status_unit_drift_enabled | bool
+    - (librenms_status_expected_systemd_units | default([]) | length) > 0
+
+- name: Check LibreNMS writable path ownership drift
+  shell: |
+    set -u
+    expected="{{ librenms_status_writable_owner }}:{{ librenms_status_writable_group }}"
+    for path in {% for path in librenms_status_writable_paths %}{{ path | quote }} {% endfor %}; do
+      if [ ! -e "${path}" ]; then
+        printf '%s missing expected_owner=%s\n' "${path}" "${expected}"
+        continue
+      fi
+      owner="$(stat -c '%U:%G' "${path}" 2>/dev/null || printf 'unknown:unknown')"
+      if [ "${owner}" != "${expected}" ]; then
+        printf '%s owner=%s expected_owner=%s\n' "${path}" "${owner}" "${expected}"
+      fi
+    done
+  args:
+    executable: /bin/sh
+  register: librenms_status_writable_path_drift
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_status_writable_path_drift_enabled | bool
+    - inventory_hostname in librenms_status_active_nodes
+
+- name: Probe maintenance node service activity
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ item.1 }}"
+  delegate_to: "{{ item.0 }}"
+  loop: "{{ librenms_status_maintenance_nodes | product(librenms_status_maintenance_probe_units | unique | list) | list }}"
+  register: librenms_status_maintenance_unit_activity
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when:
+    - librenms_status_maintenance_drift_enabled | bool
+    - (librenms_status_maintenance_nodes | length) > 0
+  run_once: true
+
+- name: Determine status probe delegate
+  set_fact:
+    librenms_status_app_probe_delegate: >-
+      {{
+        librenms_status_active_nodes
+        | first
+        | default(inventory_hostname)
+      }}
+    librenms_status_probe_delegate: >-
+      {{
+        librenms_status_active_lb_nodes
+        | first
+        | default(
+            librenms_status_active_nodes
+            | first
+            | default(inventory_hostname)
+          )
+      }}
+  run_once: true
+
+- name: Determine status database probe endpoint
+  set_fact:
+    librenms_status_db_probe_host: >-
+      {{
+        librenms_db_host
+        if librenms_db_host | length > 0
+        else
+        (
+          '127.0.0.1'
+          if librenms_db_mode == 'local'
+          else
+          (
+            librenms_vip_ip
+            if librenms_vip_enabled | bool and librenms_vip_ip | length > 0
+            else
+            (
+              hostvars[(librenms_status_active_lb_nodes | first)].ansible_host
+              | default(librenms_status_active_lb_nodes | first)
+              if (librenms_status_active_lb_nodes | length > 0)
+              else
+              (
+                hostvars[(librenms_status_active_db_nodes | first)].ansible_host
+                | default(librenms_status_active_db_nodes | first)
+                if (librenms_status_active_db_nodes | length > 0)
+                else '127.0.0.1'
+              )
+            )
+          )
+        )
+      }}
+  run_once: true
+
+- name: Check LibreNMS dispatcher service state
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms
+  register: librenms_status_dispatcher_state_raw
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in librenms_status_active_nodes
+
+- name: Set LibreNMS dispatcher service state fact
+  set_fact:
+    librenms_status_dispatcher_state: >-
+      {{ librenms_status_dispatcher_state_raw.stdout | default('not-checked') }}
+  when: inventory_hostname in librenms_status_active_nodes
+
+- name: Check LibreNMS scheduler timer state
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms-scheduler.timer
+  register: librenms_status_scheduler_state_raw
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in librenms_status_active_nodes
+
+- name: Set LibreNMS scheduler timer state fact
+  set_fact:
+    librenms_status_scheduler_state: >-
+      {{ librenms_status_scheduler_state_raw.stdout | default('not-checked') }}
+  when: inventory_hostname in librenms_status_active_nodes
+
+- name: Check LibreNMS runtime wait script
+  stat:
+    path: "{{ librenms_dispatcher_runtime_wait_path }}"
+  register: librenms_status_runtime_wait_script
+  when:
+    - inventory_hostname in librenms_status_active_nodes
+    - librenms_dispatcher_runtime_wait_enabled | bool
+
+- name: Probe LibreNMS runtime dependency gate
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_status_runtime_wait_probe_timeout | string }}"
+      - "{{ librenms_dispatcher_runtime_wait_path }}"
+  register: librenms_status_runtime_wait_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in librenms_status_active_nodes
+    - librenms_dispatcher_runtime_wait_enabled | bool
+    - librenms_status_runtime_wait_probe_enabled | bool
+    - librenms_status_runtime_wait_script.stat.exists | default(false)
+
+- name: Set LibreNMS runtime dependency state fact
+  set_fact:
+    librenms_status_runtime_readiness: >-
+      {% if not (librenms_dispatcher_runtime_wait_enabled | bool) -%}
+      disabled
+      {%- elif not (librenms_status_runtime_wait_probe_enabled | bool) -%}
+      not-probed
+      {%- elif not (librenms_status_runtime_wait_script.stat.exists | default(false)) -%}
+      missing-wait-script
+      {%- elif (librenms_status_runtime_wait_probe.rc | default(1) | int) == 0 -%}
+      ready
+      {%- elif (librenms_status_runtime_wait_probe.rc | default(1) | int) == 124 -%}
+      timeout
+      {%- else -%}
+      failed
+      {%- endif %}
+  when: inventory_hostname in librenms_status_active_nodes
+
+- name: Check LibreNMS startup repair timer state
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms-ha-startup-repair.timer
+  register: librenms_status_startup_repair_timer_raw
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in librenms_status_active_nodes
+    - librenms_startup_repair_enabled | bool
+
+- name: Check LibreNMS startup repair timer enablement
+  command:
+    argv:
+      - systemctl
+      - is-enabled
+      - librenms-ha-startup-repair.timer
+  register: librenms_status_startup_repair_timer_enabled_raw
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in librenms_status_active_nodes
+    - librenms_startup_repair_enabled | bool
+
+- name: Set LibreNMS startup repair timer state fact
+  set_fact:
+    librenms_status_startup_repair_timer: >-
+      {% if librenms_startup_repair_enabled | bool -%}
+      {{ librenms_status_startup_repair_timer_raw.stdout | default('unknown') }}/{{ librenms_status_startup_repair_timer_enabled_raw.stdout | default('unknown') }}
+      {%- else -%}
+      disabled
+      {%- endif %}
+  when: inventory_hostname in librenms_status_active_nodes
+
+- name: Check LibreNMS dispatcher recovery timer state
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - librenms-dispatcher-ha-recover.timer
+  register: librenms_status_dispatcher_recover_timer_raw
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in librenms_status_active_nodes
+    - librenms_dispatcher_failover_recovery_enabled | bool
+
+- name: Check LibreNMS dispatcher recovery timer enablement
+  command:
+    argv:
+      - systemctl
+      - is-enabled
+      - librenms-dispatcher-ha-recover.timer
+  register: librenms_status_dispatcher_recover_timer_enabled_raw
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in librenms_status_active_nodes
+    - librenms_dispatcher_failover_recovery_enabled | bool
+
+- name: Set LibreNMS dispatcher recovery timer state fact
+  set_fact:
+    librenms_status_dispatcher_recover_timer: >-
+      {% if librenms_dispatcher_failover_recovery_enabled | bool -%}
+      {{ librenms_status_dispatcher_recover_timer_raw.stdout | default('unknown') }}/{{ librenms_status_dispatcher_recover_timer_enabled_raw.stdout | default('unknown') }}
+      {%- else -%}
+      disabled
+      {%- endif %}
+  when: inventory_hostname in librenms_status_active_nodes
+
+- name: Check HAProxy service state
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_haproxy_service_name }}"
+  register: librenms_status_haproxy_state_raw
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in librenms_status_active_lb_nodes
+
+- name: Set HAProxy service state fact
+  set_fact:
+    librenms_status_haproxy_state: >-
+      {{ librenms_status_haproxy_state_raw.stdout | default('not-checked') }}
+  when: inventory_hostname in librenms_status_active_lb_nodes
+
+- name: Check keepalived service state
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_keepalived_service_name }}"
+  register: librenms_status_keepalived_state_raw
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in librenms_status_active_lb_nodes
+
+- name: Set keepalived service state fact
+  set_fact:
+    librenms_status_keepalived_state: >-
+      {{ librenms_status_keepalived_state_raw.stdout | default('not-checked') }}
+  when: inventory_hostname in librenms_status_active_lb_nodes
+
+- name: Probe VIP ownership on load balancer nodes
+  shell: >-
+    ip -o addr show |
+    awk '$4 == "{{ librenms_vip_ip }}/{{ librenms_vip_cidr }}" {
+      found=1
+    } END {
+      exit found ? 0 : 1
+    }'
+  args:
+    executable: /bin/sh
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_status_active_lb_nodes }}"
+  register: librenms_status_vip_owner_probe
+  changed_when: false
+  failed_when: false
+  when: librenms_vip_enabled | bool
+  run_once: true
+
+- name: Set VIP owner fact
+  set_fact:
+    librenms_status_vip_owner: >-
+      {{
+        (
+          librenms_status_vip_owner_probe.results
+          | default([])
+          | selectattr('rc', 'equalto', 0)
+          | map(attribute='item')
+          | list
+          | first
+        )
+        | default('')
+      }}
+  when: librenms_vip_enabled | bool
+  run_once: true
+
+- name: Determine VIP status probe endpoint
+  set_fact:
+    librenms_status_vip_url: >-
+      {{
+        ('https' if librenms_haproxy_tls_enabled | bool else 'http')
+        ~ '://'
+        ~ librenms_vip_ip
+        ~ (
+          ':' ~ (librenms_haproxy_https_port | string)
+          if librenms_haproxy_tls_enabled | bool
+          and librenms_haproxy_https_port | int != 443
+          else (
+            ':' ~ (librenms_haproxy_web_port | string)
+            if not librenms_haproxy_tls_enabled | bool
+            and librenms_haproxy_web_port | int != 80
+            else ''
+          )
+        )
+        ~ librenms_status_vip_probe_path
+      }}
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_status_vip_probe_enabled | bool
+  run_once: true
+
+- name: Query LibreNMS dispatcher poller rows
+  community.mysql.mysql_query:
+    login_host: "{{ librenms_status_db_probe_host }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - >-
+        SELECT `node_id`, `poller_name`,
+        DATE_FORMAT(`last_report`, '%Y-%m-%d %H:%i:%s') AS `last_report`,
+        TIMESTAMPDIFF(SECOND, `last_report`, NOW()) AS `age_seconds`,
+        COALESCE(`poller_frequency`, {{ librenms_dispatcher_poller_frequency | int }}) AS `poller_frequency`,
+        CASE
+          WHEN `last_report` >= DATE_SUB(
+            NOW(),
+            INTERVAL COALESCE(
+              `poller_frequency`,
+              {{ librenms_dispatcher_poller_frequency | int }}
+            ) SECOND
+          )
+          THEN 1
+          ELSE 0
+        END AS `active`
+        FROM `poller_cluster`
+        ORDER BY `node_id`
+  delegate_to: "{{ librenms_status_app_probe_delegate }}"
+  register: librenms_status_dispatcher_db_rows_raw
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - librenms_status_dispatcher_db_probe_enabled | bool
+    - librenms_status_app_probe_delegate | length > 0
+  run_once: true
+
+- name: Set LibreNMS dispatcher poller row facts
+  set_fact:
+    librenms_status_dispatcher_db_query_state: >-
+      {{
+        'ok'
+        if not (librenms_status_dispatcher_db_rows_raw.failed | default(false))
+        else 'failed'
+      }}
+    librenms_status_dispatcher_db_rows: >-
+      {{
+        (librenms_status_dispatcher_db_rows_raw.query_result | default([[]]))[0]
+        | default([])
+      }}
+  when: librenms_status_dispatcher_db_probe_enabled | bool
+  run_once: true
+
+- name: Probe LibreNMS VIP endpoint
+  uri:
+    url: "{{ librenms_status_vip_url }}"
+    method: GET
+    return_content: false
+    status_code: "{{ librenms_status_vip_probe_statuses }}"
+    timeout: "{{ librenms_status_vip_probe_timeout | int }}"
+    validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
+  delegate_to: "{{ librenms_status_probe_delegate }}"
+  register: librenms_status_vip_probe_result
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_status_vip_probe_enabled | bool
+    - librenms_status_probe_delegate | length > 0
+  run_once: true
+
+- name: Check Galera status
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+  register: librenms_status_galera_raw
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname in librenms_status_active_db_nodes
+
+- name: Set Galera status fact
+  set_fact:
+    librenms_status_galera: >-
+      {{ librenms_status_galera_raw.stdout_lines | default(['not-checked']) }}
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname in librenms_status_active_db_nodes
+
+- name: Query Redis Sentinel master
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 26379
+    {% if librenms_redis_sentinel_username | length > 0 %}
+    --user {{ librenms_redis_sentinel_username | quote }}
+    {% endif %}
+    SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }}
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+  register: librenms_status_redis_sentinel_raw
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname in librenms_status_active_redis_nodes
+
+- name: Set Redis Sentinel status fact
+  set_fact:
+    librenms_status_redis_master: >-
+      {{
+        (
+          librenms_status_redis_sentinel_raw.stdout_lines | default([])
+        )[0] | default('unknown')
+      }}:{{
+        (
+          librenms_status_redis_sentinel_raw.stdout_lines | default([])
+        )[1] | default('unknown')
+      }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname in librenms_status_active_redis_nodes
+
+- name: Check Gluster volume status
+  command:
+    argv:
+      - gluster
+      - volume
+      - status
+      - "{{ librenms_gluster_volume_name }}"
+  register: librenms_status_gluster_raw
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == (librenms_status_active_gluster_nodes | first | default(''))
+
+- name: Set Gluster status fact
+  set_fact:
+    librenms_status_gluster: >-
+      {{ librenms_status_gluster_raw.stdout_lines | default(['not-checked']) }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname == (librenms_status_active_gluster_nodes | first | default(''))
+
+- name: Initialize HA degradation report
+  set_fact:
+    librenms_status_degraded_reasons: []
+    librenms_status_redis_known_masters: []
+  run_once: true
+
+- name: Record systemd unit drift degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' has systemd unit drift: '
+            ~ (
+              hostvars[item].librenms_status_systemd_unit_drift.stdout_lines
+              | default([])
+              | join('; ')
+            )
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_managed_hosts }}"
+  when:
+    - librenms_status_unit_drift_enabled | bool
+    - >-
+      (
+        hostvars[item].librenms_status_systemd_unit_drift.stdout_lines
+        | default([])
+        | length
+      ) > 0
+  run_once: true
+
+- name: Record LibreNMS writable path drift degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' has LibreNMS writable path ownership drift: '
+            ~ (
+              hostvars[item].librenms_status_writable_path_drift.stdout_lines
+              | default([])
+              | join('; ')
+            )
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_nodes }}"
+  when:
+    - librenms_status_writable_path_drift_enabled | bool
+    - >-
+      (
+        hostvars[item].librenms_status_writable_path_drift.stdout_lines
+        | default([])
+        | length
+      ) > 0
+  run_once: true
+
+- name: Record maintenance node service activity degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item.item.0 ~ ' is listed in maintenance_nodes but '
+            ~ item.item.1
+            ~ ' is still active.'
+          ]
+      }}
+  loop: "{{ librenms_status_maintenance_unit_activity.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.0 | default('unknown') }} {{ item.item.1 | default('unknown') }}"
+  when:
+    - librenms_status_maintenance_drift_enabled | bool
+    - not (item.unreachable | default(false))
+    - (item.stdout | default('')) == 'active'
+  run_once: true
+
+- name: Record missing VIP owner degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + ['VIP has no detected owner.']
+      }}
+  when:
+    - librenms_vip_enabled | bool
+    - (librenms_status_vip_owner | default('') | length) == 0
+  run_once: true
+
+- name: Record failed VIP probe degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            'VIP probe returned status '
+            ~ (librenms_status_vip_probe_result.status | default('not-probed') | string)
+            ~ '.'
+          ]
+      }}
+  when:
+    - librenms_vip_enabled | bool
+    - librenms_status_vip_probe_enabled | bool
+    - >-
+      (librenms_status_vip_probe_result.status | default(0) | int)
+      not in (librenms_status_vip_probe_statuses | map('int') | list)
+  run_once: true
+
+- name: Record load balancer service degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' load-balancer services are degraded: haproxy='
+            ~ (hostvars[item].librenms_status_haproxy_state | default('unknown'))
+            ~ ', keepalived='
+            ~ (hostvars[item].librenms_status_keepalived_state | default('unknown'))
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_lb_nodes }}"
+  when:
+    - >-
+      (hostvars[item].librenms_status_haproxy_state | default('unknown'))
+      != 'active'
+      or
+      (hostvars[item].librenms_status_keepalived_state | default('unknown'))
+      != 'active'
+  run_once: true
+
+- name: Record LibreNMS application service degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' application services are degraded: dispatcher='
+            ~ (hostvars[item].librenms_status_dispatcher_state | default('unknown'))
+            ~ ', scheduler='
+            ~ (hostvars[item].librenms_status_scheduler_state | default('unknown'))
+            ~ ', runtime='
+            ~ (hostvars[item].librenms_status_runtime_readiness | default('unknown'))
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_nodes }}"
+  when:
+    - >-
+      (hostvars[item].librenms_status_dispatcher_state | default('unknown'))
+      != 'active'
+      or
+      (hostvars[item].librenms_status_scheduler_state | default('unknown'))
+      != 'active'
+      or
+      (
+        hostvars[item].librenms_status_runtime_readiness | default('unknown')
+      )
+      not in ['ready', 'disabled', 'not-probed']
+  run_once: true
+
+- name: Record LibreNMS repair timer degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' HA repair timers are degraded: startup_repair='
+            ~ (hostvars[item].librenms_status_startup_repair_timer | default('unknown'))
+            ~ ', dispatcher_recover='
+            ~ (hostvars[item].librenms_status_dispatcher_recover_timer | default('unknown'))
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_nodes }}"
+  when:
+    - >-
+      (
+        librenms_startup_repair_enabled | bool
+        and
+        (hostvars[item].librenms_status_startup_repair_timer | default('unknown'))
+        != 'active/enabled'
+      )
+      or
+      (
+        librenms_dispatcher_failover_recovery_enabled | bool
+        and
+        (hostvars[item].librenms_status_dispatcher_recover_timer | default('unknown'))
+        != 'active/enabled'
+      )
+  run_once: true
+
+- name: Record dispatcher database query degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + ['Dispatcher database row query failed.']
+      }}
+  when:
+    - librenms_status_dispatcher_db_probe_enabled | bool
+    - (librenms_status_dispatcher_db_query_state | default('not-probed')) != 'ok'
+  run_once: true
+
+- name: Record missing dispatcher database rows
+  vars:
+    librenms_status_expected_node_id: "{{ hostvars[item].librenms_node_id | default(item) }}"
+    librenms_status_expected_node_rows: >-
+      {{
+        librenms_status_dispatcher_db_rows
+        | default([])
+        | selectattr('node_id', 'equalto', librenms_status_expected_node_id)
+        | list
+      }}
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' has no dispatcher row in poller_cluster for node_id '
+            ~ librenms_status_expected_node_id
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_nodes }}"
+  when:
+    - (librenms_status_dispatcher_db_query_state | default('not-probed')) == 'ok'
+    - (librenms_status_expected_node_rows | length) == 0
+  run_once: true
+
+- name: Record stale dispatcher database rows
+  vars:
+    librenms_status_expected_node_id: "{{ hostvars[item].librenms_node_id | default(item) }}"
+    librenms_status_expected_node_rows: >-
+      {{
+        librenms_status_dispatcher_db_rows
+        | default([])
+        | selectattr('node_id', 'equalto', librenms_status_expected_node_id)
+        | list
+      }}
+    librenms_status_expected_node_row: >-
+      {{ librenms_status_expected_node_rows | first | default({}) }}
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' dispatcher row is stale: node_id='
+            ~ librenms_status_expected_node_id
+            ~ ', age='
+            ~ (librenms_status_expected_node_row.age_seconds | default('unknown') | string)
+            ~ 's.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_nodes }}"
+  when:
+    - (librenms_status_dispatcher_db_query_state | default('not-probed')) == 'ok'
+    - (librenms_status_expected_node_rows | length) > 0
+    - (librenms_status_expected_node_row.active | default(0) | int) != 1
+  run_once: true
+
+- name: Record Galera degradation
+  vars:
+    librenms_status_galera_joined: >-
+      {{ hostvars[item].librenms_status_galera | default([]) | join('\n') }}
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' Galera is not Primary/Synced: '
+            ~ (hostvars[item].librenms_status_galera | default(['not-checked']) | join('; '))
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_db_nodes }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - not (librenms_status_galera_joined is search('wsrep_cluster_status[ \t]+Primary'))
+      or not (librenms_status_galera_joined is search('wsrep_ready[ \t]+ON'))
+      or not (librenms_status_galera_joined is search('wsrep_local_state_comment[ \t]+Synced'))
+  run_once: true
+
+- name: Collect Redis Sentinel master reports
+  set_fact:
+    librenms_status_redis_known_masters: >-
+      {{
+        librenms_status_redis_known_masters
+        + [hostvars[item].librenms_status_redis_master | default('unknown:unknown')]
+      }}
+  loop: "{{ librenms_status_active_redis_nodes }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - (hostvars[item].librenms_status_redis_master | default('unknown:unknown'))
+      not in ['unknown:unknown', 'unknown', 'not-checked']
+  run_once: true
+
+- name: Record Redis Sentinel missing report degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' did not report a Redis Sentinel master.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_redis_nodes }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - (hostvars[item].librenms_status_redis_master | default('unknown:unknown'))
+      in ['unknown:unknown', 'unknown', 'not-checked']
+  run_once: true
+
+- name: Record Redis Sentinel disagreement degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            'Redis Sentinels do not agree on one master: '
+            ~ (librenms_status_redis_known_masters | unique | join(', '))
+            ~ '.'
+          ]
+      }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - (librenms_status_redis_known_masters | unique | list | length) != 1
+  run_once: true
+
+- name: Record Gluster status degradation
+  vars:
+    librenms_status_first_gluster_node: >-
+      {{ librenms_status_active_gluster_nodes | first | default('') }}
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            'Gluster volume status command failed on '
+            ~ librenms_status_first_gluster_node
+            ~ '.'
+          ]
+      }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_status_first_gluster_node | length > 0
+    - >-
+      (
+        hostvars[librenms_status_first_gluster_node].librenms_status_gluster_raw.rc
+        | default(1)
+        | int
+      ) != 0
+  run_once: true
+
+- name: Build HA status alert payload
+  set_fact:
+    librenms_status_alert_payload:
+      name: "{{ librenms_status_alert_name }}"
+      status: >-
+        {{
+          'degraded'
+          if (librenms_status_degraded_reasons | length) > 0
+          else 'ok'
+        }}
+      degraded: "{{ (librenms_status_degraded_reasons | length) > 0 }}"
+      reasons: "{{ librenms_status_degraded_reasons }}"
+      vip:
+        enabled: "{{ librenms_vip_enabled | bool }}"
+        owner: "{{ librenms_status_vip_owner | default('not-detected') }}"
+        probe_status: "{{ librenms_status_vip_probe_result.status | default('not-probed') }}"
+      database:
+        endpoint: "{{ librenms_status_db_probe_host | default('unknown') }}:{{ librenms_db_port }}"
+        dispatcher_query_state: "{{ librenms_status_dispatcher_db_query_state | default('not-probed') }}"
+      redis:
+        sentinel_masters: "{{ librenms_status_redis_known_masters | default([]) | unique | list }}"
+      drift:
+        checked_units: "{{ librenms_status_unit_drift_enabled | bool }}"
+        checked_writable_paths: "{{ librenms_status_writable_path_drift_enabled | bool }}"
+        checked_maintenance_nodes: "{{ librenms_status_maintenance_drift_enabled | bool }}"
+        maintenance_nodes: "{{ librenms_status_maintenance_nodes | default([]) }}"
+      dispatcher_rows: "{{ librenms_status_dispatcher_db_rows | default([]) }}"
+  run_once: true
+
+- name: Report HA runtime status
+  debug:
+    msg: |
+      VIP:
+        enabled: {{ librenms_vip_enabled | bool }}
+        owner: {{ librenms_status_vip_owner | default('not-detected') }}
+        probe_status: {{ librenms_status_vip_probe_result.status | default('not-probed') }}
+
+      Load balancers:
+      {% for host in librenms_status_active_lb_nodes %}
+        - {{ host }}: haproxy={{ hostvars[host].librenms_status_haproxy_state | default('unknown') }}, keepalived={{ hostvars[host].librenms_status_keepalived_state | default('unknown') }}
+      {% endfor %}
+
+      LibreNMS application nodes:
+      {% for host in librenms_status_active_nodes %}
+        - {{ host }}: dispatcher={{ hostvars[host].librenms_status_dispatcher_state | default('unknown') }}, scheduler={{ hostvars[host].librenms_status_scheduler_state | default('unknown') }}, runtime={{ hostvars[host].librenms_status_runtime_readiness | default('unknown') }}, startup_repair={{ hostvars[host].librenms_status_startup_repair_timer | default('unknown') }}, dispatcher_recover={{ hostvars[host].librenms_status_dispatcher_recover_timer | default('unknown') }}
+      {% endfor %}
+
+      Systemd drift:
+      {% for host in librenms_status_managed_hosts %}
+        - {{ host }}: {{ hostvars[host].librenms_status_systemd_unit_drift.stdout_lines | default([]) | join('; ') | default('none', true) }}
+      {% endfor %}
+
+      Writable path drift:
+      {% for host in librenms_status_active_nodes %}
+        - {{ host }}: {{ hostvars[host].librenms_status_writable_path_drift.stdout_lines | default([]) | join('; ') | default('none', true) }}
+      {% endfor %}
+
+      Maintenance nodes:
+      {% for host in librenms_status_maintenance_nodes | default([]) %}
+        - {{ host }}
+      {% else %}
+        - none
+      {% endfor %}
+
+      Dispatcher database rows:
+        query_state: {{ librenms_status_dispatcher_db_query_state | default('not-probed') }}
+        db_endpoint: {{ librenms_status_db_probe_host | default('unknown') }}:{{ librenms_db_port }}
+      {% for row in librenms_status_dispatcher_db_rows | default([]) %}
+        - {{ row.node_id }}: active={{ row.active }}, age={{ row.age_seconds }}s, frequency={{ row.poller_frequency }}s, last_report={{ row.last_report }}
+      {% else %}
+        - none
+      {% endfor %}
+
+      Galera:
+      {% for host in librenms_status_active_db_nodes %}
+        - {{ host }}: {{ hostvars[host].librenms_status_galera | default(['not-checked']) | join('; ') }}
+      {% endfor %}
+
+      Redis Sentinel:
+      {% for host in librenms_status_active_redis_nodes %}
+        - {{ host }}: master={{ hostvars[host].librenms_status_redis_master | default('not-checked') }}
+      {% endfor %}
+
+      Gluster:
+        {{ hostvars[(librenms_status_active_gluster_nodes | first | default(inventory_hostname))].librenms_status_gluster | default(['not-checked']) | join('\n        ') }}
+
+      Degradation:
+        status: {{ librenms_status_alert_payload.status }}
+      {% for reason in librenms_status_degraded_reasons %}
+        - {{ reason }}
+      {% else %}
+        - none
+      {% endfor %}
+  run_once: true
+
+- name: Send HA status alert webhook
+  uri:
+    url: "{{ librenms_status_alert_webhook_url }}"
+    method: "{{ librenms_status_alert_webhook_method }}"
+    headers: "{{ librenms_status_alert_webhook_headers }}"
+    body_format: json
+    body: "{{ librenms_status_alert_payload }}"
+    status_code: "{{ librenms_status_alert_webhook_success_statuses }}"
+    timeout: "{{ librenms_status_alert_webhook_timeout | int }}"
+    validate_certs: "{{ librenms_status_alert_webhook_validate_certs | bool }}"
+  delegate_to: "{{ librenms_status_alert_webhook_delegate }}"
+  become: false
+  register: librenms_status_alert_webhook_result
+  changed_when: false
+  no_log: "{{ librenms_status_alert_webhook_no_log | bool }}"
+  when:
+    - librenms_status_alerts_enabled | bool
+    - librenms_status_alert_webhook_url | length > 0
+    - >-
+      (librenms_status_degraded_reasons | length) > 0
+      or librenms_status_alert_send_when_healthy | bool
+  run_once: true
+
+- name: Fail when HA status is degraded
+  assert:
+    that:
+      - (librenms_status_degraded_reasons | length) == 0
+    fail_msg: |-
+      LibreNMS HA status is degraded:
+      {{ librenms_status_degraded_reasons | join('\n') }}
+  when: librenms_status_alert_fail_on_degraded | bool
+  run_once: true

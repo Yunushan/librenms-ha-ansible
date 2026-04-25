@@ -1,0 +1,28 @@
+---
+- name: "Check route matrix - {{ librenms_doctor_network_route_name }}"
+  ansible.builtin.command:
+    argv:
+      - ip
+      - route
+      - get
+      - "{{ (hostvars[item.1] | default({})).ansible_host | default(item.1) }}"
+  delegate_to: "{{ item.0 }}"
+  loop: "{{ librenms_doctor_network_route_sources | product(librenms_doctor_network_route_destinations) | list }}"
+  register: librenms_doctor_network_route_matrix_result
+  changed_when: false
+  failed_when: false
+  run_once: true
+
+- name: "Validate route matrix - {{ librenms_doctor_network_route_name }}"
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >-
+      No routed path for {{ librenms_doctor_network_route_name }} from
+      {{ item.item.0 }} to {{ item.item.1 }}
+      ({{ (hostvars[item.item.1] | default({})).ansible_host | default(item.item.1) }}).
+      stderr={{ item.stderr | default('') }}
+  loop: "{{ librenms_doctor_network_route_matrix_result.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.0 }} -> {{ item.item.1 }}"
+  run_once: true

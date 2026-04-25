@@ -1,3 +1,8 @@
+[Unit]
+Wants=network-online.target remote-fs.target
+After=network-online.target remote-fs.target glusterd.service
+RequiresMountsFor={{ librenms_rrdcached_base_path }}
+
 [Service]
 Type=simple
 User=root

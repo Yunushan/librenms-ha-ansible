@@ -1798,6 +1798,19 @@
           {{ librenms_php_fpm_socket_config_test.stdout | default('') }}
           {{ librenms_php_fpm_socket_config_test.stderr | default('') }}
 
+- name: Deploy LibreNMS HA runtime wait script
+  template:
+    src: librenms-ha-runtime-wait.sh.j2
+    dest: "{{ librenms_dispatcher_runtime_wait_path }}"
+    owner: root
+    group: "{{ librenms_group }}"
+    mode: "0750"
+  no_log: true
+  notify: Restart LibreNMS dispatcher
+  when:
+    - librenms_dispatcher_runtime_wait_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
 - name: Deploy scheduler service file
   template:
     src: librenms-scheduler.service.j2
@@ -1873,6 +1886,41 @@
   notify: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Ensure LibreNMS dispatcher systemd override directory exists
+  file:
+    path: "{{ librenms_dispatcher_systemd_override_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_dispatcher_runtime_wait_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy LibreNMS dispatcher HA systemd override
+  template:
+    src: librenms-dispatcher.systemd-override.conf.j2
+    dest: "{{ librenms_dispatcher_systemd_override_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart LibreNMS dispatcher
+  when:
+    - librenms_manage_dispatcher | bool
+    - librenms_dispatcher_runtime_wait_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Remove LibreNMS dispatcher HA systemd override when disabled
+  file:
+    path: "{{ librenms_dispatcher_systemd_override_path }}"
+    state: absent
+  notify: Restart LibreNMS dispatcher
+  when:
+    - librenms_manage_dispatcher | bool
+    - not (librenms_dispatcher_runtime_wait_enabled | bool)
     - ansible_service_mgr == 'systemd'
 
 - name: Deploy LibreNMS dispatcher HA recovery script

@@ -1,0 +1,6 @@
+---
+- name: Bootstrap optional AWX project, inventory, and job templates
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: awx_bootstrap

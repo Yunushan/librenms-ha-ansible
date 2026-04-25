@@ -1,0 +1,21 @@
+---
+librenms_post_reboot_connection_timeout: 300
+librenms_post_reboot_connection_delay: 5
+librenms_post_reboot_service_retries: 24
+librenms_post_reboot_service_delay: 5
+librenms_post_reboot_runtime_retries: 24
+librenms_post_reboot_runtime_delay: 5
+librenms_post_reboot_vip_retries: 24
+librenms_post_reboot_vip_delay: 5
+librenms_post_reboot_galera_retries: 24
+librenms_post_reboot_galera_delay: 5
+librenms_post_reboot_redis_retries: 24
+librenms_post_reboot_redis_delay: 5
+librenms_post_reboot_gluster_retries: 24
+librenms_post_reboot_gluster_delay: 5
+librenms_post_reboot_dispatcher_db_retries: 24
+librenms_post_reboot_dispatcher_db_delay: 5
+librenms_post_reboot_fail_on_degraded: true
+librenms_post_reboot_vip_probe_path: "{{ librenms_app_probe_path }}"
+librenms_post_reboot_vip_probe_timeout: "{{ librenms_app_probe_timeout }}"
+librenms_post_reboot_vip_probe_statuses: "{{ librenms_app_probe_success_statuses }}"

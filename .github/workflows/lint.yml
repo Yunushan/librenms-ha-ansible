@@ -26,8 +26,14 @@ jobs:
       - name: Install Ansible collections
         run: ansible-galaxy collection install -r requirements.yml -p ~/.ansible/collections
 
+      - name: Run Python smoke checks
+        run: python scripts/ci-python-smoke.py
+
       - name: Run yamllint
         run: yamllint .
+
+      - name: Run Ansible syntax checks
+        run: python scripts/ci-ansible-syntax-check.py
 
       - name: Run ansible-lint
         run: ansible-lint

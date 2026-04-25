@@ -1,0 +1,65 @@
+---
+- name: Wait for Redis Sentinel writable master
+  no_log: true
+  shell: |
+    set -eu
+    sentinel_user_args=""
+    redis_user_args=""
+    if [ -n "$LIBRENMS_SENTINEL_USERNAME" ]; then
+      sentinel_user_args="--user $LIBRENMS_SENTINEL_USERNAME"
+    fi
+    if [ -n "$LIBRENMS_REDIS_USERNAME" ]; then
+      redis_user_args="--user $LIBRENMS_REDIS_USERNAME"
+    fi
+
+    master="$(
+      REDISCLI_AUTH="$LIBRENMS_SENTINEL_PASSWORD" redis-cli \
+        -h 127.0.0.1 \
+        -p 26379 \
+        ${sentinel_user_args} \
+        SENTINEL get-master-addr-by-name "$LIBRENMS_SENTINEL_SERVICE"
+    )"
+    master_host="$(printf '%s\n' "$master" | awk 'NR == 1 { print }')"
+    master_port="$(printf '%s\n' "$master" | awk 'NR == 2 { print }')"
+    test -n "$master_host"
+    test -n "$master_port"
+
+    node_name="$(hostname)"
+    key="librenms:ansible:maintenance:${node_name}:$$"
+    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+      -h "$master_host" \
+      -p "$master_port" \
+      -n "$LIBRENMS_REDIS_CACHE_DB" \
+      ${redis_user_args} \
+      SET "$key" ok EX 30 >/dev/null
+    value="$(
+      REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+        -h "$master_host" \
+        -p "$master_port" \
+        -n "$LIBRENMS_REDIS_CACHE_DB" \
+        ${redis_user_args} \
+        GET "$key"
+    )"
+    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+      -h "$master_host" \
+      -p "$master_port" \
+      -n "$LIBRENMS_REDIS_CACHE_DB" \
+      ${redis_user_args} \
+      DEL "$key" >/dev/null
+    test "$value" = ok
+  args:
+    executable: /bin/sh
+  environment:
+    LIBRENMS_SENTINEL_USERNAME: "{{ librenms_redis_sentinel_username }}"
+    LIBRENMS_SENTINEL_PASSWORD: "{{ librenms_redis_sentinel_password }}"
+    LIBRENMS_SENTINEL_SERVICE: "{{ librenms_redis_sentinel_service }}"
+    LIBRENMS_REDIS_USERNAME: "{{ librenms_redis_username }}"
+    LIBRENMS_REDIS_PASSWORD: "{{ librenms_redis_password }}"
+    LIBRENMS_REDIS_CACHE_DB: "{{ librenms_redis_cache_db | string }}"
+  delegate_to: "{{ librenms_maintenance_redis_probe_delegate }}"
+  register: librenms_maintenance_redis_write_check
+  changed_when: false
+  until: librenms_maintenance_redis_write_check.rc == 0
+  retries: "{{ librenms_maintenance_redis_retries | int }}"
+  delay: "{{ librenms_maintenance_redis_delay | int }}"
+  run_once: true

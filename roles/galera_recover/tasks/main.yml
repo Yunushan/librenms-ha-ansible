@@ -1,0 +1,698 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_galera_recover_common_vars_lookup) }}"
+  vars:
+    librenms_galera_recover_common_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Build Galera recovery host lists
+  set_fact:
+    librenms_galera_recover_db_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(groups.get('decommission_nodes', []))
+        | difference(groups.get('maintenance_nodes', []))
+      }}
+    librenms_galera_recover_app_nodes: >-
+      {{
+        groups.get('librenms_nodes', [])
+        | difference(groups.get('decommission_nodes', []))
+        | difference(groups.get('maintenance_nodes', []))
+      }}
+  run_once: true
+
+- name: Validate Galera recovery mode
+  assert:
+    that:
+      - librenms_mode == 'ha'
+      - librenms_db_mode == 'galera'
+      - librenms_galera_recover_db_nodes | length > 0
+      - librenms_galera_recover_tie_breaker in ['manual', 'first', 'configured_bootstrap']
+    fail_msg: >-
+      galera-recover.yml is only for HA deployments using Galera. Check
+      librenms_mode, librenms_db_mode, and the librenms_db inventory group.
+  run_once: true
+
+- name: Probe Galera nodes for an existing primary component
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ hostvars[item].librenms_mariadb_socket | default(librenms_mariadb_socket) }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+  loop: "{{ librenms_galera_recover_db_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_component_probe
+  failed_when: false
+  changed_when: false
+  ignore_unreachable: true
+  run_once: true
+
+- name: Initialize Galera recovery evidence
+  set_fact:
+    librenms_galera_recover_reachable_nodes: []
+    librenms_galera_recover_live_members: []
+    librenms_galera_recover_saved_states: []
+    librenms_galera_recover_recovered_positions: []
+  run_once: true
+
+- name: Record reachable Galera nodes
+  set_fact:
+    librenms_galera_recover_reachable_nodes: >-
+      {{ librenms_galera_recover_reachable_nodes + [item.item] }}
+  loop: "{{ librenms_galera_recover_component_probe.results | default([]) }}"
+  when: not (item.unreachable | default(false))
+  run_once: true
+
+- name: Record live Galera primary members
+  set_fact:
+    librenms_galera_recover_live_members: >-
+      {{ librenms_galera_recover_live_members + [item.item] }}
+  loop: "{{ librenms_galera_recover_component_probe.results | default([]) }}"
+  when:
+    - not (item.unreachable | default(false))
+    - (item.rc | default(1) | int) == 0
+    - item.stdout | default('') is search('wsrep_cluster_status[ \t]+Primary')
+    - item.stdout | default('') is search('wsrep_ready[ \t]+ON')
+  run_once: true
+
+- name: Abort when a Galera primary component already exists
+  fail:
+    msg: |-
+      Galera already has a live primary component:
+      {{ librenms_galera_recover_live_members }}
+
+      This playbook is for disaster bootstrap only. Use cluster.yml or
+      post-reboot.yml to rejoin unhealthy nodes to the existing primary
+      component.
+  when: (librenms_galera_recover_live_members | length) > 0
+  run_once: true
+
+- name: Fail when no Galera nodes are reachable
+  assert:
+    that:
+      - librenms_galera_recover_reachable_nodes | length > 0
+    fail_msg: >-
+      No Galera database nodes were reachable over SSH. Restore at least one DB
+      node before attempting disaster recovery.
+  run_once: true
+
+- name: Read Galera grastate.dat on reachable database nodes
+  shell: |-
+    set -eu
+    if [ ! -r /var/lib/mysql/grastate.dat ]; then
+      printf '{"safe_to_bootstrap":"","seqno":-999999999,"uuid":"","error":"missing_grastate"}\n'
+      exit 0
+    fi
+
+    awk -F': *' '
+      /^safe_to_bootstrap:/ { safe=$2 }
+      /^seqno:/ { seqno=$2 }
+      /^uuid:/ { uuid=$2 }
+      END {
+        if (seqno == "") { seqno=-999999999 }
+        printf "{\"safe_to_bootstrap\":\"%s\",\"seqno\":%d,\"uuid\":\"%s\",\"error\":\"\"}\n", safe, seqno, uuid
+      }
+    ' /var/lib/mysql/grastate.dat
+  args:
+    executable: /bin/sh
+  loop: "{{ librenms_galera_recover_reachable_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_grastate
+  changed_when: false
+  failed_when: false
+  run_once: true
+
+- name: Build Galera saved-state list
+  set_fact:
+    librenms_galera_recover_saved_states: >-
+      {{
+        librenms_galera_recover_saved_states
+        + [
+          (
+            item.stdout | from_json
+          )
+          | combine({'host': item.item})
+        ]
+      }}
+  loop: "{{ librenms_galera_recover_grastate.results | default([]) }}"
+  when:
+    - (item.rc | default(1) | int) == 0
+    - item.stdout | default('') is search('^\\{')
+  run_once: true
+
+- name: Stop LibreNMS workers before Galera disaster recovery
+  shell: |-
+    set -eu
+    for unit in \
+      librenms-scheduler.timer \
+      librenms-scheduler.service \
+      librenms-daily.timer \
+      librenms-daily.service \
+      librenms.service
+    do
+      if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        if systemctl is-active --quiet "$unit"; then
+          systemctl stop "$unit"
+        fi
+      fi
+    done
+  args:
+    executable: /bin/sh
+  loop: "{{ librenms_galera_recover_app_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_quiesce_workers
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when:
+    - librenms_galera_recover_confirm | bool
+    - librenms_galera_recover_quiesce_librenms_services | bool
+  run_once: true
+
+- name: Stop MariaDB before Galera recovered-position probes
+  service:
+    name: "{{ hostvars[item].librenms_mariadb_service_name | default(librenms_mariadb_service_name) }}"
+    state: stopped
+  loop: "{{ librenms_galera_recover_reachable_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_stop_mariadb
+  failed_when: false
+  when: librenms_galera_recover_confirm | bool
+  run_once: true
+
+- name: Wait for MariaDB processes to stop before recovery probes
+  shell: |-
+    seconds=0
+    while pgrep -x mariadbd >/dev/null; do
+      if [ "$seconds" -ge "{{ librenms_galera_recover_stop_timeout | int }}" ]; then
+        exit 1
+      fi
+      seconds=$((seconds + 1))
+      sleep 1
+    done
+  args:
+    executable: /bin/sh
+  loop: "{{ librenms_galera_recover_reachable_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_stop_wait
+  changed_when: false
+  failed_when: false
+  when: librenms_galera_recover_confirm | bool
+  run_once: true
+
+- name: Force kill stale MariaDB processes before recovery probes
+  command:
+    argv:
+      - pkill
+      - -KILL
+      - -x
+      - mariadbd
+  loop: >-
+    {{
+      librenms_galera_recover_stop_wait.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_force_kill
+  changed_when: librenms_galera_recover_force_kill.rc == 0
+  failed_when: false
+  when:
+    - librenms_galera_recover_confirm | bool
+    - librenms_galera_recover_force_kill_stale_mariadb | bool
+  run_once: true
+
+- name: Reset MariaDB unit state after forced recovery stop
+  command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ hostvars[item].librenms_mariadb_service_name | default(librenms_mariadb_service_name) }}"
+  loop: >-
+    {{
+      librenms_galera_recover_force_kill.results | default([])
+      | selectattr('rc', 'equalto', 0)
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_galera_recover_confirm | bool
+    - librenms_galera_recover_force_kill_stale_mariadb | bool
+  run_once: true
+
+- name: Confirm MariaDB stopped after forced recovery stop
+  command:
+    argv:
+      - pgrep
+      - -x
+      - mariadbd
+  loop: "{{ librenms_galera_recover_reachable_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_force_kill_check
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_galera_recover_confirm | bool
+    - librenms_galera_recover_force_kill_stale_mariadb | bool
+  run_once: true
+
+- name: Fail when MariaDB remains running after forced stop
+  fail:
+    msg: |-
+      MariaDB is still running after the forced recovery stop.
+
+      Process checks:
+      {{ librenms_galera_recover_force_kill_check.results | default([]) }}
+  when:
+    - librenms_galera_recover_confirm | bool
+    - librenms_galera_recover_force_kill_stale_mariadb | bool
+    - >-
+      (
+        librenms_galera_recover_force_kill_check.results | default([])
+        | selectattr('rc', 'equalto', 0)
+        | list
+        | length
+      ) > 0
+  run_once: true
+
+- name: Fail when MariaDB is still running before recovery probes
+  fail:
+    msg: |-
+      MariaDB did not stop on all reachable Galera nodes.
+
+      Stop wait results:
+      {{ librenms_galera_recover_stop_wait.results | default([]) }}
+
+      Refusing to run galera_recovery while mariadbd is still running. Stop the
+      listed processes manually, or rerun with
+      -e librenms_galera_recover_force_kill_stale_mariadb=true.
+  when:
+    - librenms_galera_recover_confirm | bool
+    - not (librenms_galera_recover_force_kill_stale_mariadb | bool)
+    - >-
+      (
+        librenms_galera_recover_stop_wait.results | default([])
+        | selectattr('rc', 'ne', 0)
+        | list
+        | length
+      ) > 0
+  run_once: true
+
+- name: Recover Galera positions on stopped database nodes
+  shell: |-
+    { galera_recovery 2>&1 || true; } | awk '
+      /Recovered position/ {
+        pos=$NF
+        gsub(/[;,]/, "", pos)
+      }
+      END {
+        if (pos == "") {
+          printf "{\"uuid\":\"\",\"seqno\":-999999999,\"error\":\"no_recovered_position\"}\n"
+          exit 0
+        }
+        split(pos, parts, ":")
+        printf "{\"uuid\":\"%s\",\"seqno\":%d,\"error\":\"\"}\n", parts[1], parts[2]
+      }'
+  args:
+    executable: /bin/sh
+  loop: "{{ librenms_galera_recover_reachable_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_positions_raw
+  changed_when: false
+  failed_when: false
+  when: librenms_galera_recover_confirm | bool
+  run_once: true
+
+- name: Build Galera recovered-position list
+  set_fact:
+    librenms_galera_recover_recovered_positions: >-
+      {{
+        librenms_galera_recover_recovered_positions
+        + [
+          (
+            item.stdout | from_json
+          )
+          | combine({'host': item.item})
+        ]
+      }}
+  loop: "{{ librenms_galera_recover_positions_raw.results | default([]) }}"
+  when:
+    - librenms_galera_recover_confirm | bool
+    - (item.rc | default(1) | int) == 0
+    - item.stdout | default('') is search('^\\{')
+  run_once: true
+
+- name: Determine Galera safe-to-bootstrap hosts
+  set_fact:
+    librenms_galera_recover_safe_hosts: >-
+      {{
+        librenms_galera_recover_saved_states
+        | selectattr('safe_to_bootstrap', 'equalto', '1')
+        | map(attribute='host')
+        | list
+      }}
+  run_once: true
+
+- name: Determine highest recovered Galera seqno
+  set_fact:
+    librenms_galera_recover_max_seqno: >-
+      {{
+        librenms_galera_recover_recovered_positions
+        | selectattr('error', 'equalto', '')
+        | map(attribute='seqno')
+        | map('int')
+        | list
+        | max
+      }}
+  when:
+    - librenms_galera_recover_recovered_positions | length > 0
+    - >-
+      (
+        librenms_galera_recover_recovered_positions
+        | selectattr('error', 'equalto', '')
+        | list
+        | length
+      ) > 0
+  run_once: true
+
+- name: Determine highest recovered Galera candidates
+  set_fact:
+    librenms_galera_recover_highest_candidates: >-
+      {{
+        librenms_galera_recover_recovered_positions
+        | selectattr('error', 'equalto', '')
+        | selectattr('seqno', 'equalto', librenms_galera_recover_max_seqno | int)
+        | list
+      }}
+  when: librenms_galera_recover_max_seqno is defined
+  run_once: true
+
+- name: Select Galera recovery bootstrap host
+  set_fact:
+    librenms_galera_recover_selected_host: >-
+      {{
+        librenms_galera_recover_safe_hosts[0]
+        if (librenms_galera_recover_safe_hosts | length) == 1
+        else
+        ''
+        if (librenms_galera_recover_safe_hosts | length) > 1
+        else
+        (
+          librenms_galera_recover_highest_candidates[0].host
+          if (librenms_galera_recover_highest_candidates | default([]) | length) == 1
+          else
+          (
+            librenms_db_bootstrap_host
+            if (
+              (librenms_galera_recover_highest_candidates | default([]) | length) > 1
+              and librenms_galera_recover_tie_breaker == 'configured_bootstrap'
+              and librenms_db_bootstrap_host in (
+                librenms_galera_recover_highest_candidates
+                | default([])
+                | map(attribute='host')
+                | list
+              )
+            )
+            else
+            (
+              (
+                librenms_galera_recover_highest_candidates
+                | default([])
+                | map(attribute='host')
+                | list
+                | first
+              )
+              if (
+                (librenms_galera_recover_highest_candidates | default([]) | length) > 1
+                and librenms_galera_recover_tie_breaker == 'first'
+              )
+              else ''
+            )
+          )
+        )
+      }}
+  run_once: true
+
+- name: Report Galera recovery evidence
+  debug:
+    msg: |-
+      Galera recovery evidence:
+
+      Reachable DB nodes:
+      {{ librenms_galera_recover_reachable_nodes }}
+
+      grastate.dat:
+      {{ librenms_galera_recover_saved_states }}
+
+      safe_to_bootstrap hosts:
+      {{ librenms_galera_recover_safe_hosts }}
+
+      galera_recovery positions:
+      {{ librenms_galera_recover_recovered_positions }}
+
+      Highest recovered candidates:
+      {{ librenms_galera_recover_highest_candidates | default([]) }}
+
+      Selected bootstrap host:
+      {{ librenms_galera_recover_selected_host | default('') }}
+
+      To execute recovery, rerun with:
+      -e librenms_galera_recover_confirm=true
+      -e librenms_galera_recover_bootstrap_host={{ librenms_galera_recover_selected_host | default('<selected-host>') }}
+  run_once: true
+
+- name: Require explicit recovery confirmation and selected host
+  assert:
+    that:
+      - librenms_galera_recover_confirm | bool
+      - librenms_galera_recover_selected_host | default('') | length > 0
+      - librenms_galera_recover_bootstrap_host | length > 0
+      - librenms_galera_recover_bootstrap_host == librenms_galera_recover_selected_host
+    fail_msg: |-
+      Refusing to bootstrap Galera without an explicit matching confirmation.
+
+      Selected bootstrap host:
+      {{ librenms_galera_recover_selected_host | default('') }}
+
+      Requested bootstrap host:
+      {{ librenms_galera_recover_bootstrap_host }}
+
+      If the selected host is correct, rerun with:
+      -e librenms_galera_recover_confirm=true
+      -e librenms_galera_recover_bootstrap_host={{ librenms_galera_recover_selected_host | default('<selected-host>') }}
+
+      If no host was selected, inspect the evidence above. For tied recovered
+      seqno values, set librenms_galera_recover_tie_breaker to
+      configured_bootstrap or first only after choosing that policy deliberately.
+      If galera_recovery positions are empty, rerun with
+      librenms_galera_recover_confirm=true so the playbook can stop MariaDB and
+      collect recovered seqno values from each reachable node.
+  run_once: true
+
+- name: Mark non-selected Galera nodes unsafe to bootstrap
+  replace:
+    path: /var/lib/mysql/grastate.dat
+    regexp: '^safe_to_bootstrap:.*$'
+    replace: 'safe_to_bootstrap: 0'
+  loop: "{{ librenms_galera_recover_reachable_nodes | difference([librenms_galera_recover_selected_host]) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_mark_unsafe
+  failed_when: false
+  run_once: true
+
+- name: Mark selected Galera bootstrap host safe
+  replace:
+    path: /var/lib/mysql/grastate.dat
+    regexp: '^safe_to_bootstrap:.*$'
+    replace: 'safe_to_bootstrap: 1'
+  delegate_to: "{{ librenms_galera_recover_selected_host }}"
+  run_once: true
+
+- name: Bootstrap Galera on selected recovery host
+  block:
+    - name: Run guarded Galera bootstrap command
+      shell: |-
+        set -euo pipefail
+
+        cleanup() {
+          systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
+        }
+        trap cleanup EXIT
+
+        systemctl reset-failed "{{ librenms_mariadb_service_name }}"
+        systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
+        systemctl set-environment MYSQLD_OPTS='--wsrep-cluster-address=gcomm://'
+        systemctl set-environment _WSREP_NEW_CLUSTER='--wsrep-new-cluster'
+        systemctl start "{{ librenms_mariadb_service_name }}"
+      args:
+        executable: /bin/bash
+      delegate_to: "{{ librenms_galera_recover_selected_host }}"
+      register: librenms_galera_recover_bootstrap_command
+      changed_when: librenms_galera_recover_bootstrap_command.rc == 0
+      async: "{{ librenms_galera_recover_bootstrap_timeout | int }}"
+      poll: 5
+
+    - name: Wait for MariaDB socket on selected bootstrap host
+      wait_for:
+        path: "{{ librenms_mariadb_socket }}"
+        timeout: "{{ librenms_galera_recover_wait_timeout | int }}"
+      delegate_to: "{{ librenms_galera_recover_selected_host }}"
+
+    - name: Verify selected bootstrap host formed a primary component
+      command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - "--socket={{ librenms_mariadb_socket }}"
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+      delegate_to: "{{ librenms_galera_recover_selected_host }}"
+      register: librenms_galera_recover_bootstrap_status
+      changed_when: false
+      retries: "{{ librenms_galera_recover_probe_retries | int }}"
+      delay: "{{ librenms_galera_recover_probe_delay | int }}"
+      until:
+        - librenms_galera_recover_bootstrap_status.stdout is search('wsrep_cluster_status[ \t]+Primary')
+        - librenms_galera_recover_bootstrap_status.stdout is search('wsrep_ready[ \t]+ON')
+  rescue:
+    - name: Capture MariaDB status after failed Galera recovery bootstrap
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_mariadb_service_name }}"
+          - --no-pager
+          - -l
+      delegate_to: "{{ librenms_galera_recover_selected_host }}"
+      register: librenms_galera_recover_bootstrap_service_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture MariaDB journal after failed Galera recovery bootstrap
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_mariadb_service_name }}"
+          - -n
+          - "120"
+          - --no-pager
+      delegate_to: "{{ librenms_galera_recover_selected_host }}"
+      register: librenms_galera_recover_bootstrap_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Galera recovery bootstrap diagnostics
+      fail:
+        msg: |-
+          Failed to bootstrap Galera on
+          {{ librenms_galera_recover_selected_host }}.
+
+          Bootstrap command:
+          {{ librenms_galera_recover_bootstrap_command | default({}) }}
+
+          systemctl status:
+          {{ librenms_galera_recover_bootstrap_service_status.stdout | default('') }}
+
+          journal:
+          {{ librenms_galera_recover_bootstrap_journal.stdout | default('') }}
+  run_once: true
+
+- name: Write Galera bootstrap marker after guarded recovery
+  file:
+    path: "{{ librenms_galera_bootstrap_marker }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ librenms_galera_recover_selected_host }}"
+  run_once: true
+
+- name: Start remaining Galera joiners after guarded recovery
+  service:
+    name: "{{ hostvars[item].librenms_mariadb_service_name | default(librenms_mariadb_service_name) }}"
+    state: started
+  loop: "{{ librenms_galera_recover_reachable_nodes | difference([librenms_galera_recover_selected_host]) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_start_joiners_result
+  failed_when: false
+  when: librenms_galera_recover_start_joiners | bool
+  run_once: true
+
+- name: Wait for recovered Galera nodes to join primary component
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ hostvars[item].librenms_mariadb_socket | default(librenms_mariadb_socket) }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+  loop: "{{ librenms_galera_recover_reachable_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_join_status
+  changed_when: false
+  retries: "{{ librenms_galera_recover_probe_retries | int }}"
+  delay: "{{ librenms_galera_recover_probe_delay | int }}"
+  until:
+    - librenms_galera_recover_join_status.rc == 0
+    - librenms_galera_recover_join_status.stdout is search('wsrep_cluster_status[ \t]+Primary')
+    - librenms_galera_recover_join_status.stdout is search('wsrep_ready[ \t]+ON')
+  when: librenms_galera_recover_start_joiners | bool
+  run_once: true
+
+- name: Resume LibreNMS workers after guarded Galera recovery
+  shell: |-
+    set -eu
+    for unit in \
+      librenms-daily.timer \
+      librenms-scheduler.timer \
+      librenms.service
+    do
+      if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        systemctl start "$unit" || true
+      fi
+    done
+  args:
+    executable: /bin/sh
+  loop: "{{ librenms_galera_recover_app_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recover_resume_workers
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when: librenms_galera_recover_resume_librenms_services | bool
+  run_once: true
+
+- name: Report guarded Galera recovery result
+  debug:
+    msg: |-
+      Guarded Galera recovery completed.
+
+      Bootstrap host:
+      {{ librenms_galera_recover_selected_host }}
+
+      Joined nodes checked:
+      {{ librenms_galera_recover_reachable_nodes }}
+
+      Next steps:
+      1. Run playbooks/post-reboot.yml.
+      2. Run playbooks/validate.yml.
+      3. Investigate any unreachable DB nodes before returning them to service.
+  run_once: true

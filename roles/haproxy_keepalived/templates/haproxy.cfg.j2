@@ -1,4 +1,4 @@
-{% set librenms_prebootstrap_web_nodes = groups.get('librenms_primary', []) | difference(groups.get('decommission_nodes', [])) %}
+{% set librenms_prebootstrap_web_nodes = groups.get('librenms_primary', []) | difference(librenms_inactive_inventory_nodes) %}
 {% set librenms_haproxy_web_backend_nodes =
   (
     librenms_prebootstrap_web_nodes
@@ -25,7 +25,7 @@
   ~ ' rise ' ~ librenms_haproxy_db_check_rise
 %}
 {% set librenms_haproxy_rrdcached_backend_nodes =
-  groups.get('librenms_nodes', []) | difference(groups.get('decommission_nodes', []))
+  groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes)
 %}
 {% set librenms_haproxy_rrdcached_default_server =
   'inter ' ~ librenms_haproxy_rrdcached_check_interval

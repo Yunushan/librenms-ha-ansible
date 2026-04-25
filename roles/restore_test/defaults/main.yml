@@ -1,0 +1,7 @@
+---
+librenms_restore_test_backup_dir: ""
+librenms_restore_test_host: ""
+librenms_restore_test_manifest_filename: manifest.yml
+librenms_restore_test_require_database: true
+librenms_restore_test_require_config: true
+librenms_restore_test_require_rrd: false

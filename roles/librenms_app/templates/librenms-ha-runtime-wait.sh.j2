@@ -1,0 +1,167 @@
+#!/bin/bash
+set -u
+
+LIBRENMS_DIR={{ librenms_install_dir | quote }}
+RRD_MODE={{ librenms_rrd_mode | quote }}
+RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
+
+WAIT_TIMEOUT={{ librenms_dispatcher_runtime_wait_timeout | int }}
+WAIT_DELAY={{ librenms_dispatcher_runtime_wait_delay | int }}
+COMMAND_TIMEOUT={{ librenms_dispatcher_runtime_wait_command_timeout | int }}
+WAIT_DB={{ (librenms_dispatcher_runtime_wait_db | bool) | ternary('1', '0') }}
+WAIT_REDIS={{ (librenms_dispatcher_runtime_wait_redis | bool) | ternary('1', '0') }}
+WAIT_RRD={{ (librenms_dispatcher_runtime_wait_rrd | bool) | ternary('1', '0') }}
+
+DB_HOST={{ librenms_db_host_effective | quote }}
+DB_PORT={{ librenms_db_port | quote }}
+DB_NAME={{ librenms_db_name | quote }}
+DB_USER={{ librenms_db_user | quote }}
+DB_PASSWORD={{ librenms_db_password | quote }}
+
+REDIS_MODE={{ librenms_redis_mode | quote }}
+REDIS_HOST={{ librenms_redis_host_effective | quote }}
+REDIS_PORT={{ (librenms_redis_external_port if librenms_redis_mode == 'external' else 6379) | quote }}
+REDIS_PASSWORD={{ librenms_redis_password | quote }}
+REDIS_USERNAME={{ librenms_redis_username | quote }}
+REDIS_SENTINEL_ENDPOINTS={{ librenms_redis_sentinel_effective | quote }}
+REDIS_SENTINEL_SERVICE={{ librenms_redis_sentinel_service | quote }}
+REDIS_SENTINEL_PASSWORD={{ librenms_redis_sentinel_password | quote }}
+REDIS_SENTINEL_USERNAME={{ librenms_redis_sentinel_username | quote }}
+
+log() {
+  echo "librenms-ha-runtime-wait: $*"
+}
+
+redis_cli() {
+  local auth=$1
+  shift
+
+  if [ -n "${auth}" ]; then
+    REDISCLI_AUTH="${auth}" timeout "${COMMAND_TIMEOUT}" redis-cli "$@"
+  else
+    timeout "${COMMAND_TIMEOUT}" redis-cli "$@"
+  fi
+}
+
+check_rrd_mount() {
+  [ "${WAIT_RRD}" = "1" ] || return 0
+  [ "${RRD_MODE}" = "glusterfs" ] || return 0
+
+  findmnt --target "${RRD_PATH}" >/dev/null 2>&1 && return 0
+  mount "${RRD_PATH}" >/dev/null 2>&1 || true
+  findmnt --target "${RRD_PATH}" >/dev/null 2>&1
+}
+
+check_database() {
+  local output
+
+  [ "${WAIT_DB}" = "1" ] || return 0
+
+  output=$(
+    MYSQL_PWD="${DB_PASSWORD}" timeout "${COMMAND_TIMEOUT}" mysql \
+      -h "${DB_HOST}" \
+      -P "${DB_PORT}" \
+      -u "${DB_USER}" \
+      --connect-timeout="${COMMAND_TIMEOUT}" \
+      "${DB_NAME}" \
+      -Nse "SELECT 1" 2>/dev/null
+  ) || return 1
+
+  [ "${output}" = "1" ]
+}
+
+check_direct_redis() {
+  local args=("-h" "${REDIS_HOST}" "-p" "${REDIS_PORT}")
+  local output
+
+  if [ -n "${REDIS_USERNAME}" ]; then
+    args+=("--user" "${REDIS_USERNAME}")
+  fi
+
+  output=$(redis_cli "${REDIS_PASSWORD}" "${args[@]}" PING 2>/dev/null) || return 1
+  [ "${output}" = "PONG" ]
+}
+
+check_sentinel_redis() {
+  local endpoint
+  local sentinel_host
+  local sentinel_port
+  local master_output
+  local master_host
+  local master_port
+  local sentinel_args
+  local redis_args
+  local output
+
+  IFS=',' read -r -a sentinel_endpoints <<< "${REDIS_SENTINEL_ENDPOINTS}"
+  for endpoint in "${sentinel_endpoints[@]}"; do
+    endpoint=${endpoint//[[:space:]]/}
+    [ -n "${endpoint}" ] || continue
+
+    sentinel_host=${endpoint%%:*}
+    sentinel_port=${endpoint##*:}
+    sentinel_args=("-h" "${sentinel_host}" "-p" "${sentinel_port}")
+    if [ -n "${REDIS_SENTINEL_USERNAME}" ]; then
+      sentinel_args+=("--user" "${REDIS_SENTINEL_USERNAME}")
+    fi
+
+    master_output=$(
+      redis_cli "${REDIS_SENTINEL_PASSWORD}" "${sentinel_args[@]}" \
+        SENTINEL get-master-addr-by-name "${REDIS_SENTINEL_SERVICE}" 2>/dev/null
+    ) || continue
+
+    master_host=$(printf '%s\n' "${master_output}" | sed -n '1p')
+    master_port=$(printf '%s\n' "${master_output}" | sed -n '2p')
+    [ -n "${master_host}" ] && [ -n "${master_port}" ] || continue
+
+    redis_args=("-h" "${master_host}" "-p" "${master_port}")
+    if [ -n "${REDIS_USERNAME}" ]; then
+      redis_args+=("--user" "${REDIS_USERNAME}")
+    fi
+
+    output=$(redis_cli "${REDIS_PASSWORD}" "${redis_args[@]}" PING 2>/dev/null) || continue
+    [ "${output}" = "PONG" ] && return 0
+  done
+
+  return 1
+}
+
+check_redis() {
+  [ "${WAIT_REDIS}" = "1" ] || return 0
+
+  if [ "${REDIS_MODE}" = "sentinel" ]; then
+    check_sentinel_redis
+  else
+    check_direct_redis
+  fi
+}
+
+deadline=$((SECONDS + WAIT_TIMEOUT))
+
+while true; do
+  pending=0
+
+  if ! check_rrd_mount; then
+    log "waiting for RRD mount ${RRD_PATH}"
+    pending=1
+  fi
+
+  if ! check_database; then
+    log "waiting for database ${DB_HOST}:${DB_PORT}"
+    pending=1
+  fi
+
+  if ! check_redis; then
+    log "waiting for Redis runtime path"
+    pending=1
+  fi
+
+  [ "${pending}" -eq 0 ] && exit 0
+
+  if [ "${SECONDS}" -ge "${deadline}" ]; then
+    log "runtime dependencies were not ready after ${WAIT_TIMEOUT}s"
+    exit 1
+  fi
+
+  sleep "${WAIT_DELAY}"
+done

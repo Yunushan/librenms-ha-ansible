@@ -1,5 +1,19 @@
 ---
 repos:
+  - repo: local
+    hooks:
+      - id: python-smoke
+        name: Python smoke checks
+        entry: python scripts/ci-python-smoke.py
+        language: system
+        pass_filenames: false
+        files: >-
+          (?x)^(
+            scripts/.*\.py|
+            .*\.ya?ml|
+            .*\.md
+          )$
+
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.36.0
     hooks:

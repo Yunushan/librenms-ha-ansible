@@ -4,7 +4,7 @@
   )
   if inventory_hostname in (
     groups.get('lb_nodes', [])
-    | difference(groups.get('decommission_nodes', []))
+    | difference(librenms_inactive_inventory_nodes)
   )
   else '80'
 %}

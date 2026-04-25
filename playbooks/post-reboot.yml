@@ -1,0 +1,24 @@
+---
+- name: Wait for managed LibreNMS HA nodes after reboot
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes
+  become: false
+  gather_facts: false
+  vars:
+    librenms_post_reboot_connection_timeout: 300
+    librenms_post_reboot_connection_delay: 5
+  tasks:
+    - name: Wait for SSH after reboot
+      wait_for_connection:
+        timeout: "{{ librenms_post_reboot_connection_timeout | int }}"
+        delay: "{{ librenms_post_reboot_connection_delay | int }}"
+
+- name: Wait for LibreNMS HA post-reboot convergence
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: post_reboot
+    - role: ha_status
+      vars:
+        librenms_status_alert_fail_on_degraded: >-
+          {{ librenms_post_reboot_fail_on_degraded | default(true) | bool }}

@@ -12,10 +12,29 @@ Thank you for improving this project.
 
 ## Before opening a pull request
 
-1. run `yamllint .`
-2. run `ansible-lint`
-3. update relevant docs
-4. explain any distro-specific package or service assumptions in the PR
+1. run `python scripts/ci-python-smoke.py` from Windows, or
+   `python3 scripts/ci-python-smoke.py` from Linux/WSL
+2. run `yamllint .`
+3. run `ansible-lint`
+4. run `python scripts/ci-ansible-syntax-check.py` or
+   `python3 scripts/ci-ansible-syntax-check.py` from a controller with
+   `ansible-playbook`
+5. update relevant docs
+6. explain any distro-specific package or service assumptions in the PR
+
+You can install the same local guardrails as pre-commit hooks:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+The local `python-smoke` hook does not require Ansible. The yamllint and
+ansible-lint hooks still require their normal Python packages and Ansible
+dependencies.
+
+Before merging large operational changes or tagging a release, use
+[docs/release-checklist.md](docs/release-checklist.md).
 
 ## Style
 

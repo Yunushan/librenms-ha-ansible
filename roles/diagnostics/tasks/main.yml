@@ -1,0 +1,391 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_diagnostics_common_vars_lookup) }}"
+  vars:
+    librenms_diagnostics_common_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Determine diagnostics run id
+  set_fact:
+    librenms_diagnostics_run_id_seed: "{{ ansible_date_time.iso8601_basic_short }}"
+  run_once: true
+
+- name: Set diagnostics paths
+  set_fact:
+    librenms_diagnostics_run_id_effective: >-
+      {{
+        hostvars[(ansible_play_hosts | first)].librenms_diagnostics_run_id_seed
+        | default(ansible_date_time.iso8601_basic_short)
+      }}
+    librenms_diagnostics_host_dir: >-
+      {{ librenms_diagnostics_remote_base_dir }}/{{ hostvars[(ansible_play_hosts | first)].librenms_diagnostics_run_id_seed | default(ansible_date_time.iso8601_basic_short) }}/{{ inventory_hostname }}
+    librenms_diagnostics_remote_archive: >-
+      {{ librenms_diagnostics_remote_base_dir }}/{{ hostvars[(ansible_play_hosts | first)].librenms_diagnostics_run_id_seed | default(ansible_date_time.iso8601_basic_short) }}-{{ inventory_hostname }}.tar.gz
+
+- name: Create diagnostics directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ librenms_diagnostics_host_dir }}"
+    - "{{ librenms_diagnostics_host_dir }}/commands"
+    - "{{ librenms_diagnostics_host_dir }}/journals"
+    - "{{ librenms_diagnostics_host_dir }}/configs"
+    - "{{ librenms_diagnostics_host_dir }}/logs"
+
+- name: Write diagnostics metadata
+  copy:
+    dest: "{{ librenms_diagnostics_host_dir }}/metadata.txt"
+    owner: root
+    group: root
+    mode: "0640"
+    content: |
+      run_id={{ librenms_diagnostics_run_id_effective }}
+      host={{ inventory_hostname }}
+      ansible_host={{ ansible_host | default('') }}
+      distribution={{ ansible_distribution }} {{ ansible_distribution_version }}
+      os_family={{ ansible_os_family }}
+      kernel={{ ansible_kernel }}
+      service_mgr={{ ansible_service_mgr }}
+      librenms_mode={{ librenms_mode }}
+      db_mode={{ librenms_db_mode }}
+      redis_mode={{ librenms_redis_mode }}
+      rrd_mode={{ librenms_rrd_mode }}
+      vip_enabled={{ librenms_vip_enabled | bool }}
+      vip={{ librenms_vip_ip }}/{{ librenms_vip_cidr }}
+      inventory_groups={{ group_names | join(',') }}
+
+- name: Collect general command output
+  shell: |
+    set +e
+    {
+      echo "$ {{ item.cmd }}"
+      timeout {{ librenms_diagnostics_command_timeout | int }}s sh -c {{ item.cmd | quote }}
+      rc=$?
+      echo
+      echo "exit_code=${rc}"
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/' ~ item.file) | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+  loop:
+    - file: hostnamectl.txt
+      cmd: hostnamectl
+    - file: uptime.txt
+      cmd: uptime
+    - file: timedatectl.txt
+      cmd: timedatectl
+    - file: free.txt
+      cmd: free -m
+    - file: df.txt
+      cmd: df -hT
+    - file: mounts.txt
+      cmd: mount
+    - file: ip-addresses.txt
+      cmd: ip -o addr show
+    - file: ip-routes.txt
+      cmd: ip route show table all
+    - file: listeners.txt
+      cmd: ss -ltnup
+    - file: processes.txt
+      cmd: ps -eo pid,ppid,user,stat,pcpu,pmem,comm,args --sort=-pcpu | head -120
+    - file: systemctl-failed.txt
+      cmd: systemctl --failed --no-pager -l
+    - file: systemctl-timers.txt
+      cmd: systemctl list-timers --all --no-pager
+
+- name: Collect systemd unit status
+  shell: |
+    set +e
+    {
+      for unit in {% for unit in librenms_diagnostics_service_units | reject('equalto', '') | unique | list %}{{ unit | quote }} {% endfor %}; do
+        echo "### ${unit}"
+        systemctl status "${unit}" --no-pager -l || true
+        echo
+        echo "is-active=$(systemctl is-active "${unit}" 2>/dev/null || true)"
+        echo "is-enabled=$(systemctl is-enabled "${unit}" 2>/dev/null || true)"
+        echo
+      done
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/systemd-units.txt') | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+  when: ansible_service_mgr == 'systemd'
+
+- name: Collect systemd unit definitions
+  shell: |
+    set +e
+    {
+      for unit in {% for unit in librenms_diagnostics_service_units | reject('equalto', '') | unique | list %}{{ unit | quote }} {% endfor %}; do
+        echo "### ${unit}"
+        systemctl cat "${unit}" --no-pager || true
+        echo
+      done
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/systemd-cat.txt') | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+  when: ansible_service_mgr == 'systemd'
+
+- name: Collect recent systemd journals
+  shell: |
+    set +e
+    journalctl -u {{ item | quote }} -n {{ librenms_diagnostics_journal_lines | int }} --no-pager -o short-iso \
+      > {{ (librenms_diagnostics_host_dir ~ '/journals/' ~ (item | regex_replace('[^A-Za-z0-9_.-]', '_')) ~ '.log') | quote }} 2>&1 || true
+    exit 0
+  args:
+    executable: /bin/sh
+  loop: "{{ librenms_diagnostics_service_units | reject('equalto', '') | unique | list }}"
+  changed_when: false
+  failed_when: false
+  when: ansible_service_mgr == 'systemd'
+
+- name: Collect sanitized configuration snippets
+  shell: |
+    set +e
+    sanitize() {
+      awk '
+        {
+          line = $0
+          lower = tolower(line)
+          if (lower ~ /(password|passwd|secret|token|app_key|auth_pass|authpass|priv_pass|privpass|community|requirepass|masterauth|rediscli_auth|private_key|certificate_key)/) {
+            if (line ~ /=/) {
+              sub(/=.*/, "=REDACTED", line)
+            } else if (line ~ /:/) {
+              sub(/:.*/, ": REDACTED", line)
+            } else {
+              line = "[REDACTED]"
+            }
+          }
+          print line
+        }
+      ' "$1"
+    }
+    for file in {% for path in librenms_diagnostics_config_files | reject('equalto', '') | unique | list %}{{ path | quote }} {% endfor %}; do
+      [ -r "${file}" ] || continue
+      safe_name="$(printf '%s' "${file}" | sed 's#^/##; s#[^A-Za-z0-9_.-]#_#g')"
+      {
+        echo "### ${file}"
+        sanitize "${file}"
+      } > "{{ librenms_diagnostics_host_dir }}/configs/${safe_name}.txt" 2>&1 || true
+    done
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+  when: librenms_diagnostics_collect_config_snippets | bool
+
+- name: Collect LibreNMS logs
+  shell: |
+    set +e
+    for file in \
+      {{ (librenms_install_dir ~ '/logs/librenms.log') | quote }} \
+      {{ (librenms_install_dir ~ '/logs/laravel.log') | quote }} \
+      {{ (librenms_install_dir ~ '/logs/daily.log') | quote }} \
+      {{ (librenms_install_dir ~ '/logs/poller.log') | quote }}; do
+      [ -r "${file}" ] || continue
+      safe_name="$(basename "${file}")"
+      tail -n {{ librenms_diagnostics_log_lines | int }} "${file}" \
+        > "{{ librenms_diagnostics_host_dir }}/logs/${safe_name}" 2>&1 || true
+    done
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+
+- name: Collect LibreNMS validation output
+  shell: |
+    set +e
+    cd {{ librenms_install_dir | quote }} || exit 0
+    if command -v runuser >/dev/null 2>&1; then
+      timeout {{ librenms_diagnostics_command_timeout | int }}s runuser -u {{ librenms_user | quote }} -- php validate.php
+    else
+      timeout {{ librenms_diagnostics_command_timeout | int }}s su -s /bin/sh {{ librenms_user | quote }} -c 'php validate.php'
+    fi
+    echo
+    echo "exit_code=$?"
+    exit 0
+  args:
+    executable: /bin/sh
+  register: librenms_diagnostics_validate_output
+  changed_when: false
+  failed_when: false
+  when: librenms_diagnostics_collect_validate | bool
+
+- name: Save LibreNMS validation output
+  copy:
+    dest: "{{ librenms_diagnostics_host_dir }}/commands/librenms-validate.txt"
+    owner: root
+    group: root
+    mode: "0640"
+    content: "{{ librenms_diagnostics_validate_output.stdout | default('validate.php was not run') }}\n{{ librenms_diagnostics_validate_output.stderr | default('') }}"
+  when: librenms_diagnostics_collect_validate | bool
+
+- name: Collect Galera state
+  shell: |
+    set +e
+    {
+      echo "$ mysql Galera status"
+      mysql --protocol=socket --socket={{ librenms_mariadb_socket | quote }} -e "SHOW GLOBAL STATUS WHERE Variable_name LIKE 'wsrep_%';"
+      echo
+      echo "$ grastate.dat"
+      cat /var/lib/mysql/grastate.dat 2>/dev/null || true
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/galera-state.txt') | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+  when: librenms_db_mode == 'galera'
+
+- name: Collect Redis state
+  no_log: true
+  shell: |
+    set +e
+    {
+      echo "$ redis PING"
+      redis-cli -h 127.0.0.1 -p 6379 {% if librenms_redis_username | length > 0 %}--user {{ librenms_redis_username | quote }}{% endif %} PING || true
+      echo
+      echo "$ redis INFO replication"
+      redis-cli -h 127.0.0.1 -p 6379 {% if librenms_redis_username | length > 0 %}--user {{ librenms_redis_username | quote }}{% endif %} INFO replication || true
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/redis-state.txt') | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  changed_when: false
+  failed_when: false
+  when: librenms_redis_mode in ['local', 'sentinel']
+
+- name: Collect Redis Sentinel state
+  no_log: true
+  shell: |
+    set +e
+    {
+      echo
+      echo "$ sentinel master"
+      redis-cli -h 127.0.0.1 -p 26379 {% if librenms_redis_sentinel_username | length > 0 %}--user {{ librenms_redis_sentinel_username | quote }}{% endif %} SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }} || true
+      echo
+      echo "$ sentinel sentinels"
+      redis-cli -h 127.0.0.1 -p 26379 {% if librenms_redis_sentinel_username | length > 0 %}--user {{ librenms_redis_sentinel_username | quote }}{% endif %} SENTINEL sentinels {{ librenms_redis_sentinel_service | quote }} || true
+      echo
+      echo "$ sentinel replicas"
+      redis-cli -h 127.0.0.1 -p 26379 {% if librenms_redis_sentinel_username | length > 0 %}--user {{ librenms_redis_sentinel_username | quote }}{% endif %} SENTINEL replicas {{ librenms_redis_sentinel_service | quote }} || true
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/redis-sentinel-state.txt') | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+  changed_when: false
+  failed_when: false
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Collect Gluster state
+  shell: |
+    set +e
+    {
+      echo "$ gluster peer status"
+      gluster peer status || true
+      echo
+      echo "$ gluster volume info"
+      gluster volume info {{ librenms_gluster_volume_name | quote }} || true
+      echo
+      echo "$ gluster volume status"
+      gluster volume status {{ librenms_gluster_volume_name | quote }} || true
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/gluster-state.txt') | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+  when: librenms_rrd_mode == 'glusterfs'
+
+- name: Collect HAProxy runtime state
+  shell: |
+    set +e
+    {
+      if ! command -v socat >/dev/null 2>&1; then
+        echo "socat is not installed; cannot query HAProxy runtime socket."
+        exit 0
+      fi
+      found=0
+      for sock in /run/haproxy/admin.sock /run/haproxy.sock /run/haproxy-master.sock; do
+        [ -S "${sock}" ] || continue
+        found=1
+        echo "### ${sock}: show info"
+        printf 'show info\n' | socat - "UNIX-CONNECT:${sock}" || true
+        echo
+        echo "### ${sock}: show stat"
+        printf 'show stat\n' | socat - "UNIX-CONNECT:${sock}" || true
+        echo
+      done
+      [ "${found}" = "1" ] || echo "No known HAProxy runtime socket was found."
+    } > {{ (librenms_diagnostics_host_dir ~ '/commands/haproxy-runtime.txt') | quote }} 2>&1
+    exit 0
+  args:
+    executable: /bin/sh
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_diagnostics_collect_haproxy_runtime | bool
+    - inventory_hostname in groups.get('lb_nodes', [])
+
+- name: Create diagnostics archive
+  shell: |
+    set -e
+    tar -C {{ (librenms_diagnostics_host_dir | dirname) | quote }} \
+      -czf {{ librenms_diagnostics_remote_archive | quote }} \
+      {{ inventory_hostname | quote }}
+  args:
+    executable: /bin/sh
+  changed_when: false
+
+- name: Fetch diagnostics archive
+  fetch:
+    src: "{{ librenms_diagnostics_remote_archive }}"
+    dest: "{{ librenms_diagnostics_local_dir }}/{{ librenms_diagnostics_run_id_effective }}/"
+    flat: true
+  when: librenms_diagnostics_fetch | bool
+
+- name: Remove remote diagnostics bundle
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ librenms_diagnostics_host_dir }}"
+    - "{{ librenms_diagnostics_remote_archive }}"
+  when:
+    - librenms_diagnostics_fetch | bool
+    - not (librenms_diagnostics_keep_remote | bool)
+
+- name: Report diagnostics archive
+  debug:
+    msg: >-
+      Diagnostics archive for {{ inventory_hostname }}:
+      {{
+        librenms_diagnostics_local_dir
+        ~ '/'
+        ~ librenms_diagnostics_run_id_effective
+        ~ '/'
+        ~ (librenms_diagnostics_remote_archive | basename)
+        if librenms_diagnostics_fetch | bool
+        else librenms_diagnostics_remote_archive
+      }}

@@ -1,0 +1,10 @@
+[Unit]
+Wants=network-online.target remote-fs.target
+After=network-online.target remote-fs.target glusterd.service mariadb.service haproxy.service redis-server.service redis-sentinel.service
+RequiresMountsFor={{ librenms_install_dir }}{% if librenms_rrd_mode == 'glusterfs' %} {{ librenms_install_dir }}/rrd{% endif %}
+StartLimitIntervalSec=0
+
+[Service]
+ExecStartPre={{ librenms_dispatcher_runtime_wait_path }}
+Restart=always
+RestartSec={{ librenms_dispatcher_restart_sec }}

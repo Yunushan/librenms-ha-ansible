@@ -19,15 +19,9 @@ Upstream references:
 - [AWX Operator basic install](https://docs.ansible.com/projects/awx-operator/en/latest/installation/basic-install.html)
 - [AWX network and TLS configuration](https://docs.ansible.com/projects/awx-operator/en/latest/user-guide/network-and-tls-configuration.html)
 
-It does not automatically import this repository into AWX or create job templates. After AWX is online, create a Project, Inventory, Machine Credential, and Job Templates for the playbooks you want operators to run.
-
-Useful job templates usually include:
-
-- `playbooks/cluster.yml`
-- `playbooks/standalone.yml`
-- `playbooks/validate.yml`
-- `playbooks/add-node.yml`
-- `playbooks/remove-node.yml`
+It does not automatically import this repository into AWX or create job
+templates. After AWX is online, create a Project, Inventory, Machine
+Credential, Vault Credential if needed, and the operational Job Templates below.
 
 ## Inventory
 
@@ -146,17 +140,164 @@ awx_controller_loadbalancer_port: 80
 
 Add TLS at your ingress, load balancer, or reverse proxy. The AWX role does not manage certificates.
 
+## Optional AWX content bootstrap
+
+After AWX is reachable, you can either create the Project, Inventory, and Job
+Templates manually from the sections below, or let this repo create the baseline
+objects through the AWX API.
+
+Minimal bootstrap variables:
+
+```yaml
+awx_bootstrap_api_url: http://awx.example.com
+awx_bootstrap_username: admin
+awx_bootstrap_password: CHANGE_ME
+awx_bootstrap_project_scm_url: https://github.com/example/librenms-ha-ansible.git
+awx_bootstrap_project_scm_branch: main
+```
+
+Run:
+
+```bash
+make awx-bootstrap
+```
+
+or explicitly:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/awx-bootstrap.yml \
+  -e awx_bootstrap_api_url=http://awx.example.com \
+  -e awx_bootstrap_username=admin \
+  -e awx_bootstrap_password=CHANGE_ME \
+  -e awx_bootstrap_project_scm_url=https://github.com/example/librenms-ha-ansible.git
+```
+
+For production, store `awx_bootstrap_password` or `awx_bootstrap_oauth_token`
+with Ansible Vault. If AWX already has a Machine Credential, attach it to the
+templates by name:
+
+```yaml
+awx_bootstrap_job_template_credential_names:
+  - LibreNMS HA SSH
+```
+
+If no credential names are supplied, the generated templates prompt for a
+credential at launch. The bootstrap also creates an SCM inventory source pointed
+at `inventories/ha/hosts.yml` by default:
+
+```yaml
+awx_bootstrap_inventory_source_path: inventories/ha/hosts.yml
+```
+
+Set `awx_bootstrap_execution_environment_name` to attach an existing execution
+environment to every generated Job Template.
+
 ## AWX setup after deployment
 
-Inside AWX:
+Inside AWX, manually create or review these objects:
 
 1. Add a Project pointing at this Git repository.
 2. Add an Inventory matching the target LibreNMS topology.
 3. Add a Machine Credential with SSH access to the managed hosts.
-4. Create Job Templates for the playbooks operators should run.
-5. Use AWX RBAC to separate day-2 operations from full cluster administration.
+4. Add a Vault Credential when inventory or group vars are encrypted.
+5. Create Job Templates for the playbooks operators should run.
+6. Create Workflow Job Templates for repeated operational sequences.
+7. Use schedules only for read-only checks and backups.
+8. Use AWX RBAC to separate day-2 operations from full cluster administration.
 
-The AWX job execution environment must be able to reach managed hosts over SSH and must have access to any required private Git repositories or SSH keys.
+The AWX job execution environment must be able to reach managed hosts over SSH
+and must have access to required private Git repositories, SSH keys, Ansible
+collections, and any internal package mirrors.
+
+## Recommended Job Templates
+
+Use one AWX Project for this repository and one Inventory per environment
+(`lab`, `staging`, `production`). Enable "Prompt on launch" only for variables
+that should be chosen by operators at runtime.
+
+| Template name | Playbook | Launch type | Survey / extra vars | Notes |
+| --- | --- | --- | --- | --- |
+| LibreNMS HA - Status Strict | `playbooks/status.yml` | Scheduled and manual | `librenms_status_alert_fail_on_degraded: true` | Read-only health gate for VIP, HAProxy, Keepalived, Galera, Redis/Sentinel, Gluster, LibreNMS workers, scheduler, writable paths, and maintenance drift. |
+| LibreNMS HA - Diagnostics | `playbooks/diagnostics.yml` | Manual or failure workflow | Optional `librenms_diagnostics_log_lines`, `librenms_diagnostics_journal_lines`, `librenms_diagnostics_keep_remote`, `librenms_diagnostics_fetch` | Collect before repeated recovery attempts. Archives are written to `diagnostics/<run-id>/` on the controller unless fetching is disabled. |
+| LibreNMS HA - Validate | `playbooks/validate.yml` | Manual and workflow step | None by default | Application-level validation after changes, maintenance, or reboot convergence. |
+| LibreNMS HA - Backup | `playbooks/backup.yml` | Scheduled and manual | Optional `librenms_backup_include_rrd`, `librenms_backup_host`, `librenms_backup_app_host`, `librenms_backup_rrd_host` | Schedule before maintenance windows. Keep at least one copy outside the HA cluster. |
+| LibreNMS HA - Restore Test | `playbooks/restore-test.yml` | Manual | Required `librenms_restore_test_backup_dir` | Verifies a backup artifact without restoring it. |
+| LibreNMS HA - Cluster Converge | `playbooks/cluster.yml` | Manual | None by default | Use after inventory/config changes or package/template drift. Do not schedule. |
+| LibreNMS HA - Post Reboot | `playbooks/post-reboot.yml` | Manual | None by default | Use after full power loss, hypervisor maintenance, or restart of all nodes. |
+| LibreNMS HA - Maintenance Enter | `playbooks/maintenance-enter.yml` | Manual with confirmation | Required `librenms_maintenance_target`; required `librenms_maintenance_confirm: true` | Drains one node before shutdown or OS work. Restrict to senior operators. |
+| LibreNMS HA - Maintenance Exit | `playbooks/maintenance-exit.yml` | Manual with confirmation | Required `librenms_maintenance_target`; required `librenms_maintenance_confirm: true` | Rejoins one node and verifies the remaining HA layer. |
+| LibreNMS HA - Failover Drill | `playbooks/ha-failover-test.yml` | Manual with confirmation | Required `librenms_failover_test_confirm: true`; optional `librenms_failover_test_cases` | Use in a maintenance window. Keep web/VIP cases separate from Redis/Galera cases unless you have a fresh backup. |
+| LibreNMS HA - Galera Recovery | `playbooks/galera-recover.yml` | Emergency manual with approval | Required `librenms_galera_recover_confirm: true`; usually required `librenms_galera_recover_bootstrap_host` | Use only when Galera has no Primary component. Restrict heavily and require diagnostics first. |
+| LibreNMS HA - Add Node | `playbooks/add-node.yml` | Manual | Node-specific inventory change first | Run only after the host is added to inventory and reviewed. |
+| LibreNMS HA - Remove Node | `playbooks/remove-node.yml` | Manual | Node-specific inventory change first | Run only after the host is marked for removal and reviewed. |
+
+For a standalone deployment, keep separate templates for
+`playbooks/standalone.yml` and `playbooks/validate.yml` against the standalone
+inventory. Do not point HA templates at a standalone inventory.
+
+## Surveys
+
+Recommended survey fields:
+
+| Variable | Type | Required | Where used |
+| --- | --- | --- | --- |
+| `librenms_maintenance_target` | Text or multiple choice from inventory hostnames | Yes | Maintenance enter/exit |
+| `librenms_maintenance_confirm` | Boolean | Yes, default `false` | Maintenance enter/exit |
+| `librenms_restore_test_backup_dir` | Text | Yes | Restore test |
+| `librenms_failover_test_confirm` | Boolean | Yes, default `false` | Failover drill |
+| `librenms_failover_test_cases` | Multiple choice | Optional | Failover drill |
+| `librenms_galera_recover_confirm` | Boolean | Yes, default `false` | Galera recovery |
+| `librenms_galera_recover_bootstrap_host` | Text or multiple choice from DB hostnames | Required for confirmed recovery | Galera recovery |
+| `librenms_diagnostics_log_lines` | Integer | Optional | Diagnostics |
+| `librenms_diagnostics_journal_lines` | Integer | Optional | Diagnostics |
+
+Keep confirmation booleans defaulted to `false`. This forces the operator to
+make an explicit disruptive or destructive choice at launch time.
+
+## Workflow Templates
+
+Create these AWX Workflow Job Templates for common operations:
+
+| Workflow | Steps | Schedule |
+| --- | --- | --- |
+| HA Health Gate | Status Strict | Every 5-15 minutes if AWX is your alert source |
+| Pre-Maintenance Evidence | Status Strict -> Backup -> Validate | Manual before planned work |
+| Incident Evidence | Status Strict -> Diagnostics | Manual, or attach to failed Status Strict notifications |
+| Full Cluster Power-On Check | Post Reboot -> Validate -> Status Strict | Manual after all nodes boot |
+| Node Maintenance Exit Check | Maintenance Exit -> Validate -> Status Strict | Manual after one node returns |
+| Backup Assurance | Backup -> Restore Test | Daily or before maintenance if storage allows |
+
+Do not put `maintenance-enter.yml`, `ha-failover-test.yml`, or
+`galera-recover.yml` on an unattended schedule.
+
+## RBAC Model
+
+Use separate AWX teams:
+
+- **Viewers** can read job history and diagnostics artifacts.
+- **Operators** can launch `status.yml`, `diagnostics.yml`, `validate.yml`,
+  `backup.yml`, `restore-test.yml`, `post-reboot.yml`, and maintenance exit.
+- **Maintainers** can launch maintenance enter/exit, failover drills, and
+  cluster convergence.
+- **Administrators** can edit inventories, credentials, projects, and launch
+  Galera recovery.
+
+For production, require a ticket or approval process before launching
+maintenance enter, data-layer failover tests, node removal, or Galera recovery.
+
+## Scheduling
+
+Reasonable production schedules:
+
+- `status.yml` with `librenms_status_alert_fail_on_degraded: true`: every
+  5-15 minutes.
+- `backup.yml`: daily and before maintenance windows.
+- `restore-test.yml`: after backup creation, or at least weekly.
+- `diagnostics.yml`: not scheduled by default; run on failure.
+- `validate.yml`: after changes, post-reboot convergence, or maintenance exit.
+
+Avoid running `cluster.yml` on a timer. It is a convergence tool for intentional
+changes, not a monitoring job.
 
 ## Operational notes
 

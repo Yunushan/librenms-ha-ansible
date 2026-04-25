@@ -1,0 +1,48 @@
+---
+librenms_status_vip_probe_enabled: true
+librenms_status_vip_probe_path: "{{ librenms_app_probe_path }}"
+librenms_status_vip_probe_timeout: "{{ librenms_app_probe_timeout }}"
+librenms_status_vip_probe_statuses: "{{ librenms_app_probe_success_statuses }}"
+librenms_status_runtime_wait_probe_enabled: true
+librenms_status_runtime_wait_probe_timeout: 20
+librenms_status_dispatcher_db_probe_enabled: true
+librenms_status_unit_drift_enabled: true
+librenms_status_writable_path_drift_enabled: true
+librenms_status_maintenance_drift_enabled: true
+librenms_status_expected_unit_enabled_states:
+  - enabled
+librenms_status_writable_paths:
+  - "{{ librenms_install_dir }}/rrd"
+  - "{{ librenms_install_dir }}/logs"
+  - "{{ librenms_install_dir }}/storage"
+  - "{{ librenms_install_dir }}/bootstrap/cache"
+librenms_status_writable_owner: "{{ librenms_user }}"
+librenms_status_writable_group: "{{ librenms_group }}"
+librenms_status_maintenance_probe_units:
+  - librenms.service
+  - librenms-scheduler.timer
+  - librenms-daily.timer
+  - "{{ librenms_nginx_service_name }}"
+  - "{{ librenms_haproxy_service_name }}"
+  - "{{ librenms_keepalived_service_name }}"
+  - "{{ librenms_mariadb_service_name }}"
+  - "{{ librenms_redis_service_name }}"
+  - "{{ librenms_redis_sentinel_service_name_effective }}"
+  - "{{ librenms_rrdcached_service_name }}"
+  - "{{ librenms_glusterd_service_name }}"
+librenms_status_alerts_enabled: false
+librenms_status_alert_name: LibreNMS HA status
+librenms_status_alert_fail_on_degraded: false
+librenms_status_alert_send_when_healthy: false
+librenms_status_alert_webhook_url: ""
+librenms_status_alert_webhook_method: POST
+librenms_status_alert_webhook_headers: {}
+librenms_status_alert_webhook_delegate: localhost
+librenms_status_alert_webhook_timeout: 10
+librenms_status_alert_webhook_validate_certs: true
+librenms_status_alert_webhook_success_statuses:
+  - 200
+  - 201
+  - 202
+  - 204
+librenms_status_alert_webhook_no_log: true

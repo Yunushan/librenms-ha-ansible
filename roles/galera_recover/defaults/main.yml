@@ -1,0 +1,13 @@
+---
+librenms_galera_recover_confirm: false
+librenms_galera_recover_bootstrap_host: ""
+librenms_galera_recover_tie_breaker: manual
+librenms_galera_recover_quiesce_librenms_services: true
+librenms_galera_recover_resume_librenms_services: true
+librenms_galera_recover_start_joiners: true
+librenms_galera_recover_force_kill_stale_mariadb: false
+librenms_galera_recover_stop_timeout: "{{ librenms_galera_stop_timeout }}"
+librenms_galera_recover_bootstrap_timeout: "{{ librenms_galera_bootstrap_timeout }}"
+librenms_galera_recover_wait_timeout: "{{ librenms_galera_wait_timeout }}"
+librenms_galera_recover_probe_retries: 24
+librenms_galera_recover_probe_delay: 5

@@ -5,6 +5,10 @@ librenms_failover_test_cases:
   - keepalived_vip
 
 librenms_failover_test_web_backend_host: ""
+librenms_failover_test_haproxy_host: ""
+librenms_failover_test_dispatcher_host: ""
+librenms_failover_test_redis_query_host: ""
+librenms_failover_test_galera_host: ""
 librenms_failover_test_probe_delegate: ""
 librenms_failover_test_restore_services: true
 
@@ -17,3 +21,7 @@ librenms_failover_test_validate_certs: "{{ librenms_vip_app_probe_validate_certs
 
 librenms_failover_test_wait_after_stop: 2
 librenms_failover_test_wait_after_restore: 3
+librenms_failover_test_redis_failover_retries: 20
+librenms_failover_test_redis_failover_delay: 3
+librenms_failover_test_galera_recovery_retries: 20
+librenms_failover_test_galera_recovery_delay: 3
