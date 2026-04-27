@@ -19,7 +19,7 @@ The English README is the canonical version. The links below point to full trans
 | [Bahasa Indonesia](docs/i18n/README.id.md) | [Deutsch](docs/i18n/README.de.md) | [日本語](docs/i18n/README.ja.md) | [Naija Pidgin](docs/i18n/README.pcm.md) | [मराठी](docs/i18n/README.mr.md) |
 | [తెలుగు](docs/i18n/README.te.md) | [Türkçe](docs/i18n/README.tr.md) | [தமிழ்](docs/i18n/README.ta.md) | [粵語](docs/i18n/README.yue.md) | [Tiếng Việt](docs/i18n/README.vi.md) |
 
-Quick Start • Topology Modes • Support Matrix • Network and Access Matrix • Inventory Model • Variables • Add / Remove Nodes • Security • Contributing
+Quick Start • Topology Modes • Example HA Architecture • Support Matrix • Network and Access Matrix • Inventory Model • Variables • Add / Remove Nodes • Security • Contributing
 
 See [CHANGELOG.md](CHANGELOG.md) for operator-facing release notes before
 applying a newer revision to an existing cluster.
@@ -113,6 +113,147 @@ Good for:
 > explicitly set `librenms_bootstrap_auto_complete: false`; in that mode,
 > complete the installer first, then rerun with
 > `librenms_bootstrap_completed: true`.
+
+---
+
+## Example HA Architecture
+
+The sample HA inventory uses private example addresses so you can copy the
+shape, then replace the network values with your own management, server, and
+polling subnets.
+
+```mermaid
+flowchart LR
+  operator["Operators / browsers"]
+  controller["ansiblectl1<br/>Ansible CLI controller<br/>10.10.10.5"]
+  awx["awx1<br/>Optional AWX controller<br/>10.10.10.6"]
+  internet["GitHub / Galaxy / OS mirrors<br/>443/tcp"]
+  vip["librenms.example.com<br/>VIP 10.10.10.10"]
+  devices["Monitored devices<br/>10.20.0.0/16"]
+
+  subgraph cluster["LibreNMS HA cluster - 10.10.10.0/24"]
+    lnms1["lnms1<br/>10.10.10.11<br/>web, poller, DB, Redis, LB, Gluster"]
+    lnms2["lnms2<br/>10.10.10.12<br/>web, poller, DB, Redis, LB, Gluster"]
+    lnms3["lnms3<br/>10.10.10.13<br/>web, poller, DB, Redis, LB, Gluster"]
+  end
+
+  operator -->|"80/tcp or 443/tcp"| vip
+  vip -->|"HAProxy web backend 80/tcp"| lnms1
+  vip -->|"HAProxy web backend 80/tcp"| lnms2
+  vip -->|"HAProxy web backend 80/tcp"| lnms3
+
+  controller -->|"SSH 22/tcp"| lnms1
+  controller -->|"SSH 22/tcp"| lnms2
+  controller -->|"SSH 22/tcp"| lnms3
+  controller -->|"collections and repo sync 443/tcp"| internet
+  awx -.->|"SSH 22/tcp when enabled"| lnms1
+  awx -.->|"project sync and images 443/tcp"| internet
+
+  lnms1 <-->|"Galera 3306, 4444, 4567, 4568"| lnms2
+  lnms2 <-->|"Galera 3306, 4444, 4567, 4568"| lnms3
+  lnms1 <-->|"Redis 6379 / Sentinel 26379"| lnms3
+  lnms1 <-->|"Gluster 24007, 24008, 49152-49251"| lnms2
+  lnms2 <-->|"Gluster 24007, 24008, 49152-49251"| lnms3
+  lnms1 <-->|"VRRP protocol 112"| lnms2
+  lnms2 <-->|"VRRP protocol 112"| lnms3
+
+  lnms1 -->|"SNMP polling 161/udp"| devices
+  lnms2 -->|"SNMP polling 161/udp"| devices
+  lnms3 -->|"SNMP polling 161/udp"| devices
+  devices -.->|"SNMP traps 162/udp if separately enabled"| lnms1
+```
+
+### Example hostname and IP schema
+
+| Name | Example IP / DNS | Inventory group | Purpose |
+|---|---:|---|---|
+| `ansiblectl1` | `10.10.10.5` | not required, or external controller host | CLI Ansible controller that runs `ansible-playbook` |
+| `awx1` | `10.10.10.6` | `ansible_controller` | Optional AWX controller for GUI-driven playbooks |
+| `librenms.example.com` | `10.10.10.10` | VIP on `lb_nodes` | Browser entrypoint and optional DB / RRDCacheD frontend |
+| `lnms1` | `10.10.10.11` | all HA service groups | Primary bootstrap host and first full LibreNMS node |
+| `lnms2` | `10.10.10.12` | all HA service groups | Second full LibreNMS node |
+| `lnms3` | `10.10.10.13` | all HA service groups | Third full LibreNMS node |
+| monitored devices | `10.20.0.0/16` | outside Ansible inventory | Routers, switches, firewalls, servers, and appliances polled by LibreNMS |
+
+The included HA example maps each `lnms*` host into every full-HA group:
+`librenms_nodes`, `librenms_web`, `librenms_db`, `librenms_redis`,
+`lb_nodes`, and `gluster_nodes`. That creates a compact three-node lab or small
+production reference design where every LibreNMS node can serve web traffic,
+poll devices, participate in Galera, participate in Redis Sentinel, hold the
+VIP, and provide a Gluster brick.
+
+### Example directional traffic
+
+This table is the short form for the example diagram. See
+the [Network and Access Matrix](#network-and-access-matrix) for the complete
+firewall table and operational notes.
+
+| Direction | Protocol / Port | Service | Notes |
+|---|---|---|---|
+| Ansible controller to `lnms*` | TCP 22 | SSH | Required for Ansible push execution |
+| Ansible or AWX controller to GitHub, Galaxy, mirrors | TCP 443 | HTTPS | Required for repo syncs, collections, packages, and container images |
+| Operators to VIP | TCP 80 / 443 | HTTP / HTTPS | `443/tcp` is used when HAProxy TLS is enabled |
+| VIP / HAProxy to web nodes | TCP 80 | HTTP backend | nginx and PHP-FPM health checks use node-local web endpoints |
+| LibreNMS app nodes to DB frontend or Galera nodes | TCP 3306 | MariaDB | Runtime DB access and Galera client traffic |
+| Galera nodes to Galera nodes | TCP 4444, TCP/UDP 4567, TCP 4568 | Galera replication | SST, replication, and IST between DB peers |
+| LibreNMS app nodes to Redis Sentinel nodes | TCP 26379 | Redis Sentinel | LibreNMS discovers the active Redis master through Sentinel |
+| Redis nodes to Redis nodes | TCP 6379, TCP 26379 | Redis / Sentinel | Replication, Sentinel quorum, monitoring, and failover |
+| `lb_nodes` to `lb_nodes` | IP protocol 112 | VRRP | Keepalived VIP ownership; not TCP or UDP |
+| Gluster clients and peers to Gluster nodes | TCP 24007, 24008, 49152-49251 | GlusterFS | Management and brick traffic for shared RRD storage |
+| LibreNMS pollers to monitored devices | UDP 161 | SNMP | SNMP polling for v1, v2c, and v3 |
+| Monitored devices to LibreNMS trap receiver | UDP 162 | SNMP traps | Only if trap reception is separately deployed |
+
+Minimal HA inventory shape:
+
+```yaml
+all:
+  children:
+    librenms_nodes:
+      hosts:
+        lnms1: { ansible_host: 10.10.10.11, ansible_user: root, librenms_node_id: lnms1 }
+        lnms2: { ansible_host: 10.10.10.12, ansible_user: root, librenms_node_id: lnms2 }
+        lnms3: { ansible_host: 10.10.10.13, ansible_user: root, librenms_node_id: lnms3 }
+    librenms_primary:
+      hosts:
+        lnms1:
+    librenms_web:
+      hosts:
+        lnms1:
+        lnms2:
+        lnms3:
+    librenms_db:
+      hosts:
+        lnms1:
+        lnms2:
+        lnms3:
+    librenms_redis:
+      hosts:
+        lnms1:
+        lnms2:
+        lnms3:
+    lb_nodes:
+      hosts:
+        lnms1:
+        lnms2:
+        lnms3:
+    gluster_nodes:
+      hosts:
+        lnms1:
+        lnms2:
+        lnms3:
+```
+
+Matching mode variables:
+
+```yaml
+librenms_mode: ha
+librenms_db_mode: galera
+librenms_redis_mode: sentinel
+librenms_rrd_mode: glusterfs
+librenms_vip_enabled: true
+librenms_vip_ip: 10.10.10.10
+librenms_fqdn: librenms.example.com
+```
 
 ---
 
