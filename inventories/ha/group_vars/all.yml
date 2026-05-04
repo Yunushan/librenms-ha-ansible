@@ -119,3 +119,14 @@ librenms_snmp_v3_users:
     priv_protocol: AES
     priv_password: CHANGE_ME_PRIV_PASSWORD
     access: ro
+
+# Device map locations come from SNMP sysLocation or LibreNMS location maps.
+# Use a real address, or provide fixed coordinates to avoid external geocoding.
+#
+# librenms_snmp_syslocation: "Istanbul, Turkiye"
+# librenms_snmp_syslocation_latitude: "41.0082"
+# librenms_snmp_syslocation_longitude: "28.9784"
+#
+# Optional external geocoder for devices that expose real postal addresses.
+# librenms_geolocation_engine: google
+# librenms_geolocation_api_key: CHANGE_ME_GEOCODER_API_KEY

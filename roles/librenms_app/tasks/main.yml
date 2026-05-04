@@ -2504,6 +2504,98 @@
     - item.username not in (librenms_snmp_v3_current.stdout | default(''))
   loop: "{{ librenms_snmp_v3_users }}"
 
+- name: Configure LibreNMS map and geolocation engine
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - "{{ item.key }}"
+      - "{{ item.value }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  loop:
+    - key: map.engine
+      value: "{{ librenms_geolocation_map_engine }}"
+    - key: geoloc.engine
+      value: "{{ librenms_geolocation_engine }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - item.value | string | length > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS geolocation API key
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - geoloc.api_key
+      - "{{ librenms_geolocation_api_key }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  no_log: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - librenms_geolocation_api_key | length > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS Leaflet map defaults
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - "{{ item.key }}"
+      - "--"
+      - "{{ item.value }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  loop:
+    - key: leaflet.default_lat
+      value: "{{ librenms_geolocation_leaflet_default_lat }}"
+    - key: leaflet.default_lng
+      value: "{{ librenms_geolocation_leaflet_default_lng }}"
+    - key: leaflet.default_zoom
+      value: "{{ librenms_geolocation_leaflet_default_zoom }}"
+    - key: leaflet.group_radius
+      value: "{{ librenms_geolocation_leaflet_group_radius }}"
+    - key: leaflet.tile_url
+      value: "{{ librenms_geolocation_leaflet_tile_url }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - item.value | string | length > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS location maps
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - "{{ item.key }}"
+      - "{{ item.value_json }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  loop:
+    - key: location_map
+      value_json: "{{ librenms_location_map | to_json }}"
+      enabled: "{{ (librenms_location_map | length) > 0 }}"
+    - key: location_map_regex
+      value_json: "{{ librenms_location_map_regex | to_json }}"
+      enabled: "{{ (librenms_location_map_regex | length) > 0 }}"
+    - key: location_map_regex_sub
+      value_json: "{{ librenms_location_map_regex_sub | to_json }}"
+      enabled: "{{ (librenms_location_map_regex_sub | length) > 0 }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - item.enabled | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
 - name: Determine effective LibreNMS auto-discovery networks
   set_fact:
     librenms_autodiscovery_nets_effective: >-
