@@ -953,6 +953,44 @@
     - librenms_gluster_repair_rrd_permissions | bool
     - inventory_hostname in groups.get('librenms_nodes', [])
 
+- name: Probe ACL support on Gluster-backed RRD tree
+  command:
+    argv:
+      - setfacl
+      - -m
+      - "group:{{ librenms_group }}:rwx"
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_gluster_rrd_acl_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_repair_rrd_permissions | bool
+    - librenms_gluster_repair_rrd_acls | bool
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Record Gluster-backed RRD ACL support
+  set_fact:
+    librenms_gluster_rrd_acl_supported: >-
+      {{ (librenms_gluster_rrd_acl_probe.rc | default(1) | int) == 0 }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_repair_rrd_permissions | bool
+    - librenms_gluster_repair_rrd_acls | bool
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Skip Gluster-backed RRD ACL repair when unsupported
+  debug:
+    msg: >-
+      Skipping ACL repair for {{ librenms_gluster_mountpoint }} because this
+      Gluster mount does not support setfacl; ownership and mode repair already ran.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_repair_rrd_permissions | bool
+    - librenms_gluster_repair_rrd_acls | bool
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - not (librenms_gluster_rrd_acl_supported | default(false) | bool)
+
 - name: Grant LibreNMS group access ACL on Gluster-backed RRD tree
   ansible.posix.acl:
     path: "{{ librenms_gluster_mountpoint }}"
@@ -964,6 +1002,8 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - librenms_gluster_repair_rrd_permissions | bool
+    - librenms_gluster_repair_rrd_acls | bool
+    - librenms_gluster_rrd_acl_supported | default(false) | bool
     - inventory_hostname in groups.get('librenms_nodes', [])
 
 - name: Grant LibreNMS group default ACL on Gluster-backed RRD tree
@@ -978,4 +1018,6 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - librenms_gluster_repair_rrd_permissions | bool
+    - librenms_gluster_repair_rrd_acls | bool
+    - librenms_gluster_rrd_acl_supported | default(false) | bool
     - inventory_hostname in groups.get('librenms_nodes', [])
