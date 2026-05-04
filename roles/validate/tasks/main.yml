@@ -1,4 +1,21 @@
 ---
+- name: Check LibreNMS RRD permission repair helper
+  stat:
+    path: "{{ librenms_rrd_permission_repair_path }}"
+  register: librenms_validate_rrd_permission_repair_stat
+  when: inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Repair LibreNMS RRD permissions before validator
+  command:
+    argv:
+      - "{{ librenms_rrd_permission_repair_path }}"
+  register: librenms_validate_rrd_permission_repair
+  changed_when: "'fixing ownership' in (librenms_validate_rrd_permission_repair.stdout | default(''))"
+  failed_when: false
+  when:
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_validate_rrd_permission_repair_stat.stat.exists | default(false)
+
 - name: Run LibreNMS validator on app nodes
   command:
     argv:

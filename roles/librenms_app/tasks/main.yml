@@ -389,19 +389,90 @@
         )
       }}
 
-- name: Create LibreNMS group
+- name: Determine LibreNMS numeric identity anchor host
+  set_fact:
+    librenms_identity_anchor_host_effective: >-
+      {{
+        groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
+        | first
+      }}
+
+- name: Ensure LibreNMS group exists on identity anchor
   group:
     name: "{{ librenms_group }}"
+    gid: "{{ (librenms_gid | string | length > 0) | ternary(librenms_gid | int, omit) }}"
     system: true
+  register: librenms_anchor_group_account
+  delegate_to: "{{ librenms_identity_anchor_host_effective }}"
+  run_once: true
 
-- name: Create LibreNMS user
+- name: Ensure LibreNMS user exists on identity anchor
   user:
     name: "{{ librenms_user }}"
+    uid: "{{ (librenms_uid | string | length > 0) | ternary(librenms_uid | int, omit) }}"
     group: "{{ librenms_group }}"
     system: true
     home: "{{ librenms_install_dir }}"
     create_home: false
     shell: "{{ librenms_shell }}"
+  register: librenms_anchor_user_account
+  delegate_to: "{{ librenms_identity_anchor_host_effective }}"
+  run_once: true
+
+- name: Read LibreNMS group identity from anchor
+  command:
+    argv:
+      - getent
+      - group
+      - "{{ librenms_group }}"
+  register: librenms_anchor_group_identity
+  changed_when: false
+  delegate_to: "{{ librenms_identity_anchor_host_effective }}"
+  run_once: true
+
+- name: Read LibreNMS user identity from anchor
+  command:
+    argv:
+      - getent
+      - passwd
+      - "{{ librenms_user }}"
+  register: librenms_anchor_user_identity
+  changed_when: false
+  delegate_to: "{{ librenms_identity_anchor_host_effective }}"
+  run_once: true
+
+- name: Record LibreNMS numeric identity
+  set_fact:
+    librenms_gid_effective: "{{ librenms_anchor_group_identity.stdout.split(':')[2] | int }}"
+    librenms_uid_effective: "{{ librenms_anchor_user_identity.stdout.split(':')[2] | int }}"
+
+- name: Create LibreNMS group
+  group:
+    name: "{{ librenms_group }}"
+    gid: "{{ librenms_gid_effective }}"
+    system: true
+  register: librenms_group_account
+
+- name: Create LibreNMS user
+  user:
+    name: "{{ librenms_user }}"
+    uid: "{{ librenms_uid_effective }}"
+    group: "{{ librenms_group }}"
+    system: true
+    home: "{{ librenms_install_dir }}"
+    create_home: false
+    shell: "{{ librenms_shell }}"
+  register: librenms_user_account
+
+- name: Record LibreNMS account identity change
+  set_fact:
+    librenms_identity_account_changed: >-
+      {{
+        (librenms_anchor_group_account.changed | default(false))
+        or (librenms_anchor_user_account.changed | default(false))
+        or (librenms_group_account.changed | default(false))
+        or (librenms_user_account.changed | default(false))
+      }}
 
 - name: Ensure install directory parent exists
   file:
@@ -720,6 +791,16 @@
     - "{{ librenms_install_dir }}/storage"
   when:
     - not (librenms_rrd_mode == 'glusterfs' and item == (librenms_install_dir ~ '/rrd'))
+
+- name: Deploy LibreNMS HA RRD permission repair script
+  template:
+    src: librenms-ha-rrd-permission-repair.sh.j2
+    dest: "{{ librenms_rrd_permission_repair_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - librenms_startup_repair_fix_writable_ownership | bool
 
 - name: Discover stale LibreNMS bootstrap cache files before Composer
   find:
@@ -1663,6 +1744,7 @@
     - >-
       (librenms_rrdcached_defaults_deploy.changed | default(false))
       or (librenms_rrdcached_systemd_override_deploy.changed | default(false))
+      or (librenms_identity_account_changed | default(false) | bool)
 
 - name: Check for wildcard rrdcached TCP listener in VIP mode
   command:
@@ -1751,7 +1833,12 @@
 - name: Enable PHP-FPM
   service:
     name: "{{ librenms_php_fpm_service_effective }}"
-    state: started
+    state: >-
+      {{
+        'restarted'
+        if (librenms_identity_account_changed | default(false) | bool)
+        else 'started'
+      }}
     enabled: true
   when: librenms_manage_php_fpm | bool
 
@@ -2066,7 +2153,15 @@
 - name: Enable and start dispatcher service
   service:
     name: librenms.service
-    state: "{{ 'started' if librenms_bootstrap_completed_effective | bool else 'stopped' }}"
+    state: >-
+      {{
+        'restarted'
+        if (
+          (librenms_bootstrap_completed_effective | bool)
+          and (librenms_identity_account_changed | default(false) | bool)
+        )
+        else ('started' if librenms_bootstrap_completed_effective | bool else 'stopped')
+      }}
     enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
   when:
     - librenms_manage_dispatcher | bool
@@ -2240,6 +2335,8 @@
   loop:
     - key: autodiscovery.xdp
       value: "{{ librenms_autodiscovery_xdp }}"
+    - key: discovery_by_ip
+      value: "{{ librenms_autodiscovery_by_ip }}"
     - key: discovery_modules.arp-table
       value: "{{ librenms_autodiscovery_arp_table }}"
     - key: discovery_modules.discovery-arp

@@ -10,6 +10,7 @@ LIBRENMS_USER={{ librenms_user | quote }}
 LIBRENMS_GROUP={{ librenms_group | quote }}
 RRD_MODE={{ librenms_rrd_mode | quote }}
 RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
+RRD_PERMISSION_REPAIR={{ librenms_rrd_permission_repair_path | quote }}
 GLUSTER_MOUNT_WAIT={{ librenms_startup_repair_gluster_mount_wait | int }}
 RUNTIME_RETRIES={{ librenms_startup_repair_runtime_retries | int }}
 RUNTIME_DELAY={{ librenms_startup_repair_runtime_delay | int }}
@@ -114,7 +115,11 @@ repair_writable_paths() {
 
   wait_for_rrd_mount || true
 
-  repair_writable_path "${LIBRENMS_DIR}/rrd" || true
+  if [ -x "${RRD_PERMISSION_REPAIR}" ]; then
+    "${RRD_PERMISSION_REPAIR}" || true
+  else
+    repair_writable_path "${LIBRENMS_DIR}/rrd" || true
+  fi
   repair_writable_path "${LIBRENMS_DIR}/logs" || true
   repair_writable_path "${LIBRENMS_DIR}/bootstrap/cache" || true
   repair_writable_path "${LIBRENMS_DIR}/storage" || true

@@ -8,6 +8,9 @@ Type=simple
 User=root
 Group=root
 PIDFile=
+{% if librenms_startup_repair_fix_writable_ownership | bool %}
+ExecStartPre={{ librenms_rrd_permission_repair_path }}
+{% endif %}
 ExecStart=
 ExecStart={{ librenms_rrdcached_daemon_path }} \
   -g \

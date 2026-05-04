@@ -1,0 +1,31 @@
+#!/bin/bash
+set -u
+
+LOCK_FILE=/run/librenms-ha-rrd-permission-repair.lock
+exec 9>"${LOCK_FILE}"
+flock -n 9 || exit 0
+
+RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
+LIBRENMS_USER={{ librenms_user | quote }}
+LIBRENMS_GROUP={{ librenms_group | quote }}
+
+log() {
+  echo "librenms-ha-rrd-permission-repair: $*"
+}
+
+[ -e "${RRD_PATH}" ] || exit 0
+
+if find "${RRD_PATH}" -xdev \( ! -user "${LIBRENMS_USER}" -o ! -group "${LIBRENMS_GROUP}" \) \
+  -print -quit 2>/dev/null | grep -q .; then
+  log "fixing ownership under ${RRD_PATH}"
+  find "${RRD_PATH}" -xdev \( ! -user "${LIBRENMS_USER}" -o ! -group "${LIBRENMS_GROUP}" \) \
+    -exec chown -h "${LIBRENMS_USER}:${LIBRENMS_GROUP}" {} + || exit 1
+fi
+
+chmod ug+rwx "${RRD_PATH}" >/dev/null 2>&1 || true
+find "${RRD_PATH}" -xdev -type d \( ! -perm -2770 -o -perm /0007 \) \
+  -exec chmod u+rwx,g+rwxs,o-rwx {} + >/dev/null 2>&1 || true
+find "${RRD_PATH}" -xdev -type f \( ! -perm -0660 -o -perm /0007 \) \
+  -exec chmod u+rw,g+rw,o-rwx {} + >/dev/null 2>&1 || true
+
+exit 0

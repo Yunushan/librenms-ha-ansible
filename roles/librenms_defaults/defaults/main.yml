@@ -14,6 +14,7 @@ librenms_autodiscovery_manage: "{{ librenms_mode == 'ha' }}"
 librenms_autodiscovery_xdp: true
 librenms_autodiscovery_arp: true
 librenms_autodiscovery_arp_table: true
+librenms_autodiscovery_by_ip: "{{ librenms_autodiscovery_manage | bool }}"
 librenms_autodiscovery_mydomain: ""
 librenms_autodiscovery_nets: []
 librenms_autodiscovery_include_primary_subnet: "{{ librenms_mode == 'ha' }}"
@@ -35,6 +36,8 @@ librenms_inactive_inventory_nodes: >-
 librenms_install_dir: /opt/librenms
 librenms_user: librenms
 librenms_group: librenms
+librenms_uid: ""
+librenms_gid: ""
 librenms_shell: /bin/bash
 librenms_ansible_remote_tmp: "{{ librenms_install_dir }}/.ansible/tmp"
 librenms_composer_install_timeout: 900
@@ -326,6 +329,7 @@ librenms_dispatcher_systemd_override_path: >-
   {{ librenms_dispatcher_systemd_override_dir }}/librenms-ha.conf
 librenms_startup_repair_enabled: "{{ librenms_mode != 'standalone' }}"
 librenms_startup_repair_path: /usr/local/sbin/librenms-ha-startup-repair
+librenms_rrd_permission_repair_path: /usr/local/sbin/librenms-ha-rrd-permission-repair
 librenms_startup_repair_interval: 30s
 librenms_startup_repair_gluster_mount_wait: 180
 librenms_startup_repair_runtime_retries: 18
