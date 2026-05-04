@@ -2171,6 +2171,106 @@
     - item.username not in (librenms_snmp_v3_current.stdout | default(''))
   loop: "{{ librenms_snmp_v3_users }}"
 
+- name: Determine effective LibreNMS auto-discovery networks
+  set_fact:
+    librenms_autodiscovery_nets_effective: >-
+      {{
+        (
+          librenms_autodiscovery_nets
+          + (
+            [
+              ansible_default_ipv4.network
+              ~ '/'
+              ~ (ansible_default_ipv4.prefix | string)
+            ]
+            if (
+              librenms_autodiscovery_include_primary_subnet | bool
+              and ansible_default_ipv4 is defined
+              and ansible_default_ipv4.network is defined
+              and ansible_default_ipv4.prefix is defined
+            )
+            else []
+          )
+        )
+        | map('string')
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Read current LibreNMS auto-discovery networks
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:get
+      - nets
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_autodiscovery_nets_current
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS auto-discovery toggles
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - "{{ item.key }}"
+      - "{{ item.value | bool | ternary('true', 'false') }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  loop:
+    - key: autodiscovery.xdp
+      value: "{{ librenms_autodiscovery_xdp }}"
+    - key: discovery_modules.arp-table
+      value: "{{ librenms_autodiscovery_arp_table }}"
+    - key: discovery_modules.discovery-arp
+      value: "{{ librenms_autodiscovery_arp }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS auto-discovery domain
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - mydomain
+      - "{{ librenms_autodiscovery_mydomain }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - librenms_autodiscovery_mydomain | length > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Add LibreNMS auto-discovery networks
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - nets.+
+      - "{{ item }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  loop: "{{ librenms_autodiscovery_nets_effective | default([]) }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - item not in (librenms_autodiscovery_nets_current.stdout | default(''))
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
 - name: Determine effective SNMP version for cluster device seeding
   set_fact:
     librenms_seed_cluster_device_snmp_version_effective: >-
@@ -2376,6 +2476,122 @@
     - librenms_seed_cluster_devices | bool
     - item.query_result is defined
     - (item.query_result[0][0].device_count | default(0) | int) == 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Check LibreNMS auto-discovery bootstrap marker
+  stat:
+    path: "{{ librenms_autodiscovery_bootstrap_marker }}"
+  register: librenms_autodiscovery_bootstrap_marker_stat
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - >-
+      (librenms_autodiscovery_snmp_scan_enabled | bool)
+      or (librenms_autodiscovery_force_cycle_after_deploy | bool)
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Check LibreNMS SNMP subnet scanner
+  stat:
+    path: "{{ librenms_install_dir }}/snmp-scan.py"
+  register: librenms_autodiscovery_snmp_scan_stat
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - librenms_autodiscovery_snmp_scan_enabled | bool
+    - (librenms_autodiscovery_nets_effective | default([]) | length) > 0
+    - >-
+      not (librenms_autodiscovery_run_once_after_deploy | bool)
+      or not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Run LibreNMS SNMP subnet auto-scan
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/snmp-scan.py"
+      - "{{ item }}"
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  loop: "{{ librenms_autodiscovery_nets_effective | default([]) }}"
+  register: librenms_autodiscovery_snmp_scan_result
+  changed_when: librenms_autodiscovery_snmp_scan_result.rc == 0
+  failed_when: >-
+    (librenms_autodiscovery_fail_on_scan_error | bool)
+    and librenms_autodiscovery_snmp_scan_result.rc != 0
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - librenms_autodiscovery_snmp_scan_enabled | bool
+    - librenms_autodiscovery_snmp_scan_stat.stat.exists | default(false)
+    - >-
+      not (librenms_autodiscovery_run_once_after_deploy | bool)
+      or not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Run LibreNMS discovery cycle after auto-discovery configuration
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/discovery.php"
+      - -h
+      - all
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_autodiscovery_discovery_cycle
+  changed_when: librenms_autodiscovery_discovery_cycle.rc == 0
+  failed_when: >-
+    (librenms_autodiscovery_fail_on_cycle_error | bool)
+    and librenms_autodiscovery_discovery_cycle.rc != 0
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - librenms_autodiscovery_force_cycle_after_deploy | bool
+    - >-
+      not (librenms_autodiscovery_run_once_after_deploy | bool)
+      or not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Run LibreNMS poller cycle after auto-discovery configuration
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/poller.php"
+      - -h
+      - all
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_autodiscovery_poller_cycle
+  changed_when: librenms_autodiscovery_poller_cycle.rc == 0
+  failed_when: >-
+    (librenms_autodiscovery_fail_on_cycle_error | bool)
+    and librenms_autodiscovery_poller_cycle.rc != 0
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - librenms_autodiscovery_force_cycle_after_deploy | bool
+    - >-
+      not (librenms_autodiscovery_run_once_after_deploy | bool)
+      or not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Mark LibreNMS auto-discovery bootstrap run complete
+  file:
+    path: "{{ librenms_autodiscovery_bootstrap_marker }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_autodiscovery_manage | bool
+    - librenms_autodiscovery_run_once_after_deploy | bool
+    - >-
+      (librenms_autodiscovery_snmp_scan_enabled | bool)
+      or (librenms_autodiscovery_force_cycle_after_deploy | bool)
+    - not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Enable distributed poller after bootstrap

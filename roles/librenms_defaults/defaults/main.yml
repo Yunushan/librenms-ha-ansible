@@ -10,6 +10,20 @@ librenms_daily_timer_randomized_delay: 45min
 librenms_daily_run_once_after_deploy: true
 librenms_daily_maintenance_bootstrap_marker: /var/lib/librenms-ha-ansible/daily_maintenance_bootstrapped
 
+librenms_autodiscovery_manage: "{{ librenms_mode == 'ha' }}"
+librenms_autodiscovery_xdp: true
+librenms_autodiscovery_arp: true
+librenms_autodiscovery_arp_table: true
+librenms_autodiscovery_mydomain: ""
+librenms_autodiscovery_nets: []
+librenms_autodiscovery_include_primary_subnet: "{{ librenms_mode == 'ha' }}"
+librenms_autodiscovery_snmp_scan_enabled: "{{ librenms_autodiscovery_manage | bool }}"
+librenms_autodiscovery_force_cycle_after_deploy: "{{ librenms_autodiscovery_manage | bool }}"
+librenms_autodiscovery_run_once_after_deploy: true
+librenms_autodiscovery_fail_on_scan_error: false
+librenms_autodiscovery_fail_on_cycle_error: false
+librenms_autodiscovery_bootstrap_marker: /var/lib/librenms-ha-ansible/autodiscovery_bootstrapped
+
 librenms_mode: standalone
 librenms_install_profile: full
 librenms_inactive_inventory_nodes: >-
