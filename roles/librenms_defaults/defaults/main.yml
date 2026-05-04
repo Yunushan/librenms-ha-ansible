@@ -33,6 +33,8 @@ librenms_network_map_show_on_worldmap: true
 librenms_network_map_worldmap_link_type: xdp
 librenms_network_map_worldmap_show_disabled_alerts: true
 librenms_network_map_force_topology_discovery: "{{ librenms_network_map_manage | bool }}"
+librenms_network_map_show_menu_without_links: true
+librenms_network_map_warn_when_no_links: true
 librenms_network_map_topology_discovery_modules:
   - discovery-protocols
   - arp-table
@@ -345,7 +347,11 @@ librenms_seed_cluster_device_port: 161
 librenms_seed_cluster_device_poller_group: ""
 
 librenms_geolocation_api_key: ""
-librenms_geolocation_api_key_valid: "{{ (librenms_geolocation_api_key | string | length) > 0 and librenms_geolocation_api_key != 'CHANGE_ME_GEOCODER_API_KEY' }}"
+librenms_geolocation_api_key_valid: >-
+  {{
+    (librenms_geolocation_api_key | string | length) > 0
+    and librenms_geolocation_api_key != 'CHANGE_ME_GEOCODER_API_KEY'
+  }}
 librenms_geolocation_manage: "{{ librenms_bootstrap_completed_effective | bool }}"
 librenms_geolocation_engine: "{{ 'google' if (librenms_geolocation_api_key_valid | bool) else '' }}"
 librenms_geolocation_map_engine: leaflet

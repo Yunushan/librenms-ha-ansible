@@ -956,6 +956,29 @@
       register: librenms_git_checkout
       throttle: 1
 
+- name: Keep LibreNMS network map menu visible when topology is enabled
+  replace:
+    path: "{{ librenms_install_dir }}/app/Http/ViewComposers/MenuComposer.php"
+    regexp: '^\s*\$vars\[''links''\] = Link::exists\(\);$'
+    replace: >-
+      $vars['links'] = Link::exists() ||
+      ! empty(LibrenmsConfig::get('network_map_items', []));
+  become: true
+  when:
+    - librenms_network_map_manage | bool
+    - librenms_network_map_show_menu_without_links | bool
+
+- name: Preserve ownership for LibreNMS menu composer
+  file:
+    path: "{{ librenms_install_dir }}/app/Http/ViewComposers/MenuComposer.php"
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0644"
+  become: true
+  when:
+    - librenms_network_map_manage | bool
+    - librenms_network_map_show_menu_without_links | bool
+
 - name: Detect PHP version on Debian-family systems
   command:
     argv:
@@ -3078,6 +3101,56 @@
     - >-
       not (librenms_autodiscovery_run_once_after_deploy | bool)
       or not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Read LibreNMS network map link count
+  community.mysql.mysql_query:
+    login_host: "{{ librenms_db_host_effective }}"
+    login_port: "{{ librenms_db_port }}"
+    login_user: "{{ librenms_db_user }}"
+    login_password: "{{ librenms_db_password }}"
+    login_db: "{{ librenms_db_name }}"
+    query:
+      - "SELECT COUNT(*) AS link_count FROM `links`"
+  register: librenms_network_map_link_count_query
+  changed_when: false
+  no_log: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_network_map_manage | bool
+    - librenms_network_map_warn_when_no_links | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Record LibreNMS network map link count
+  set_fact:
+    librenms_network_map_link_count: >-
+      {{
+        (
+          librenms_network_map_link_count_query.query_result[0][0].link_count
+          | default(0)
+        )
+        | int
+      }}
+  when:
+    - librenms_network_map_link_count_query is defined
+    - librenms_network_map_link_count_query.query_result is defined
+
+- name: Warn when LibreNMS has no topology links yet
+  debug:
+    msg: |-
+      LibreNMS has zero rows in the links table, so upstream LibreNMS would hide
+      Maps -> Network. This role keeps the menu visible, but the map will stay
+      empty until monitored network devices expose LLDP/CDP/FDP or usable
+      FDB/ARP data over SNMP.
+
+      Check SNMP credentials and reachability for switches/firewalls, then run:
+      {{ librenms_install_dir }}/discovery.php -h all -m discovery-protocols
+      {{ librenms_install_dir }}/discovery.php -h all -m arp-table
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_network_map_manage | bool
+    - librenms_network_map_warn_when_no_links | bool
+    - (librenms_network_map_link_count | default(0) | int) == 0
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Mark LibreNMS auto-discovery bootstrap run complete
