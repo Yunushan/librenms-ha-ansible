@@ -939,3 +939,43 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Repair Gluster-backed RRD ownership and permissions
+  file:
+    path: "{{ librenms_gluster_mountpoint }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "u=rwX,g=rwX,o="
+    recurse: true
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_repair_rrd_permissions | bool
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Grant LibreNMS group access ACL on Gluster-backed RRD tree
+  ansible.posix.acl:
+    path: "{{ librenms_gluster_mountpoint }}"
+    entity: "{{ librenms_group }}"
+    etype: group
+    permissions: rwx
+    recursive: true
+    state: present
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_repair_rrd_permissions | bool
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Grant LibreNMS group default ACL on Gluster-backed RRD tree
+  ansible.posix.acl:
+    path: "{{ librenms_gluster_mountpoint }}"
+    entity: "{{ librenms_group }}"
+    etype: group
+    permissions: rwx
+    default: true
+    recursive: true
+    state: present
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_gluster_repair_rrd_permissions | bool
+    - inventory_hostname in groups.get('librenms_nodes', [])

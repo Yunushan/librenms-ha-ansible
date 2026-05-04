@@ -176,6 +176,7 @@ librenms_gluster_firewall_ports:
   - 24009
 librenms_gluster_firewall_port_ranges:
   - 49152:49251
+librenms_gluster_repair_rrd_permissions: true
 
 librenms_vip_enabled: false
 librenms_vip_ip: ""
