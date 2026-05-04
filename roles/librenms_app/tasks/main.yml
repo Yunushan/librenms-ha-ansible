@@ -452,6 +452,7 @@
   when: librenms_install_git_dir_stat.stat.exists
 
 - name: Ensure pre-existing LibreNMS writable paths are writable before Git checkout
+  become: true
   file:
     path: "{{ item }}"
     state: directory
@@ -549,6 +550,7 @@
     - librenms_origin_remote.stdout != librenms_repo_url
 
 - name: Remove runtime placeholder files that can block first LibreNMS checkout
+  become: true
   file:
     path: "{{ item }}"
     state: absent
@@ -594,20 +596,65 @@
       node cannot query GitHub tags during deployment.
 
 - name: Checkout LibreNMS repository
-  git:
-    repo: "{{ librenms_repo_url }}"
-    dest: "{{ librenms_install_dir }}"
-    version: "{{ librenms_version_effective }}"
-    update: true
-    force: true
-  become: true
-  become_user: "{{ librenms_user }}"
-  environment:
-    GIT_CONFIG_COUNT: "1"
-    GIT_CONFIG_KEY_0: safe.directory
-    GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
-  register: librenms_git_checkout
-  throttle: 1
+  block:
+    - name: Checkout LibreNMS repository
+      git:
+        repo: "{{ librenms_repo_url }}"
+        dest: "{{ librenms_install_dir }}"
+        version: "{{ librenms_version_effective }}"
+        update: true
+        force: true
+      become: true
+      become_user: "{{ librenms_user }}"
+      environment:
+        GIT_CONFIG_COUNT: "1"
+        GIT_CONFIG_KEY_0: safe.directory
+        GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
+      register: librenms_git_checkout
+      throttle: 1
+  rescue:
+    - name: Re-prepare LibreNMS runtime directories after checkout failure
+      become: true
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ librenms_user }}"
+        group: "{{ librenms_group }}"
+        mode: "0775"
+      loop:
+        - "{{ librenms_install_dir }}/rrd"
+        - "{{ librenms_install_dir }}/logs"
+        - "{{ librenms_install_dir }}/bootstrap"
+        - "{{ librenms_install_dir }}/bootstrap/cache"
+        - "{{ librenms_install_dir }}/storage"
+
+    - name: Remove runtime placeholder files after checkout failure
+      become: true
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ librenms_install_dir }}/rrd/.gitignore"
+        - "{{ librenms_install_dir }}/logs/.gitignore"
+        - "{{ librenms_install_dir }}/bootstrap/.gitignore"
+        - "{{ librenms_install_dir }}/bootstrap/cache/.gitignore"
+        - "{{ librenms_install_dir }}/storage/.gitignore"
+
+    - name: Retry LibreNMS repository checkout
+      git:
+        repo: "{{ librenms_repo_url }}"
+        dest: "{{ librenms_install_dir }}"
+        version: "{{ librenms_version_effective }}"
+        update: true
+        force: true
+      become: true
+      become_user: "{{ librenms_user }}"
+      environment:
+        GIT_CONFIG_COUNT: "1"
+        GIT_CONFIG_KEY_0: safe.directory
+        GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
+      register: librenms_git_checkout
+      throttle: 1
 
 - name: Detect PHP version on Debian-family systems
   command:
