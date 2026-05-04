@@ -91,14 +91,18 @@ repair_writable_path() {
   local path=$1
   [ -e "${path}" ] || return 0
 
-  local current_owner
-  current_owner=$(stat -c '%U:%G' "${path}" 2>/dev/null || true)
-  if [ "${current_owner}" != "${LIBRENMS_USER}:${LIBRENMS_GROUP}" ]; then
-    log "fixing ownership on ${path}"
-    chown -R "${LIBRENMS_USER}:${LIBRENMS_GROUP}" "${path}" || return 1
+  if find "${path}" -xdev \( ! -user "${LIBRENMS_USER}" -o ! -group "${LIBRENMS_GROUP}" \) \
+    -print -quit 2>/dev/null | grep -q .; then
+    log "fixing ownership under ${path}"
+    find "${path}" -xdev \( ! -user "${LIBRENMS_USER}" -o ! -group "${LIBRENMS_GROUP}" \) \
+      -exec chown -h "${LIBRENMS_USER}:${LIBRENMS_GROUP}" {} + || return 1
   fi
 
   chmod ug+rwx "${path}" >/dev/null 2>&1 || true
+  find "${path}" -xdev -type d \( ! -perm -2770 -o -perm /0007 \) \
+    -exec chmod u+rwx,g+rwxs,o-rwx {} + >/dev/null 2>&1 || true
+  find "${path}" -xdev -type f \( ! -perm -0660 -o -perm /0007 \) \
+    -exec chmod u+rw,g+rw,o-rwx {} + >/dev/null 2>&1 || true
   if command -v setfacl >/dev/null 2>&1; then
     setfacl -m "g:${LIBRENMS_GROUP}:rwx" "${path}" >/dev/null 2>&1 || true
     setfacl -d -m "g:${LIBRENMS_GROUP}:rwx" "${path}" >/dev/null 2>&1 || true

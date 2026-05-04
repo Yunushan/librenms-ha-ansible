@@ -5,6 +5,7 @@ Description=Run LibreNMS HA startup repair
 OnBootSec={{ librenms_startup_repair_interval }}
 OnUnitActiveSec={{ librenms_startup_repair_interval }}
 AccuracySec=5s
+Persistent=true
 Unit=librenms-ha-startup-repair.service
 
 [Install]

@@ -2091,6 +2091,15 @@
     - librenms_startup_repair_enabled | bool
     - ansible_service_mgr == 'systemd'
 
+- name: Run LibreNMS HA startup repair once after deployment
+  systemd:
+    name: librenms-ha-startup-repair.service
+    state: started
+  when:
+    - librenms_startup_repair_enabled | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+
 - name: Remove legacy cron file
   file:
     path: /etc/cron.d/librenms
