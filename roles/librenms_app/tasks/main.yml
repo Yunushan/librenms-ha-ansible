@@ -389,33 +389,52 @@
         )
       }}
 
+- name: Determine LibreNMS numeric identity nodes
+  set_fact:
+    librenms_identity_nodes_effective: >-
+      {{
+        (
+          groups.get('librenms_nodes', [inventory_hostname])
+          | difference(librenms_inactive_inventory_nodes)
+        )
+        if (
+          (
+            groups.get('librenms_nodes', [inventory_hostname])
+            | difference(librenms_inactive_inventory_nodes)
+          ) | length
+        ) > 0
+        else [inventory_hostname]
+      }}
+
 - name: Determine LibreNMS numeric identity anchor host
   set_fact:
     librenms_identity_anchor_host_effective: >-
       {{
-        groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname]))
+        (
+          groups.get('librenms_primary', [])
+          | difference(librenms_inactive_inventory_nodes)
+        )
         | first
+        | default(librenms_identity_nodes_effective | first)
       }}
 
-- name: Ensure LibreNMS group exists on identity anchor
+- name: Ensure LibreNMS group exists on identity anchor before ID selection
   group:
     name: "{{ librenms_group }}"
-    gid: "{{ (librenms_gid | string | length > 0) | ternary(librenms_gid | int, omit) }}"
     system: true
-  register: librenms_anchor_group_account
+  register: librenms_anchor_group_seed_account
   delegate_to: "{{ librenms_identity_anchor_host_effective }}"
   run_once: true
 
-- name: Ensure LibreNMS user exists on identity anchor
+- name: Ensure LibreNMS user exists on identity anchor before ID selection
   user:
     name: "{{ librenms_user }}"
-    uid: "{{ (librenms_uid | string | length > 0) | ternary(librenms_uid | int, omit) }}"
     group: "{{ librenms_group }}"
     system: true
     home: "{{ librenms_install_dir }}"
     create_home: false
     shell: "{{ librenms_shell }}"
-  register: librenms_anchor_user_account
+  register: librenms_anchor_user_seed_account
   delegate_to: "{{ librenms_identity_anchor_host_effective }}"
   run_once: true
 
@@ -441,10 +460,142 @@
   delegate_to: "{{ librenms_identity_anchor_host_effective }}"
   run_once: true
 
+- name: Scan reserved group IDs on LibreNMS nodes
+  command:
+    argv:
+      - sh
+      - -lc
+      - >-
+        getent group | awk -F: -v name={{ librenms_group | quote }}
+        '$1 != name { print $3 }'
+  register: librenms_identity_reserved_gid_scan
+  changed_when: false
+  loop: "{{ librenms_identity_nodes_effective }}"
+  delegate_to: "{{ item }}"
+  run_once: true
+
+- name: Scan reserved user IDs on LibreNMS nodes
+  command:
+    argv:
+      - sh
+      - -lc
+      - >-
+        getent passwd | awk -F: -v name={{ librenms_user | quote }}
+        '$1 != name { print $3 }'
+  register: librenms_identity_reserved_uid_scan
+  changed_when: false
+  loop: "{{ librenms_identity_nodes_effective }}"
+  delegate_to: "{{ item }}"
+  run_once: true
+
 - name: Record LibreNMS numeric identity
   set_fact:
-    librenms_gid_effective: "{{ librenms_anchor_group_identity.stdout.split(':')[2] | int }}"
-    librenms_uid_effective: "{{ librenms_anchor_user_identity.stdout.split(':')[2] | int }}"
+    librenms_anchor_gid_candidate: "{{ librenms_anchor_group_identity.stdout.split(':')[2] | int }}"
+    librenms_anchor_uid_candidate: "{{ librenms_anchor_user_identity.stdout.split(':')[2] | int }}"
+    librenms_identity_reserved_gids: >-
+      {{
+        librenms_identity_reserved_gid_scan.results
+        | map(attribute='stdout_lines')
+        | flatten
+        | reject('equalto', '')
+        | map('int')
+        | unique
+        | list
+      }}
+    librenms_identity_reserved_uids: >-
+      {{
+        librenms_identity_reserved_uid_scan.results
+        | map(attribute='stdout_lines')
+        | flatten
+        | reject('equalto', '')
+        | map('int')
+        | unique
+        | list
+      }}
+
+- name: Determine available LibreNMS numeric identity candidates
+  set_fact:
+    librenms_identity_free_gids: >-
+      {{
+        range(
+          librenms_identity_gid_search_start | int,
+          (librenms_identity_gid_search_end | int) + 1
+        )
+        | list
+        | difference(librenms_identity_reserved_gids)
+        | list
+      }}
+    librenms_identity_free_uids: >-
+      {{
+        range(
+          librenms_identity_uid_search_start | int,
+          (librenms_identity_uid_search_end | int) + 1
+        )
+        | list
+        | difference(librenms_identity_reserved_uids)
+        | list
+      }}
+
+- name: Select LibreNMS numeric identity
+  set_fact:
+    librenms_gid_effective: >-
+      {{
+        (librenms_gid | int)
+        if (librenms_gid | string | length > 0)
+        else (
+          librenms_anchor_gid_candidate
+          if (librenms_anchor_gid_candidate | int) not in librenms_identity_reserved_gids
+          else (librenms_identity_free_gids | first)
+        )
+      }}
+    librenms_uid_effective: >-
+      {{
+        (librenms_uid | int)
+        if (librenms_uid | string | length > 0)
+        else (
+          librenms_anchor_uid_candidate
+          if (librenms_anchor_uid_candidate | int) not in librenms_identity_reserved_uids
+          else (librenms_identity_free_uids | first)
+        )
+      }}
+
+- name: Validate selected LibreNMS numeric identity
+  assert:
+    that:
+      - librenms_gid_effective is defined
+      - librenms_uid_effective is defined
+      - librenms_gid_effective | int not in librenms_identity_reserved_gids
+      - librenms_uid_effective | int not in librenms_identity_reserved_uids
+    fail_msg: >-
+      Could not select a collision-free LibreNMS UID/GID across
+      {{ librenms_identity_nodes_effective | join(', ') }}. Existing non-LibreNMS
+      IDs block gid={{ librenms_gid_effective | default('unset') }} or
+      uid={{ librenms_uid_effective | default('unset') }}. Adjust
+      librenms_identity_uid_search_start/end, librenms_identity_gid_search_start/end,
+      or set explicit unused librenms_uid/librenms_gid values.
+  run_once: true
+
+- name: Align LibreNMS group identity on anchor
+  group:
+    name: "{{ librenms_group }}"
+    gid: "{{ librenms_gid_effective }}"
+    system: true
+  register: librenms_anchor_group_account
+  delegate_to: "{{ librenms_identity_anchor_host_effective }}"
+  run_once: true
+
+- name: Align LibreNMS user identity on anchor
+  user:
+    name: "{{ librenms_user }}"
+    uid: "{{ librenms_uid_effective }}"
+    group: "{{ librenms_group }}"
+    system: true
+    home: "{{ librenms_install_dir }}"
+    create_home: false
+    shell: "{{ librenms_shell }}"
+  register: librenms_anchor_user_account
+  delegate_to: "{{ librenms_identity_anchor_host_effective }}"
+  run_once: true
 
 - name: Create LibreNMS group
   group:
