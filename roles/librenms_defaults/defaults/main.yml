@@ -42,6 +42,7 @@ librenms_identity_uid_search_start: 60000
 librenms_identity_uid_search_end: 60999
 librenms_identity_gid_search_start: 60000
 librenms_identity_gid_search_end: 60999
+librenms_identity_process_stop_timeout: 30
 librenms_shell: /bin/bash
 librenms_ansible_remote_tmp: "{{ librenms_install_dir }}/.ansible/tmp"
 librenms_composer_install_timeout: 900

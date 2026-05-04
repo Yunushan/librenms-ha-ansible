@@ -575,6 +575,84 @@
       or set explicit unused librenms_uid/librenms_gid values.
   run_once: true
 
+- name: Check LibreNMS nodes that need numeric identity changes
+  command:
+    argv:
+      - sh
+      - -lc
+      - >-
+        current_gid="$(getent group {{ librenms_group | quote }} | awk -F: '{ print $3 }')";
+        current_uid="$(getent passwd {{ librenms_user | quote }} | awk -F: '{ print $3 }')";
+        [ "${current_gid}" = {{ (librenms_gid_effective | string) | quote }} ] &&
+        [ "${current_uid}" = {{ (librenms_uid_effective | string) | quote }} ]
+  register: librenms_identity_change_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ librenms_identity_nodes_effective }}"
+  delegate_to: "{{ item }}"
+  run_once: true
+
+- name: Stop LibreNMS services before numeric identity changes
+  command:
+    argv:
+      - sh
+      - -lc
+      - >-
+        systemctl stop
+        librenms-scheduler.timer
+        librenms-daily.timer
+        librenms-dispatcher-ha-recover.timer
+        librenms-ha-startup-repair.timer
+        librenms.service
+        librenms-scheduler.service
+        librenms-daily.service
+        librenms-dispatcher-ha-recover.service
+        librenms-ha-startup-repair.service
+        {{ librenms_rrdcached_service_name | quote }} >/dev/null 2>&1 || true;
+        php_fpm_units="$(systemctl list-units --type=service --all --no-legend 'php*-fpm.service' | awk '{ print $1 }')";
+        if [ -n "${php_fpm_units}" ]; then
+          systemctl stop ${php_fpm_units} >/dev/null 2>&1 || true;
+        fi
+  register: librenms_identity_service_drain
+  changed_when: true
+  loop: "{{ librenms_identity_change_check.results | default([]) }}"
+  delegate_to: "{{ item.item }}"
+  run_once: true
+  when:
+    - (hostvars[item.item].ansible_service_mgr | default(ansible_service_mgr)) == 'systemd'
+    - item.rc | default(0) != 0
+
+- name: Drain LibreNMS user processes before numeric identity changes
+  command:
+    argv:
+      - sh
+      - -lc
+      - >-
+        uid="$(id -u {{ librenms_user | quote }} 2>/dev/null || true)";
+        [ -n "${uid}" ] || exit 0;
+        loginctl terminate-user {{ librenms_user | quote }} >/dev/null 2>&1 || true;
+        timeout {{ librenms_identity_process_stop_timeout | int }}
+        sh -c 'while pgrep -u "$1" >/dev/null 2>&1; do sleep 1; done' sh "${uid}" && exit 0;
+        echo "terminating lingering {{ librenms_user }} processes";
+        pkill -TERM -u "${uid}" >/dev/null 2>&1 || true;
+        timeout {{ librenms_identity_process_stop_timeout | int }}
+        sh -c 'while pgrep -u "$1" >/dev/null 2>&1; do sleep 1; done' sh "${uid}" && exit 0;
+        echo "killing lingering {{ librenms_user }} processes";
+        pkill -KILL -u "${uid}" >/dev/null 2>&1 || true;
+        timeout {{ librenms_identity_process_stop_timeout | int }}
+        sh -c 'while pgrep -u "$1" >/dev/null 2>&1; do sleep 1; done' sh "${uid}" && exit 0;
+        echo "LibreNMS processes are still running after forced drain:" >&2;
+        pgrep -a -u "${uid}" >&2 || true;
+        exit 1
+  register: librenms_identity_process_drain
+  changed_when: >-
+    'lingering' in (librenms_identity_process_drain.stdout | default(''))
+  loop: "{{ librenms_identity_change_check.results | default([]) }}"
+  delegate_to: "{{ item.item }}"
+  run_once: true
+  when:
+    - item.rc | default(0) != 0
+
 - name: Align LibreNMS group identity on anchor
   group:
     name: "{{ librenms_group }}"
