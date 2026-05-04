@@ -2504,6 +2504,21 @@
     - item.username not in (librenms_snmp_v3_current.stdout | default(''))
   loop: "{{ librenms_snmp_v3_users }}"
 
+- name: Validate LibreNMS geolocation API key
+  assert:
+    that:
+      - (librenms_geolocation_api_key | string | length) > 0
+      - librenms_geolocation_api_key != 'CHANGE_ME_GEOCODER_API_KEY'
+    fail_msg: >-
+      librenms_geolocation_engine is set, but librenms_geolocation_api_key is
+      empty or still set to CHANGE_ME_GEOCODER_API_KEY. Set a real geocoder API
+      key in inventory, or leave librenms_geolocation_engine empty.
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - (librenms_geolocation_engine | string | length) > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
 - name: Configure LibreNMS map and geolocation engine
   command:
     argv:
@@ -2539,7 +2554,7 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_geolocation_manage | bool
-    - librenms_geolocation_api_key | length > 0
+    - librenms_geolocation_api_key_valid | bool
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Configure LibreNMS Leaflet map defaults
@@ -2583,17 +2598,13 @@
   loop:
     - key: location_map
       value_json: "{{ librenms_location_map | to_json }}"
-      enabled: "{{ (librenms_location_map | length) > 0 }}"
     - key: location_map_regex
       value_json: "{{ librenms_location_map_regex | to_json }}"
-      enabled: "{{ (librenms_location_map_regex | length) > 0 }}"
     - key: location_map_regex_sub
       value_json: "{{ librenms_location_map_regex_sub | to_json }}"
-      enabled: "{{ (librenms_location_map_regex_sub | length) > 0 }}"
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_geolocation_manage | bool
-    - item.enabled | bool
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Determine effective LibreNMS auto-discovery networks
@@ -2658,6 +2669,8 @@
       value: "{{ librenms_autodiscovery_xdp }}"
     - key: discovery_by_ip
       value: "{{ librenms_autodiscovery_by_ip }}"
+    - key: discovery_modules.discovery-protocols
+      value: "{{ librenms_autodiscovery_discovery_protocols }}"
     - key: discovery_modules.arp-table
       value: "{{ librenms_autodiscovery_arp_table }}"
     - key: discovery_modules.discovery-arp
@@ -2665,6 +2678,44 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_autodiscovery_manage | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS network topology map inputs
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - network_map_items
+      - "{{ librenms_network_map_items | to_json }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_network_map_manage | bool
+    - (librenms_network_map_items | length) > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS world map topology overlay
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - "{{ item.key }}"
+      - "{{ item.value }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  loop:
+    - key: network_map_show_on_worldmap
+      value: "{{ librenms_network_map_show_on_worldmap | bool | ternary('true', 'false') }}"
+    - key: network_map_worldmap_link_type
+      value: "{{ librenms_network_map_worldmap_link_type }}"
+    - key: network_map_worldmap_show_disabled_alerts
+      value: "{{ librenms_network_map_worldmap_show_disabled_alerts | bool | ternary('true', 'false') }}"
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_network_map_manage | bool
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Configure LibreNMS auto-discovery domain
@@ -2954,6 +3005,31 @@
     - >-
       not (librenms_autodiscovery_run_once_after_deploy | bool)
       or not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Run LibreNMS topology discovery modules for network map
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/discovery.php"
+      - -h
+      - all
+      - -m
+      - "{{ item }}"
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  loop: "{{ librenms_network_map_topology_discovery_modules }}"
+  register: librenms_network_map_topology_discovery
+  changed_when: librenms_network_map_topology_discovery.rc == 0
+  failed_when: >-
+    (librenms_autodiscovery_fail_on_cycle_error | bool)
+    and librenms_network_map_topology_discovery.rc != 0
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_network_map_manage | bool
+    - librenms_network_map_force_topology_discovery | bool
+    - item in ['discovery-protocols', 'arp-table']
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Run LibreNMS discovery cycle after auto-discovery configuration

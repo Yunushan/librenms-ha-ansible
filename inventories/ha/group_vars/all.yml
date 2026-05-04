@@ -128,5 +128,27 @@ librenms_snmp_v3_users:
 # librenms_snmp_syslocation_longitude: "28.9784"
 #
 # Optional external geocoder for devices that expose real postal addresses.
+# Add a real key here; the role enables geoloc.engine=google automatically
+# when this value is set.
+librenms_geolocation_api_key: ""
 # librenms_geolocation_engine: google
-# librenms_geolocation_api_key: CHANGE_ME_GEOCODER_API_KEY
+
+# Optional sysLocation rewrite maps. These let LibreNMS convert vague SNMP
+# locations into full addresses or fixed coordinates before geocoding.
+librenms_location_map: {}
+librenms_location_map_regex: {}
+librenms_location_map_regex_sub: {}
+# Example:
+# librenms_location_map:
+#   "LibreNMS Node": "Istanbul, Turkiye [41.0082, 28.9784]"
+# librenms_location_map_regex_sub:
+#   "/DC1-Rack([0-9]+)/": "DC1 Rack $1, Istanbul, Turkiye [41.0082, 28.9784]"
+
+# Topology map inputs. LibreNMS can only draw links discovered from LLDP/CDP/FDP
+# or from MAC/ARP data exposed by monitored network devices.
+librenms_network_map_show_on_worldmap: true
+librenms_network_map_worldmap_show_disabled_alerts: true
+librenms_network_map_worldmap_link_type: xdp
+# librenms_network_map_items:
+#   - mac
+#   - xdp

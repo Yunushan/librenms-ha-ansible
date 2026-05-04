@@ -14,6 +14,7 @@ librenms_autodiscovery_manage: "{{ librenms_mode == 'ha' }}"
 librenms_autodiscovery_xdp: true
 librenms_autodiscovery_arp: true
 librenms_autodiscovery_arp_table: true
+librenms_autodiscovery_discovery_protocols: true
 librenms_autodiscovery_by_ip: "{{ librenms_autodiscovery_manage | bool }}"
 librenms_autodiscovery_mydomain: ""
 librenms_autodiscovery_nets: []
@@ -24,6 +25,17 @@ librenms_autodiscovery_run_once_after_deploy: true
 librenms_autodiscovery_fail_on_scan_error: false
 librenms_autodiscovery_fail_on_cycle_error: false
 librenms_autodiscovery_bootstrap_marker: /var/lib/librenms-ha-ansible/autodiscovery_bootstrapped
+librenms_network_map_manage: "{{ librenms_autodiscovery_manage | bool }}"
+librenms_network_map_items:
+  - mac
+  - xdp
+librenms_network_map_show_on_worldmap: true
+librenms_network_map_worldmap_link_type: xdp
+librenms_network_map_worldmap_show_disabled_alerts: true
+librenms_network_map_force_topology_discovery: "{{ librenms_network_map_manage | bool }}"
+librenms_network_map_topology_discovery_modules:
+  - discovery-protocols
+  - arp-table
 
 librenms_mode: standalone
 librenms_install_profile: full
@@ -332,9 +344,10 @@ librenms_seed_cluster_device_transport: udp
 librenms_seed_cluster_device_port: 161
 librenms_seed_cluster_device_poller_group: ""
 
-librenms_geolocation_manage: "{{ librenms_bootstrap_completed_effective | bool }}"
-librenms_geolocation_engine: ""
 librenms_geolocation_api_key: ""
+librenms_geolocation_api_key_valid: "{{ (librenms_geolocation_api_key | string | length) > 0 and librenms_geolocation_api_key != 'CHANGE_ME_GEOCODER_API_KEY' }}"
+librenms_geolocation_manage: "{{ librenms_bootstrap_completed_effective | bool }}"
+librenms_geolocation_engine: "{{ 'google' if (librenms_geolocation_api_key_valid | bool) else '' }}"
 librenms_geolocation_map_engine: leaflet
 librenms_geolocation_leaflet_default_lat: ""
 librenms_geolocation_leaflet_default_lng: ""
