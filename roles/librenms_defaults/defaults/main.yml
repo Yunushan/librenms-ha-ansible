@@ -36,7 +36,8 @@ librenms_network_map_show_on_worldmap: true
 librenms_network_map_worldmap_link_type: xdp
 librenms_network_map_worldmap_show_disabled_alerts: true
 librenms_network_map_force_topology_discovery: "{{ librenms_network_map_manage | bool }}"
-librenms_network_map_show_menu_without_links: true
+librenms_network_map_show_menu_without_links: false
+librenms_network_map_cleanup_legacy_menu_patch: true
 librenms_network_map_warn_when_no_links: true
 librenms_network_map_topology_discovery_modules:
   - discovery-protocols

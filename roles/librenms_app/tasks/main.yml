@@ -976,6 +976,8 @@
   register: librenms_menu_composer_legacy_patch
   changed_when: false
   failed_when: false
+  when:
+    - librenms_network_map_cleanup_legacy_menu_patch | bool
 
 - name: Restore upstream LibreNMS menu composer after legacy menu patch
   command:
@@ -993,6 +995,7 @@
     GIT_CONFIG_KEY_0: safe.directory
     GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
   when:
+    - librenms_network_map_cleanup_legacy_menu_patch | bool
     - librenms_menu_composer_legacy_patch.rc | default(1) == 0
 
 - name: Detect PHP version on Debian-family systems
@@ -3257,9 +3260,10 @@
   debug:
     msg: |-
       LibreNMS has zero rows in the links table, so upstream LibreNMS would hide
-      Maps -> Network. This role keeps the menu visible, but the map will stay
-      empty until monitored network devices expose LLDP/CDP/FDP or usable
-      FDB/ARP data over SNMP.
+      Maps -> Network. The playbook does not modify LibreNMS source to force
+      that menu item because doing so creates local git changes that block
+      automatic updates. The map will stay empty until monitored network devices
+      expose LLDP/CDP/FDP or usable FDB/ARP data over SNMP.
 
       Check SNMP credentials and reachability for switches/firewalls, then run:
       {{ librenms_install_dir }}/discovery.php -h all -m discovery-protocols
