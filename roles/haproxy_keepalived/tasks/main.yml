@@ -821,6 +821,7 @@
         return_content: false
         status_code: "{{ librenms_app_probe_success_statuses }}"
         timeout: "{{ librenms_app_probe_timeout | int }}"
+        follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
         validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
       register: librenms_vip_app_probe
       changed_when: false

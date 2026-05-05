@@ -3,6 +3,7 @@ librenms_status_vip_probe_enabled: true
 librenms_status_vip_probe_path: "{{ librenms_app_probe_path }}"
 librenms_status_vip_probe_timeout: "{{ librenms_app_probe_timeout }}"
 librenms_status_vip_probe_statuses: "{{ librenms_app_probe_success_statuses }}"
+librenms_status_vip_probe_follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
 librenms_status_runtime_wait_probe_enabled: true
 librenms_status_runtime_wait_probe_timeout: 20
 librenms_status_dispatcher_db_probe_enabled: true

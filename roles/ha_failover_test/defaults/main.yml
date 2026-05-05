@@ -15,6 +15,7 @@ librenms_failover_test_restore_services: true
 librenms_failover_test_http_path: "{{ librenms_app_probe_path }}"
 librenms_failover_test_http_statuses: "{{ librenms_app_probe_success_statuses }}"
 librenms_failover_test_http_timeout: "{{ librenms_app_probe_timeout }}"
+librenms_failover_test_http_follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
 librenms_failover_test_probe_retries: 20
 librenms_failover_test_probe_delay: 2
 librenms_failover_test_validate_certs: "{{ librenms_vip_app_probe_validate_certs }}"

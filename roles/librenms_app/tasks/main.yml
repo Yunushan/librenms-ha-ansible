@@ -33,6 +33,15 @@
         | regex_replace(':.*$', '')
       }}
 
+- name: Determine effective secure session cookie setting
+  set_fact:
+    librenms_session_secure_cookie_effective: >-
+      {{
+        (librenms_session_secure_cookie | bool)
+        if (librenms_session_secure_cookie | string | length > 0)
+        else ((librenms_app_url_effective | regex_search('^https://')) is not none)
+      }}
+
 - name: Determine effective nginx server names
   set_fact:
     librenms_nginx_server_names_effective: >-
@@ -956,28 +965,35 @@
       register: librenms_git_checkout
       throttle: 1
 
-- name: Keep LibreNMS network map menu visible when topology is enabled
-  replace:
-    path: "{{ librenms_install_dir }}/app/Http/ViewComposers/MenuComposer.php"
-    regexp: '^\s*\$vars\[''links''\] = Link::exists\(\);$'
-    replace: >-
-      $vars['links'] = Link::exists() ||
-      ! empty(LibrenmsConfig::get('network_map_items', []));
+- name: Detect legacy LibreNMS network map menu source patch
+  command:
+    argv:
+      - grep
+      - -F
+      - "LibrenmsConfig::get('network_map_items', [])"
+      - "{{ librenms_install_dir }}/app/Http/ViewComposers/MenuComposer.php"
   become: true
-  when:
-    - librenms_network_map_manage | bool
-    - librenms_network_map_show_menu_without_links | bool
+  register: librenms_menu_composer_legacy_patch
+  changed_when: false
+  failed_when: false
 
-- name: Preserve ownership for LibreNMS menu composer
-  file:
-    path: "{{ librenms_install_dir }}/app/Http/ViewComposers/MenuComposer.php"
-    owner: "{{ librenms_user }}"
-    group: "{{ librenms_group }}"
-    mode: "0644"
+- name: Restore upstream LibreNMS menu composer after legacy menu patch
+  command:
+    argv:
+      - git
+      - checkout
+      - --
+      - app/Http/ViewComposers/MenuComposer.php
+  args:
+    chdir: "{{ librenms_install_dir }}"
   become: true
+  become_user: "{{ librenms_user }}"
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ librenms_install_dir }}"
   when:
-    - librenms_network_map_manage | bool
-    - librenms_network_map_show_menu_without_links | bool
+    - librenms_menu_composer_legacy_patch.rc | default(1) == 0
 
 - name: Detect PHP version on Debian-family systems
   command:
@@ -4162,6 +4178,7 @@
         return_content: false
         status_code: "{{ librenms_app_probe_success_statuses }}"
         timeout: "{{ librenms_app_probe_timeout | int }}"
+        follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
       register: librenms_web_probe
       changed_when: false
       retries: >-
@@ -4210,6 +4227,7 @@
         return_content: false
         status_code: "{{ librenms_app_probe_success_statuses }}"
         timeout: "{{ librenms_app_probe_timeout | int }}"
+        follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
       register: librenms_web_probe_retry
       changed_when: false
       retries: "{{ (librenms_app_probe_retries | int) + 1 }}"

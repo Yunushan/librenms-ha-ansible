@@ -68,6 +68,7 @@ librenms_artisan_package_discover_timeout: 180
 librenms_fqdn: librenms.example.com
 librenms_default_fqdn_placeholder: librenms.example.com
 librenms_app_url: ""
+librenms_session_secure_cookie: ""
 librenms_app_key: CHANGE_ME
 
 librenms_timezone: Etc/UTC
@@ -235,6 +236,12 @@ librenms_haproxy_web_port: 80
 librenms_haproxy_https_port: 443
 librenms_haproxy_tls_enabled: false
 librenms_haproxy_http_redirect_to_https: "{{ librenms_haproxy_tls_enabled | bool }}"
+librenms_haproxy_canonical_host: ""
+librenms_haproxy_canonical_host_redirect: >-
+  {{
+    librenms_fqdn | length > 0
+    and librenms_fqdn != librenms_default_fqdn_placeholder
+  }}
 librenms_haproxy_tls_cert_dir: /etc/haproxy/certs
 librenms_haproxy_tls_cert_path: "{{ librenms_haproxy_tls_cert_dir }}/librenms.pem"
 librenms_haproxy_tls_manage_cert: false
@@ -303,6 +310,7 @@ librenms_app_probe_success_statuses:
 librenms_app_probe_retries: 3
 librenms_app_probe_delay: 3
 librenms_app_probe_timeout: 3
+librenms_app_probe_follow_redirects: none
 librenms_app_probe_fail_deployment: false
 librenms_vip_app_probe_enabled: true
 librenms_vip_app_probe_fail_deployment: true

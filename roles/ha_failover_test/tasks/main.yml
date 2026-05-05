@@ -184,6 +184,7 @@
     return_content: false
     status_code: "{{ librenms_failover_test_http_statuses }}"
     timeout: "{{ librenms_failover_test_http_timeout }}"
+    follow_redirects: "{{ librenms_failover_test_http_follow_redirects }}"
     validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
   delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
   register: librenms_failover_test_baseline_probe
@@ -226,6 +227,7 @@
         return_content: false
         status_code: "{{ librenms_failover_test_http_statuses }}"
         timeout: "{{ librenms_failover_test_http_timeout }}"
+        follow_redirects: "{{ librenms_failover_test_http_follow_redirects }}"
         validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
       delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
       register: librenms_failover_test_web_probe
@@ -320,6 +322,7 @@
         return_content: false
         status_code: "{{ librenms_failover_test_http_statuses }}"
         timeout: "{{ librenms_failover_test_http_timeout }}"
+        follow_redirects: "{{ librenms_failover_test_http_follow_redirects }}"
         validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
       delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
       register: librenms_failover_test_haproxy_probe
@@ -384,6 +387,7 @@
         return_content: false
         status_code: "{{ librenms_failover_test_http_statuses }}"
         timeout: "{{ librenms_failover_test_http_timeout }}"
+        follow_redirects: "{{ librenms_failover_test_http_follow_redirects }}"
         validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
       delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
       register: librenms_failover_test_haproxy_restored_probe
@@ -507,6 +511,7 @@
         return_content: false
         status_code: "{{ librenms_failover_test_http_statuses }}"
         timeout: "{{ librenms_failover_test_http_timeout }}"
+        follow_redirects: "{{ librenms_failover_test_http_follow_redirects }}"
         validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
       delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
       register: librenms_failover_test_keepalived_probe
@@ -567,6 +572,7 @@
         return_content: false
         status_code: "{{ librenms_failover_test_http_statuses }}"
         timeout: "{{ librenms_failover_test_http_timeout }}"
+        follow_redirects: "{{ librenms_failover_test_http_follow_redirects }}"
         validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
       delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
       register: librenms_failover_test_restored_probe

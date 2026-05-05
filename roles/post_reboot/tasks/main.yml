@@ -407,6 +407,7 @@
     method: GET
     return_content: false
     timeout: "{{ librenms_post_reboot_vip_probe_timeout | int }}"
+    follow_redirects: "{{ librenms_post_reboot_vip_probe_follow_redirects }}"
     validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
   delegate_to: "{{ librenms_post_reboot_probe_delegate }}"
   register: librenms_post_reboot_vip_probe

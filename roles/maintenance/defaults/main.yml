@@ -21,4 +21,5 @@ librenms_maintenance_dispatcher_delay: 3
 librenms_maintenance_http_path: "{{ librenms_app_probe_path }}"
 librenms_maintenance_http_statuses: "{{ librenms_app_probe_success_statuses }}"
 librenms_maintenance_http_timeout: "{{ librenms_app_probe_timeout }}"
+librenms_maintenance_http_follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
 librenms_maintenance_validate_certs: "{{ librenms_vip_app_probe_validate_certs }}"

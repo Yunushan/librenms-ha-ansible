@@ -14,6 +14,32 @@
 {% set librenms_haproxy_tls_bind =
   librenms_haproxy_bind_address ~ ':' ~ librenms_haproxy_https_port
 %}
+{% set librenms_haproxy_canonical_host_effective =
+  (
+    librenms_haproxy_canonical_host
+    if librenms_haproxy_canonical_host | length > 0
+    else librenms_fqdn
+  )
+%}
+{% set librenms_haproxy_canonical_scheme =
+  'https' if librenms_haproxy_tls_enabled | bool else 'http'
+%}
+{% set librenms_haproxy_canonical_port =
+  (
+    ':' ~ librenms_haproxy_https_port
+    if librenms_haproxy_tls_enabled | bool and librenms_haproxy_https_port | int != 443
+    else (
+      ':' ~ librenms_haproxy_web_port
+      if not librenms_haproxy_tls_enabled | bool and librenms_haproxy_web_port | int != 80
+      else ''
+    )
+  )
+%}
+{% set librenms_haproxy_canonical_url =
+  librenms_haproxy_canonical_scheme ~ '://'
+  ~ librenms_haproxy_canonical_host_effective
+  ~ librenms_haproxy_canonical_port
+%}
 {% set librenms_haproxy_web_default_server =
   'inter ' ~ librenms_haproxy_web_check_interval
   ~ ' fall ' ~ librenms_haproxy_web_check_fall
@@ -55,6 +81,10 @@ frontend librenms_web_http
     mode http
     option httplog
     option forwardfor
+{% if librenms_haproxy_canonical_host_redirect | bool and librenms_haproxy_canonical_host_effective | length > 0 %}
+    acl librenms_canonical_host hdr(host),lower -i {{ librenms_haproxy_canonical_host_effective | lower }}
+    http-request redirect location {{ librenms_haproxy_canonical_url }}%[pathq] code 301 unless librenms_canonical_host
+{% endif %}
 {% if librenms_haproxy_tls_enabled | bool and librenms_haproxy_http_redirect_to_https | bool %}
     http-request redirect scheme https code 301
 {% else %}
@@ -68,6 +98,10 @@ frontend librenms_web_https
     mode http
     option httplog
     option forwardfor
+{% if librenms_haproxy_canonical_host_redirect | bool and librenms_haproxy_canonical_host_effective | length > 0 %}
+    acl librenms_canonical_host hdr(host),lower -i {{ librenms_haproxy_canonical_host_effective | lower }}
+    http-request redirect location {{ librenms_haproxy_canonical_url }}%[pathq] code 301 unless librenms_canonical_host
+{% endif %}
     http-request set-header X-Forwarded-Proto https
     http-request set-header X-Forwarded-Ssl on
     default_backend librenms_web_nodes

@@ -200,6 +200,7 @@
     return_content: false
     status_code: "{{ librenms_maintenance_http_statuses }}"
     timeout: "{{ librenms_maintenance_http_timeout | int }}"
+    follow_redirects: "{{ librenms_maintenance_http_follow_redirects }}"
     validate_certs: "{{ librenms_maintenance_validate_certs | bool }}"
   delegate_to: "{{ librenms_maintenance_probe_delegate }}"
   register: librenms_maintenance_exit_vip

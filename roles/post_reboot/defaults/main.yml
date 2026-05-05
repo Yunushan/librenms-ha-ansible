@@ -19,3 +19,4 @@ librenms_post_reboot_fail_on_degraded: true
 librenms_post_reboot_vip_probe_path: "{{ librenms_app_probe_path }}"
 librenms_post_reboot_vip_probe_timeout: "{{ librenms_app_probe_timeout }}"
 librenms_post_reboot_vip_probe_statuses: "{{ librenms_app_probe_success_statuses }}"
+librenms_post_reboot_vip_probe_follow_redirects: "{{ librenms_app_probe_follow_redirects }}"

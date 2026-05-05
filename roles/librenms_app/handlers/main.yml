@@ -14,6 +14,24 @@
   loop: "{{ librenms_handler_bootstrap_cache_files.files | default([]) }}"
   listen: Clear LibreNMS bootstrap cache
 
+- name: Rebuild LibreNMS config cache
+  command:
+    argv:
+      - timeout
+      - 60s
+      - php
+      - artisan
+      - config:cache
+      - --no-ansi
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: false
+  listen: Clear LibreNMS bootstrap cache
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+
 - name: Restart PHP-FPM
   service:
     name: "{{ librenms_php_fpm_service_effective }}"
