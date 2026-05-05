@@ -41,8 +41,8 @@ VALUES
   (@owner_id, 'top-devices', 1, 7, 10, 5, 'Top Devices by Traffic', 60, '', @dashboard_id),
   (@owner_id, 'top-interfaces', 11, 7, 10, 5, 'Top Interfaces', 60, '', @dashboard_id),
   (@owner_id, 'eventlog', 1, 12, 10, 5, 'Recent Eventlog', 60, '', @dashboard_id),
-  (@owner_id, 'device-types', 11, 12, 5, 5, 'Device Types / Distribution', 300, '', @dashboard_id),
-  (@owner_id, 'worldmap', 16, 12, 5, 5, 'Network Overview', 300, '', @dashboard_id);
+  (@owner_id, 'device-types', 11, 12, 5, 5, 'Device Types / Distribution', 60, '', @dashboard_id),
+  (@owner_id, 'worldmap', 16, 12, 5, 5, 'Network Overview', 60, '', @dashboard_id);
 
 COMMIT;
 
