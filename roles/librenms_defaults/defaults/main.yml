@@ -25,6 +25,9 @@ librenms_autodiscovery_run_once_after_deploy: true
 librenms_autodiscovery_fail_on_scan_error: false
 librenms_autodiscovery_fail_on_cycle_error: false
 librenms_autodiscovery_bootstrap_marker: /var/lib/librenms-ha-ansible/autodiscovery_bootstrapped
+librenms_availability_manage: "{{ librenms_bootstrap_completed_effective | bool }}"
+librenms_availability_polling_enabled: true
+librenms_availability_refresh_after_deploy: "{{ librenms_availability_manage | bool }}"
 librenms_network_map_manage: "{{ librenms_autodiscovery_manage | bool }}"
 librenms_network_map_items:
   - mac
@@ -237,6 +240,12 @@ librenms_haproxy_tls_cert_path: "{{ librenms_haproxy_tls_cert_dir }}/librenms.pe
 librenms_haproxy_tls_manage_cert: false
 librenms_haproxy_tls_pem_src: ""
 librenms_haproxy_tls_pem_content: ""
+librenms_haproxy_tls_cert_src: ""
+librenms_haproxy_tls_key_src: ""
+librenms_haproxy_tls_chain_src: ""
+librenms_haproxy_tls_cert_content: ""
+librenms_haproxy_tls_key_content: ""
+librenms_haproxy_tls_chain_content: ""
 librenms_haproxy_tls_bind_options: alpn h2,http/1.1
 librenms_letsencrypt_enabled: false
 librenms_letsencrypt_install_certbot: true
@@ -363,6 +372,23 @@ librenms_geolocation_leaflet_tile_url: ""
 librenms_location_map: {}
 librenms_location_map_regex: {}
 librenms_location_map_regex_sub: {}
+librenms_geolocation_warn_missing_source: true
+librenms_geolocation_refresh_after_deploy: "{{ librenms_geolocation_manage | bool }}"
+librenms_geolocation_has_location_source: >-
+  {{
+    (
+      (librenms_snmp_syslocation_latitude | string | length) > 0
+      and (librenms_snmp_syslocation_longitude | string | length) > 0
+    )
+    or (
+      (librenms_geolocation_api_key_valid | bool)
+      and (librenms_snmp_syslocation | string | trim) != 'LibreNMS Node'
+      and (librenms_snmp_syslocation | string | trim | length) > 0
+    )
+    or (librenms_location_map | length) > 0
+    or (librenms_location_map_regex | length) > 0
+    or (librenms_location_map_regex_sub | length) > 0
+  }}
 
 librenms_manage_dispatcher: true
 librenms_manage_scheduler: true

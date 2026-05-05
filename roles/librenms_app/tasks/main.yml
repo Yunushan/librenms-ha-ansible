@@ -2527,6 +2527,55 @@
     - item.username not in (librenms_snmp_v3_current.stdout | default(''))
   loop: "{{ librenms_snmp_v3_users }}"
 
+- name: Configure LibreNMS availability polling module
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - poller_modules.availability
+      - "{{ librenms_availability_polling_enabled | bool | ternary('true', 'false') }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_availability_manage | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Refresh LibreNMS availability data after deployment
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - device:poll
+      - all
+      - -m
+      - availability
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_availability_refresh
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_availability_manage | bool
+    - librenms_availability_refresh_after_deploy | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Warn when LibreNMS availability refresh fails
+  debug:
+    msg: >-
+      LibreNMS availability refresh returned rc={{ librenms_availability_refresh.rc }}.
+      The normal dispatcher poller will try again, but check SNMP reachability
+      for devices if the Availability panel still shows no useful history.
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_availability_manage | bool
+    - librenms_availability_refresh is defined
+    - (librenms_availability_refresh.rc | default(0) | int) != 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
 - name: Validate LibreNMS geolocation API key
   assert:
     that:
@@ -2628,6 +2677,59 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_geolocation_manage | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Warn when LibreNMS has no geolocation source
+  debug:
+    msg: |-
+      LibreNMS cannot calculate Lat / Lng from the current inputs. The SNMP
+      sysLocation is "{{ librenms_snmp_syslocation }}", no fixed coordinates are
+      configured, no geocodable address/map is set, and location maps are empty.
+
+      Set one of these in inventory, then rerun the playbook:
+      - librenms_snmp_syslocation_latitude and librenms_snmp_syslocation_longitude
+      - librenms_geolocation_api_key with a real address in librenms_snmp_syslocation
+      - librenms_location_map or librenms_location_map_regex_sub
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - librenms_geolocation_warn_missing_source | bool
+    - not (librenms_geolocation_has_location_source | bool)
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Refresh LibreNMS geolocation data after deployment
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - device:poll
+      - all
+      - -m
+      - system
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_geolocation_refresh
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - librenms_geolocation_refresh_after_deploy | bool
+    - librenms_geolocation_has_location_source | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Warn when LibreNMS geolocation refresh fails
+  debug:
+    msg: >-
+      LibreNMS geolocation refresh returned rc={{ librenms_geolocation_refresh.rc }}.
+      The normal dispatcher poller will try again, but check SNMP and geocoder
+      settings if devices still show Lat / Lng as N/A.
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_geolocation_manage | bool
+    - librenms_geolocation_refresh is defined
+    - (librenms_geolocation_refresh.rc | default(0) | int) != 0
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Determine effective LibreNMS auto-discovery networks

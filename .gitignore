@@ -10,6 +10,13 @@ vault.yml
 vault-*.yml
 *.vault
 
+# Local TLS material
+files/*.crt
+files/*.pem
+files/*.key
+certs/
+secrets/
+
 # IDE
 .vscode/
 .idea/

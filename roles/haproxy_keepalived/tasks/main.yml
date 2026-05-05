@@ -33,6 +33,28 @@
     reload: true
   when: librenms_vip_enabled | bool
 
+- name: Count managed HAProxy TLS certificate input methods
+  set_fact:
+    librenms_haproxy_tls_managed_input_methods: >-
+      {{
+        [
+          (librenms_haproxy_tls_pem_src | length > 0),
+          (librenms_haproxy_tls_pem_content | length > 0),
+          (
+            (librenms_haproxy_tls_cert_src | length > 0)
+            and (librenms_haproxy_tls_key_src | length > 0)
+          ),
+          (
+            (librenms_haproxy_tls_cert_content | length > 0)
+            and (librenms_haproxy_tls_key_content | length > 0)
+          )
+        ]
+        | select('equalto', true)
+        | list
+        | length
+      }}
+  when: librenms_haproxy_tls_enabled | bool or librenms_letsencrypt_enabled | bool
+
 - name: Validate HAProxy TLS certificate settings
   assert:
     that:
@@ -42,12 +64,37 @@
       - >-
         librenms_letsencrypt_enabled | bool
         or not librenms_haproxy_tls_manage_cert | bool
-        or librenms_haproxy_tls_pem_src | length > 0
-        or librenms_haproxy_tls_pem_content | length > 0
+        or (librenms_haproxy_tls_managed_input_methods | int) == 1
       - >-
         not librenms_haproxy_tls_manage_cert | bool
-        or librenms_haproxy_tls_pem_src | length == 0
-        or librenms_haproxy_tls_pem_content | length == 0
+        or librenms_haproxy_tls_cert_src | length == 0
+        or librenms_haproxy_tls_key_src | length > 0
+      - >-
+        not librenms_haproxy_tls_manage_cert | bool
+        or librenms_haproxy_tls_key_src | length == 0
+        or librenms_haproxy_tls_cert_src | length > 0
+      - >-
+        not librenms_haproxy_tls_manage_cert | bool
+        or librenms_haproxy_tls_cert_content | length == 0
+        or librenms_haproxy_tls_key_content | length > 0
+      - >-
+        not librenms_haproxy_tls_manage_cert | bool
+        or librenms_haproxy_tls_key_content | length == 0
+        or librenms_haproxy_tls_cert_content | length > 0
+      - >-
+        not librenms_haproxy_tls_manage_cert | bool
+        or librenms_haproxy_tls_chain_src | length == 0
+        or (
+          librenms_haproxy_tls_cert_src | length > 0
+          and librenms_haproxy_tls_key_src | length > 0
+        )
+      - >-
+        not librenms_haproxy_tls_manage_cert | bool
+        or librenms_haproxy_tls_chain_content | length == 0
+        or (
+          librenms_haproxy_tls_cert_content | length > 0
+          and librenms_haproxy_tls_key_content | length > 0
+        )
       - >-
         not librenms_letsencrypt_enabled | bool
         or librenms_letsencrypt_email | length > 0
@@ -60,8 +107,11 @@
     fail_msg: >-
       Enable librenms_haproxy_tls_enabled for TLS. Then either provide an existing
       HAProxy PEM at librenms_haproxy_tls_cert_path, set librenms_haproxy_tls_manage_cert
-      with one of librenms_haproxy_tls_pem_src or librenms_haproxy_tls_pem_content,
-      or enable librenms_letsencrypt_enabled with email, domains, and certbot
+      with exactly one managed certificate source: librenms_haproxy_tls_pem_src,
+      librenms_haproxy_tls_pem_content, librenms_haproxy_tls_cert_src plus
+      librenms_haproxy_tls_key_src, or librenms_haproxy_tls_cert_content plus
+      librenms_haproxy_tls_key_content. Alternatively enable
+      librenms_letsencrypt_enabled with email, domains, and certbot
       authenticator args.
   when: librenms_haproxy_tls_enabled | bool or librenms_letsencrypt_enabled | bool
 
@@ -217,6 +267,48 @@
     - librenms_haproxy_tls_manage_cert | bool
     - not librenms_letsencrypt_enabled | bool
     - librenms_haproxy_tls_pem_content | length > 0
+
+- name: Build HAProxy TLS PEM from controller certificate and key files
+  copy:
+    dest: "{{ librenms_haproxy_tls_cert_path }}"
+    content: |
+      {{ lookup('file', librenms_haproxy_tls_cert_src) | trim }}
+      {% if librenms_haproxy_tls_chain_src | length > 0 %}
+      {{ lookup('file', librenms_haproxy_tls_chain_src) | trim }}
+      {% endif %}
+      {{ lookup('file', librenms_haproxy_tls_key_src) | trim }}
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart HAProxy
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_haproxy_tls_manage_cert | bool
+    - not librenms_letsencrypt_enabled | bool
+    - librenms_haproxy_tls_cert_src | length > 0
+    - librenms_haproxy_tls_key_src | length > 0
+
+- name: Build HAProxy TLS PEM from certificate and key variables
+  copy:
+    dest: "{{ librenms_haproxy_tls_cert_path }}"
+    content: |
+      {{ librenms_haproxy_tls_cert_content | trim }}
+      {% if librenms_haproxy_tls_chain_content | length > 0 %}
+      {{ librenms_haproxy_tls_chain_content | trim }}
+      {% endif %}
+      {{ librenms_haproxy_tls_key_content | trim }}
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart HAProxy
+  when:
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_haproxy_tls_manage_cert | bool
+    - not librenms_letsencrypt_enabled | bool
+    - librenms_haproxy_tls_cert_content | length > 0
+    - librenms_haproxy_tls_key_content | length > 0
 
 - name: Check unmanaged HAProxy TLS PEM exists
   stat:

@@ -36,6 +36,16 @@ librenms_vip_interface: ""
 librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
 librenms_keepalived_vrid: 51
 
+# Domain/TLS through the HAProxy VIP. Point your DNS A record at
+# librenms_vip_ip, then enable these values when you have certificate files.
+#
+# librenms_fqdn: librenms.example.com
+# librenms_haproxy_tls_enabled: true
+# librenms_haproxy_tls_manage_cert: true
+# librenms_haproxy_tls_cert_src: "{{ playbook_dir }}/../files/librenms.crt"
+# librenms_haproxy_tls_key_src: "{{ playbook_dir }}/../files/librenms.key.pem"
+# librenms_haproxy_tls_chain_src: "{{ playbook_dir }}/../files/ca-chain.crt"
+
 librenms_bootstrap_completed: false
 librenms_manage_local_snmpd: true
 # Auto-add hosts in librenms_nodes as monitored LibreNMS devices after bootstrap.
