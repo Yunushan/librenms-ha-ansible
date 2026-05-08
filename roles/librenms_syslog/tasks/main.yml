@@ -120,6 +120,34 @@
     - (librenms_syslog_xlate | length) > 0
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
+- name: Discover LibreNMS bootstrap cache files after syslog config
+  find:
+    paths: "{{ librenms_install_dir }}/bootstrap/cache"
+    file_type: file
+    excludes: ".gitignore"
+  register: librenms_syslog_bootstrap_cache_files
+
+- name: Remove LibreNMS bootstrap cache files after syslog config
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_syslog_bootstrap_cache_files.files | default([]) }}"
+
+- name: Rebuild LibreNMS config cache after syslog config
+  command:
+    argv:
+      - timeout
+      - 60s
+      - php
+      - artisan
+      - config:cache
+      - --no-ansi
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: false
+
 - name: Enable and start rsyslog
   service:
     name: "{{ librenms_syslog_service_name }}"
