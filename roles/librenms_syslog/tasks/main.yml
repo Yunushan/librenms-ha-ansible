@@ -205,7 +205,19 @@
       - -N1
   changed_when: false
 
-- name: Enable LibreNMS syslog ingestion
+- name: Read LibreNMS syslog ingestion state
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:get
+      - enable_syslog
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_syslog_enabled_state
+  changed_when: false
+  failed_when: false
+
+- name: Enable LibreNMS syslog ingestion on this node
   command:
     argv:
       - "{{ librenms_install_dir }}/lnms"
@@ -215,7 +227,7 @@
   become: true
   become_user: "{{ librenms_user }}"
   changed_when: true
-  when: inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+  when: (librenms_syslog_enabled_state.stdout | default('') | trim | lower) != 'true'
 
 - name: Configure LibreNMS syslog retention
   command:
@@ -286,6 +298,18 @@
   become: true
   become_user: "{{ librenms_user }}"
   changed_when: false
+
+- name: Verify LibreNMS syslog ingestion is active on this node
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:get
+      - enable_syslog
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_syslog_enabled_verify
+  changed_when: false
+  failed_when: (librenms_syslog_enabled_verify.stdout | default('') | trim | lower) != 'true'
 
 - name: Enable and start rsyslog
   service:
