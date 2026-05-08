@@ -59,6 +59,7 @@ librenms_syslog_listen_udp: true
 librenms_syslog_listen_tcp: true
 librenms_syslog_udp_port: 514
 librenms_syslog_tcp_port: 514
+librenms_syslog_manage_firewall: true
 librenms_syslog_host_property: fromhost-ip
 librenms_syslog_purge_days: 30
 librenms_syslog_enable_hooks: false

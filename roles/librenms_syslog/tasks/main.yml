@@ -18,6 +18,72 @@
     name: "{{ librenms_syslog_packages }}"
     state: present
 
+- name: Gather service facts for syslog firewall detection
+  service_facts:
+  when: librenms_syslog_manage_firewall | bool
+
+- name: Detect UFW availability on Debian syslog receivers
+  command:
+    argv:
+      - ufw
+      - status
+  register: librenms_syslog_ufw_status
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_syslog_manage_firewall | bool
+    - ansible_os_family == 'Debian'
+
+- name: Allow LibreNMS syslog UDP port with UFW when available
+  community.general.ufw:
+    rule: allow
+    port: "{{ librenms_syslog_udp_port }}"
+    proto: udp
+  when:
+    - librenms_syslog_manage_firewall | bool
+    - librenms_syslog_listen_udp | bool
+    - ansible_os_family == 'Debian'
+    - librenms_syslog_ufw_status is defined
+    - librenms_syslog_ufw_status.rc == 0
+
+- name: Allow LibreNMS syslog TCP port with UFW when available
+  community.general.ufw:
+    rule: allow
+    port: "{{ librenms_syslog_tcp_port }}"
+    proto: tcp
+  when:
+    - librenms_syslog_manage_firewall | bool
+    - librenms_syslog_listen_tcp | bool
+    - ansible_os_family == 'Debian'
+    - librenms_syslog_ufw_status is defined
+    - librenms_syslog_ufw_status.rc == 0
+
+- name: Allow LibreNMS syslog UDP port with firewalld when active
+  ansible.posix.firewalld:
+    port: "{{ librenms_syslog_udp_port }}/udp"
+    permanent: true
+    immediate: true
+    state: enabled
+  when:
+    - librenms_syslog_manage_firewall | bool
+    - librenms_syslog_listen_udp | bool
+    - ansible_os_family == 'RedHat'
+    - "'firewalld.service' in ansible_facts.services"
+    - ansible_facts.services['firewalld.service'].state == 'running'
+
+- name: Allow LibreNMS syslog TCP port with firewalld when active
+  ansible.posix.firewalld:
+    port: "{{ librenms_syslog_tcp_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  when:
+    - librenms_syslog_manage_firewall | bool
+    - librenms_syslog_listen_tcp | bool
+    - ansible_os_family == 'RedHat'
+    - "'firewalld.service' in ansible_facts.services"
+    - ansible_facts.services['firewalld.service'].state == 'running'
+
 - name: Check rsyslog runtime user
   getent:
     database: passwd
