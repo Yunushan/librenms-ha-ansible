@@ -50,3 +50,13 @@ input(
     ruleset="librenms_remote"
 )
 {% endif %}
+
+{% if librenms_syslog_forward_local_logs | bool %}
+# Forward this node's local system logs to the LibreNMS syslog receiver.
+{{ librenms_syslog_forward_selector }} action(
+    type="omfwd"
+    target="{{ librenms_syslog_forward_target }}"
+    port="{{ librenms_syslog_forward_port }}"
+    protocol="{{ librenms_syslog_forward_protocol }}"
+)
+{% endif %}

@@ -60,6 +60,17 @@ librenms_syslog_listen_tcp: true
 librenms_syslog_udp_port: 514
 librenms_syslog_tcp_port: 514
 librenms_syslog_manage_firewall: true
+librenms_syslog_forward_local_logs: "{{ librenms_mode == 'ha' }}"
+librenms_syslog_forward_target: >-
+  {{
+    librenms_vip_ip
+    if (librenms_vip_enabled | default(false) | bool)
+    and (librenms_vip_ip | default('') | length > 0)
+    else librenms_fqdn
+  }}
+librenms_syslog_forward_port: "{{ librenms_syslog_udp_port }}"
+librenms_syslog_forward_protocol: udp
+librenms_syslog_forward_selector: "*.info;auth,authpriv.none;cron.none;mail.none"
 librenms_syslog_host_property: fromhost-ip
 librenms_syslog_purge_days: 30
 librenms_syslog_enable_hooks: false

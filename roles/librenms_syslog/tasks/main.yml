@@ -5,6 +5,9 @@
       - librenms_syslog_backend == 'rsyslog'
       - librenms_syslog_listen_udp | bool or librenms_syslog_listen_tcp | bool
       - librenms_syslog_host_property in ['fromhost', 'fromhost-ip', 'hostname']
+      - librenms_syslog_forward_protocol in ['udp', 'tcp']
+      - not (librenms_syslog_forward_local_logs | bool) or librenms_syslog_forward_target | length > 0
+      - not (librenms_syslog_forward_local_logs | bool) or librenms_syslog_forward_selector | length > 0
     fail_msg: "Only the rsyslog backend is currently supported for LibreNMS syslog ingestion."
 
 - name: Refresh apt cache for syslog receiver packages
