@@ -43,12 +43,24 @@
     path: "{{ librenms_install_dir }}/syslog.php"
   register: librenms_syslog_sink
 
+- name: Check LibreNMS syslog PHP binary exists
+  stat:
+    path: "{{ librenms_syslog_php_binary }}"
+  register: librenms_syslog_php_binary_stat
+
 - name: Fail when LibreNMS syslog sink is missing
   fail:
     msg: >-
       {{ librenms_install_dir }}/syslog.php does not exist.
       Run the LibreNMS application deployment before enabling syslog ingestion.
   when: not (librenms_syslog_sink.stat.exists | default(false))
+
+- name: Fail when LibreNMS syslog PHP binary is missing
+  fail:
+    msg: >-
+      {{ librenms_syslog_php_binary }} does not exist.
+      Set librenms_syslog_php_binary to the PHP CLI path on this host.
+  when: not (librenms_syslog_php_binary_stat.stat.exists | default(false))
 
 - name: Deploy rsyslog LibreNMS receiver configuration
   template:

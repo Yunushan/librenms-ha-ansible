@@ -49,6 +49,7 @@ librenms_syslog_packages:
   - rsyslog
 librenms_syslog_service_name: rsyslog
 librenms_syslog_conf_path: /etc/rsyslog.d/30-librenms.conf
+librenms_syslog_php_binary: /usr/bin/php
 librenms_syslog_runtime_user: syslog
 librenms_syslog_manage_runtime_user_group: true
 librenms_syslog_listen_udp: true
