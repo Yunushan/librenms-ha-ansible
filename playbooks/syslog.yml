@@ -1,4 +1,12 @@
 ---
+- name: Refresh HAProxy database listener for syslog workers
+  hosts: lb_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: haproxy_keepalived
+      when: librenms_vip_enabled | bool or (librenms_db_mode == 'galera') or ((librenms_active_web_nodes | default([])) | length > 1)
+
 - name: Configure LibreNMS syslog ingestion
   hosts: librenms_nodes:!maintenance_nodes
   become: true
