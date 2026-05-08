@@ -4,6 +4,7 @@
   become: true
   gather_facts: true
   roles:
+    - role: common
     - role: haproxy_keepalived
       when: librenms_vip_enabled | bool or (librenms_db_mode == 'galera') or ((librenms_active_web_nodes | default([])) | length > 1)
 
