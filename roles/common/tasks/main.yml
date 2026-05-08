@@ -100,6 +100,51 @@
     fail_msg: "Galera mode requires an explicit DB host, VIP, or lb_nodes frontend."
   when: librenms_db_mode == 'galera'
 
+- name: Check whether Ubuntu deb822 sources already include universe
+  shell: |
+    if [ ! -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+      exit 1
+    fi
+    awk '
+      /^Suites:/ {
+        suite = ($0 ~ /(^|[[:space:]]){{ ansible_distribution_release }}([[:space:]]|$)/)
+      }
+      /^Components:/ && suite && $0 ~ /(^|[[:space:]])universe([[:space:]]|$)/ {
+        found = 1
+      }
+      END { exit found ? 0 : 1 }
+    ' /etc/apt/sources.list.d/ubuntu.sources
+  args:
+    executable: /bin/bash
+  register: librenms_ubuntu_sources_universe
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Debian'
+    - ansible_distribution == 'Ubuntu'
+    - librenms_enable_extra_repos | bool
+
+- name: Check for legacy Ubuntu universe source file
+  stat:
+    path: /etc/apt/sources.list.d/archive_ubuntu_com_ubuntu.list
+  register: librenms_ubuntu_legacy_universe_source
+  when:
+    - ansible_os_family == 'Debian'
+    - ansible_distribution == 'Ubuntu'
+    - librenms_enable_extra_repos | bool
+
+- name: Remove duplicate Ubuntu universe source when deb822 already provides it
+  lineinfile:
+    path: /etc/apt/sources.list.d/archive_ubuntu_com_ubuntu.list
+    regexp: "^deb\\s+https?://archive\\.ubuntu\\.com/ubuntu\\s+{{ ansible_distribution_release }}\\s+universe\\s*$"
+    state: absent
+  when:
+    - ansible_os_family == 'Debian'
+    - ansible_distribution == 'Ubuntu'
+    - librenms_enable_extra_repos | bool
+    - (librenms_ubuntu_sources_universe.rc | default(1)) == 0
+    - librenms_ubuntu_legacy_universe_source.stat.exists | default(false)
+
 - name: Configure Ubuntu universe repository
   apt_repository:
     repo: "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
@@ -108,6 +153,7 @@
     - ansible_os_family == 'Debian'
     - ansible_distribution == 'Ubuntu'
     - librenms_enable_extra_repos | bool
+    - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
 
 - name: Refresh apt cache
   apt:
