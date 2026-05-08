@@ -1,0 +1,52 @@
+# Managed by Ansible. Feed remote syslog messages to LibreNMS.
+
+{% if librenms_syslog_listen_udp | bool %}
+module(load="imudp")
+{% endif %}
+{% if librenms_syslog_listen_tcp | bool %}
+module(load="imtcp")
+{% endif %}
+module(load="omprog")
+
+template(name="librenms" type="list") {
+    property(name="{{ librenms_syslog_host_property }}")
+    constant(value="||")
+    property(name="syslogfacility")
+    constant(value="||")
+    property(name="syslogpriority")
+    constant(value="||")
+    property(name="syslogseverity")
+    constant(value="||")
+    property(name="syslogtag")
+    constant(value="||")
+    property(name="timegenerated" dateFormat="mysql")
+    constant(value="||")
+    property(name="msg")
+    constant(value="||")
+    property(name="programname")
+    constant(value="\n")
+}
+
+ruleset(name="librenms_remote") {
+    action(
+        type="omprog"
+        binary="{{ librenms_install_dir }}/syslog.php"
+        template="librenms"
+    )
+    stop
+}
+
+{% if librenms_syslog_listen_udp | bool %}
+input(
+    type="imudp"
+    port="{{ librenms_syslog_udp_port }}"
+    ruleset="librenms_remote"
+)
+{% endif %}
+{% if librenms_syslog_listen_tcp | bool %}
+input(
+    type="imtcp"
+    port="{{ librenms_syslog_tcp_port }}"
+    ruleset="librenms_remote"
+)
+{% endif %}

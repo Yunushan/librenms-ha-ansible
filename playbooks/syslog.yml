@@ -1,0 +1,8 @@
+---
+- name: Configure LibreNMS syslog ingestion
+  hosts: librenms_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: librenms_syslog
+      when: librenms_syslog_enabled | bool

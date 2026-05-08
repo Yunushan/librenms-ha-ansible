@@ -1,0 +1,127 @@
+---
+- name: Validate LibreNMS syslog backend
+  assert:
+    that:
+      - librenms_syslog_backend == 'rsyslog'
+      - librenms_syslog_listen_udp | bool or librenms_syslog_listen_tcp | bool
+      - librenms_syslog_host_property in ['fromhost', 'hostname']
+    fail_msg: "Only the rsyslog backend is currently supported for LibreNMS syslog ingestion."
+
+- name: Refresh apt cache for syslog receiver packages
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+
+- name: Install LibreNMS syslog receiver packages
+  package:
+    name: "{{ librenms_syslog_packages }}"
+    state: present
+
+- name: Check rsyslog runtime user
+  getent:
+    database: passwd
+    key: "{{ librenms_syslog_runtime_user }}"
+  register: librenms_syslog_runtime_user_getent
+  failed_when: false
+  changed_when: false
+  when: librenms_syslog_runtime_user | length > 0
+
+- name: Grant rsyslog runtime user access to LibreNMS files
+  user:
+    name: "{{ librenms_syslog_runtime_user }}"
+    groups: "{{ librenms_group }}"
+    append: true
+  notify: Restart rsyslog
+  when:
+    - librenms_syslog_manage_runtime_user_group | bool
+    - librenms_syslog_runtime_user | length > 0
+    - (librenms_syslog_runtime_user_getent.ansible_facts.getent_passwd | default({})) | length > 0
+
+- name: Check LibreNMS syslog sink exists
+  stat:
+    path: "{{ librenms_install_dir }}/syslog.php"
+  register: librenms_syslog_sink
+
+- name: Fail when LibreNMS syslog sink is missing
+  fail:
+    msg: >-
+      {{ librenms_install_dir }}/syslog.php does not exist.
+      Run the LibreNMS application deployment before enabling syslog ingestion.
+  when: not (librenms_syslog_sink.stat.exists | default(false))
+
+- name: Deploy rsyslog LibreNMS receiver configuration
+  template:
+    src: rsyslog-librenms.conf.j2
+    dest: "{{ librenms_syslog_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart rsyslog
+
+- name: Validate rsyslog configuration
+  command:
+    argv:
+      - rsyslogd
+      - -N1
+  changed_when: false
+
+- name: Enable LibreNMS syslog ingestion
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - enable_syslog
+      - "true"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when: inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS syslog retention
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - syslog_purge
+      - "{{ librenms_syslog_purge_days }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when:
+    - (librenms_syslog_purge_days | int) > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Enable LibreNMS syslog hooks
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - enable_syslog_hooks
+      - "{{ librenms_syslog_enable_hooks | bool | ternary('true', 'false') }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when:
+    - librenms_syslog_enable_hooks | bool
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Configure LibreNMS syslog hostname translations
+  command:
+    argv:
+      - "{{ librenms_install_dir }}/lnms"
+      - config:set
+      - syslog_xlate
+      - "{{ librenms_syslog_xlate | to_json }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when:
+    - (librenms_syslog_xlate | length) > 0
+    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
+
+- name: Enable and start rsyslog
+  service:
+    name: "{{ librenms_syslog_service_name }}"
+    state: started
+    enabled: true
