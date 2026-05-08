@@ -50,13 +50,16 @@ librenms_syslog_packages:
 librenms_syslog_service_name: rsyslog
 librenms_syslog_conf_path: /etc/rsyslog.d/30-librenms.conf
 librenms_syslog_php_binary: /usr/bin/php
+librenms_syslog_manage_apparmor: "{{ ansible_os_family == 'Debian' }}"
+librenms_syslog_apparmor_profile_path: /etc/apparmor.d/usr.sbin.rsyslogd
+librenms_syslog_apparmor_local_path: /etc/apparmor.d/local/usr.sbin.rsyslogd
 librenms_syslog_runtime_user: syslog
 librenms_syslog_manage_runtime_user_group: true
 librenms_syslog_listen_udp: true
 librenms_syslog_listen_tcp: true
 librenms_syslog_udp_port: 514
 librenms_syslog_tcp_port: 514
-librenms_syslog_host_property: fromhost
+librenms_syslog_host_property: fromhost-ip
 librenms_syslog_purge_days: 30
 librenms_syslog_enable_hooks: false
 librenms_syslog_xlate: {}

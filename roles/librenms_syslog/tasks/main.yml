@@ -4,7 +4,7 @@
     that:
       - librenms_syslog_backend == 'rsyslog'
       - librenms_syslog_listen_udp | bool or librenms_syslog_listen_tcp | bool
-      - librenms_syslog_host_property in ['fromhost', 'hostname']
+      - librenms_syslog_host_property in ['fromhost', 'fromhost-ip', 'hostname']
     fail_msg: "Only the rsyslog backend is currently supported for LibreNMS syslog ingestion."
 
 - name: Refresh apt cache for syslog receiver packages
@@ -61,6 +61,60 @@
       {{ librenms_syslog_php_binary }} does not exist.
       Set librenms_syslog_php_binary to the PHP CLI path on this host.
   when: not (librenms_syslog_php_binary_stat.stat.exists | default(false))
+
+- name: Check rsyslog AppArmor profile exists
+  stat:
+    path: "{{ librenms_syslog_apparmor_profile_path }}"
+  register: librenms_syslog_apparmor_profile
+  when: librenms_syslog_manage_apparmor | bool
+
+- name: Ensure rsyslog AppArmor local override directory exists
+  file:
+    path: "{{ librenms_syslog_apparmor_local_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_syslog_manage_apparmor | bool
+    - librenms_syslog_apparmor_profile.stat.exists | default(false)
+
+- name: Permit rsyslog omprog to execute LibreNMS syslog sink
+  blockinfile:
+    path: "{{ librenms_syslog_apparmor_local_path }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED LIBRENMS SYSLOG"
+    block: |
+      {{ librenms_syslog_php_binary }} ix,
+      /etc/alternatives/php ix,
+      /usr/bin/php* ix,
+      {{ librenms_install_dir }}/syslog.php r,
+      {{ librenms_install_dir }}/** r,
+      owner {{ librenms_install_dir }}/logs/** rwk,
+      owner {{ librenms_install_dir }}/storage/** rwk,
+      /etc/php/** r,
+      /usr/share/php/** r,
+      /usr/lib/php/** mr,
+  register: librenms_syslog_apparmor_local
+  when:
+    - librenms_syslog_manage_apparmor | bool
+    - librenms_syslog_apparmor_profile.stat.exists | default(false)
+
+- name: Reload rsyslog AppArmor profile
+  command:
+    argv:
+      - apparmor_parser
+      - -r
+      - "{{ librenms_syslog_apparmor_profile_path }}"
+  changed_when: librenms_syslog_apparmor_local.changed
+  notify: Restart rsyslog
+  when:
+    - librenms_syslog_manage_apparmor | bool
+    - librenms_syslog_apparmor_profile.stat.exists | default(false)
+    - librenms_syslog_apparmor_local.changed
 
 - name: Deploy rsyslog LibreNMS receiver configuration
   template:
