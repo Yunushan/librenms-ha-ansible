@@ -124,11 +124,13 @@ backend librenms_web_nodes
 frontend librenms_db
     bind {{ librenms_haproxy_bind_address }}:{{ librenms_haproxy_db_port }}
     mode tcp
+    timeout client {{ librenms_haproxy_db_timeout_client }}
     default_backend galera_nodes
 
 backend galera_nodes
     mode tcp
     balance roundrobin
+    timeout server {{ librenms_haproxy_db_timeout_server }}
     default-server {{ librenms_haproxy_db_default_server }}
 {% if librenms_haproxy_db_mysql_check_enabled | bool %}
     option mysql-check user {{ librenms_haproxy_db_health_user }}

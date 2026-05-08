@@ -307,6 +307,8 @@ librenms_haproxy_timeout_client: 180s
 librenms_haproxy_timeout_server: 180s
 librenms_haproxy_retries: 2
 librenms_haproxy_redispatch: true
+librenms_haproxy_db_timeout_client: 8h
+librenms_haproxy_db_timeout_server: 8h
 librenms_haproxy_web_check_interval: 1s
 librenms_haproxy_web_check_fall: 2
 librenms_haproxy_web_check_rise: 1
