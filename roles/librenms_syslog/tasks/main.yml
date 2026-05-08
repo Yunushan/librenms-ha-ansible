@@ -93,10 +93,14 @@
       /usr/bin/php* ix,
       {{ librenms_install_dir }}/syslog.php r,
       {{ librenms_install_dir }}/** r,
-      owner {{ librenms_install_dir }}/logs/** rwk,
-      owner {{ librenms_install_dir }}/storage/** rwk,
+      owner {{ librenms_install_dir }}/logs/** rwkl,
+      owner {{ librenms_install_dir }}/storage/** rwkld,
+      {{ librenms_install_dir }}/storage/framework/cache/** rwkld,
+      {{ librenms_install_dir }}/bootstrap/cache/** rwkl,
       /etc/php/** r,
+      /etc/snmp/** r,
       /usr/share/php/** r,
+      /usr/share/snmp/** r,
       /usr/lib/php/** mr,
   register: librenms_syslog_apparmor_local
   when:
