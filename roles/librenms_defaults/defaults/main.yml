@@ -70,7 +70,7 @@ librenms_syslog_forward_target: >-
   }}
 librenms_syslog_forward_port: "{{ librenms_syslog_udp_port }}"
 librenms_syslog_forward_protocol: udp
-librenms_syslog_forward_selector: "*.info;auth,authpriv.none;cron.none;mail.none"
+librenms_syslog_forward_selector: "*.notice;auth,authpriv.none;cron.none;mail.none"
 librenms_syslog_host_property: fromhost-ip
 librenms_syslog_purge_days: 30
 librenms_syslog_enable_hooks: false
