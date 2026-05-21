@@ -1273,7 +1273,9 @@ librenms_install_profile: full      # full | web | poller
 ```yaml
 librenms_version: latest-stable     # latest stable tag; use master only for dev testing
 librenms_update_channel: release    # LibreNMS update channel managed in the DB
-librenms_update_enabled: false      # keep code updates controlled by Ansible
+librenms_update_enabled: true       # allow LibreNMS daily.sh to update release code
+librenms_daily_timer_on_calendar: "*-*-* 03:00:00"
+librenms_daily_timer_randomized_delay: 0
 ```
 
 `latest-stable` resolves the newest numeric release tag, such as `26.4.0`, from the
@@ -1282,9 +1284,31 @@ pin this to an explicit released tag instead of tracking `master`.
 
 The role also sets LibreNMS' own `update_channel` to `release` and keeps
 `daily.sh` running with a systemd timer. This preserves LibreNMS' normal daily
-cleanup and update bookkeeping without tracking the development branch. Automatic
-code updates are disabled by default; upgrade intentionally by changing
-`librenms_version` and rerunning the playbook.
+cleanup and update bookkeeping without tracking the development branch. By
+default, `daily.sh` runs at 03:00 in each host's local timezone and LibreNMS code
+updates are enabled on the release channel. Set `librenms_update_enabled: false`
+to keep code updates controlled only by Ansible, or pin `librenms_version` to an
+explicit released tag for repeatable production rebuilds.
+
+### Network map auto-repair
+
+The role configures LibreNMS map inputs and automatically checks the `links`
+table on the primary node after topology discovery. If the map data is empty or
+LLDP/CDP/FDP neighbors are present but cannot be matched to monitored devices,
+the role enables MAC/XDP fallback, refreshes topology discovery, runs the poller,
+and prints unmatched-neighbor diagnostics.
+
+```yaml
+librenms_network_map_auto_repair: true
+librenms_network_map_auto_enable_mac_fallback: true
+librenms_network_map_fallback_items:
+  - mac
+  - xdp
+```
+
+Set `librenms_network_map_auto_repair: false` if you only want the role to keep
+map configuration in place and report diagnostics without running the repair
+cycle.
 
 ### Database mode
 

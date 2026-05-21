@@ -3,10 +3,10 @@ librenms_repo_url: https://github.com/librenms/librenms.git
 librenms_version: latest-stable
 librenms_manage_updates: true
 librenms_update_channel: release
-librenms_update_enabled: false
+librenms_update_enabled: true
 librenms_manage_daily_maintenance: true
-librenms_daily_timer_on_calendar: "*-*-* 00:19:00"
-librenms_daily_timer_randomized_delay: 45min
+librenms_daily_timer_on_calendar: "*-*-* 03:00:00"
+librenms_daily_timer_randomized_delay: 0
 librenms_daily_run_once_after_deploy: true
 librenms_daily_maintenance_bootstrap_marker: /var/lib/librenms-ha-ansible/daily_maintenance_bootstrapped
 
@@ -39,6 +39,16 @@ librenms_network_map_force_topology_discovery: "{{ librenms_network_map_manage |
 librenms_network_map_show_menu_without_links: false
 librenms_network_map_cleanup_legacy_menu_patch: true
 librenms_network_map_warn_when_no_links: true
+librenms_network_map_auto_repair: "{{ librenms_network_map_manage | bool }}"
+librenms_network_map_auto_repair_when_unmatched: true
+librenms_network_map_auto_repair_run_poller: true
+librenms_network_map_auto_enable_mac_fallback: true
+librenms_network_map_fallback_items:
+  - mac
+  - xdp
+librenms_network_map_diagnostic_limit: 50
+librenms_network_map_collect_web_errors: true
+librenms_network_map_web_error_lines: 100
 librenms_network_map_topology_discovery_modules:
   - discovery-protocols
   - arp-table

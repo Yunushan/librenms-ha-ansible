@@ -3154,11 +3154,10 @@
 - name: Run LibreNMS topology discovery modules for network map
   command:
     argv:
-      - "{{ librenms_install_dir }}/discovery.php"
-      - -h
+      - "{{ librenms_install_dir }}/lnms"
+      - device:discover
       - all
-      - -m
-      - "{{ item }}"
+      - "--modules={{ item }}"
   args:
     chdir: "{{ librenms_install_dir }}"
   become: true
@@ -3179,8 +3178,8 @@
 - name: Run LibreNMS discovery cycle after auto-discovery configuration
   command:
     argv:
-      - "{{ librenms_install_dir }}/discovery.php"
-      - -h
+      - "{{ librenms_install_dir }}/lnms"
+      - device:discover
       - all
   args:
     chdir: "{{ librenms_install_dir }}"
@@ -3203,8 +3202,8 @@
 - name: Run LibreNMS poller cycle after auto-discovery configuration
   command:
     argv:
-      - "{{ librenms_install_dir }}/poller.php"
-      - -h
+      - "{{ librenms_install_dir }}/lnms"
+      - device:poll
       - all
   args:
     chdir: "{{ librenms_install_dir }}"
@@ -3224,55 +3223,14 @@
       or not (librenms_autodiscovery_bootstrap_marker_stat.stat.exists | default(false))
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
-- name: Read LibreNMS network map link count
-  community.mysql.mysql_query:
-    login_host: "{{ librenms_db_host_effective }}"
-    login_port: "{{ librenms_db_port }}"
-    login_user: "{{ librenms_db_user }}"
-    login_password: "{{ librenms_db_password }}"
-    login_db: "{{ librenms_db_name }}"
-    query:
-      - "SELECT COUNT(*) AS link_count FROM `links`"
-  register: librenms_network_map_link_count_query
-  changed_when: false
-  no_log: true
+- name: Auto-repair and diagnose LibreNMS network map topology
+  include_tasks: network_map_repair.yml
   when:
     - librenms_apply_post_bootstrap_config | bool
     - librenms_network_map_manage | bool
-    - librenms_network_map_warn_when_no_links | bool
-    - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
-
-- name: Record LibreNMS network map link count
-  set_fact:
-    librenms_network_map_link_count: >-
-      {{
-        (
-          librenms_network_map_link_count_query.query_result[0][0].link_count
-          | default(0)
-        )
-        | int
-      }}
-  when:
-    - librenms_network_map_link_count_query is defined
-    - librenms_network_map_link_count_query.query_result is defined
-
-- name: Warn when LibreNMS has no topology links yet
-  debug:
-    msg: |-
-      LibreNMS has zero rows in the links table, so upstream LibreNMS would hide
-      Maps -> Network. The playbook does not modify LibreNMS source to force
-      that menu item because doing so creates local git changes that block
-      automatic updates. The map will stay empty until monitored network devices
-      expose LLDP/CDP/FDP or usable FDB/ARP data over SNMP.
-
-      Check SNMP credentials and reachability for switches/firewalls, then run:
-      {{ librenms_install_dir }}/discovery.php -h all -m discovery-protocols
-      {{ librenms_install_dir }}/discovery.php -h all -m arp-table
-  when:
-    - librenms_apply_post_bootstrap_config | bool
-    - librenms_network_map_manage | bool
-    - librenms_network_map_warn_when_no_links | bool
-    - (librenms_network_map_link_count | default(0) | int) == 0
+    - >-
+      (librenms_network_map_auto_repair | bool)
+      or (librenms_network_map_warn_when_no_links | bool)
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Mark LibreNMS auto-discovery bootstrap run complete

@@ -263,6 +263,53 @@ artifacts reliably. Config snippets redact obvious passwords and tokens, but
 logs can still contain sensitive operational data, so store bundles like an
 incident record.
 
+### LibreNMS application updates
+
+The role manages LibreNMS' normal `daily.sh` maintenance through
+`librenms-daily.timer`. By default the timer runs at 03:00 in each host's local
+timezone, uses LibreNMS' `release` update channel, and allows LibreNMS to update
+to the latest stable release:
+
+```yaml
+librenms_version: latest-stable
+librenms_update_channel: release
+librenms_update_enabled: true
+librenms_daily_timer_on_calendar: "*-*-* 03:00:00"
+librenms_daily_timer_randomized_delay: 0
+```
+
+Disable automatic code updates while keeping daily maintenance tasks with:
+
+```yaml
+librenms_update_enabled: false
+```
+
+For a controlled version pin, set `librenms_version` to an explicit released tag
+and rerun `playbooks/site.yml` after a backup and validation gate.
+
+### Network map auto-repair
+
+Network map repair is part of normal convergence on the primary LibreNMS node.
+The playbook checks link totals, matched remote devices, and matched remote
+ports in the LibreNMS database. When topology data is missing or unmatched, it
+sets MAC/XDP fallback, refreshes topology discovery, runs the poller, and then
+reports the before/after counts.
+
+Useful controls:
+
+```yaml
+librenms_network_map_auto_repair: true
+librenms_network_map_auto_repair_run_poller: true
+librenms_network_map_auto_enable_mac_fallback: true
+librenms_network_map_fallback_items:
+  - mac
+  - xdp
+```
+
+If the map still cannot correlate neighbors, the run output lists unmatched
+remote hostnames and the first link rows so you can add or monitor the missing
+devices instead of running SQL by hand.
+
 ### Rolling major OS upgrades
 
 Major OS release upgrades are not automated by this repo. For Ubuntu, Debian,
