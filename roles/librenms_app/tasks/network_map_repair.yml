@@ -15,7 +15,38 @@
         FROM `links`
   register: librenms_network_map_summary_query
   changed_when: false
+  failed_when: false
   no_log: true
+
+- name: Check LibreNMS network map topology summary availability
+  set_fact:
+    librenms_network_map_summary_available: >-
+      {{
+        librenms_network_map_summary_query is defined
+        and not (librenms_network_map_summary_query.failed | default(false))
+        and (librenms_network_map_summary_query.query_result | default([]) | length) > 0
+        and (librenms_network_map_summary_query.query_result[0] | default([]) | length) > 0
+      }}
+
+- name: Skip LibreNMS network map auto-repair when topology summary is unavailable
+  set_fact:
+    librenms_network_map_link_count: 0
+    librenms_network_map_matched_remote_devices: 0
+    librenms_network_map_matched_remote_ports: 0
+    librenms_network_map_needs_repair: false
+  when:
+    - not (librenms_network_map_summary_available | bool)
+
+- name: Warn when LibreNMS network map topology summary is unavailable
+  debug:
+    msg: >-
+      LibreNMS network map auto-repair was skipped because the links table
+      topology summary could not be read yet. This is non-fatal during site.yml;
+      run validate.yml after convergence if LibreNMS database readiness is in
+      doubt.
+  when:
+    - librenms_network_map_warn_when_no_links | bool
+    - not (librenms_network_map_summary_available | bool)
 
 - name: Record LibreNMS network map topology summary
   set_fact:
@@ -43,6 +74,8 @@
         )
         | int
       }}
+  when:
+    - librenms_network_map_summary_available | bool
 
 - name: Decide whether LibreNMS network map auto-repair is needed
   set_fact:
@@ -57,6 +90,8 @@
     librenms_network_map_initial_link_count: "{{ librenms_network_map_link_count | int }}"
     librenms_network_map_initial_matched_remote_devices: "{{ librenms_network_map_matched_remote_devices | int }}"
     librenms_network_map_initial_matched_remote_ports: "{{ librenms_network_map_matched_remote_ports | int }}"
+  when:
+    - librenms_network_map_summary_available | bool
 
 - name: Enable LibreNMS MAC/XDP network map fallback when topology is unmatched
   command:
@@ -73,9 +108,10 @@
   changed_when: librenms_network_map_fallback_config.rc == 0
   failed_when: librenms_network_map_fallback_config.rc != 0
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_auto_repair | bool
     - librenms_network_map_auto_enable_mac_fallback | bool
-    - librenms_network_map_needs_repair | bool
+    - librenms_network_map_needs_repair | default(false) | bool
     - (librenms_network_map_fallback_items | length) > 0
 
 - name: Refresh LibreNMS topology discovery for network map auto-repair
@@ -96,8 +132,9 @@
     (librenms_autodiscovery_fail_on_cycle_error | bool)
     and librenms_network_map_auto_repair_discovery.rc != 0
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_auto_repair | bool
-    - librenms_network_map_needs_repair | bool
+    - librenms_network_map_needs_repair | default(false) | bool
     - item in ['discovery-protocols', 'arp-table']
 
 - name: Refresh LibreNMS poller data for network map auto-repair
@@ -116,9 +153,10 @@
     (librenms_autodiscovery_fail_on_cycle_error | bool)
     and librenms_network_map_auto_repair_poller.rc != 0
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_auto_repair | bool
     - librenms_network_map_auto_repair_run_poller | bool
-    - librenms_network_map_needs_repair | bool
+    - librenms_network_map_needs_repair | default(false) | bool
 
 - name: Re-read LibreNMS network map topology summary after auto-repair
   community.mysql.mysql_query:
@@ -136,10 +174,12 @@
         FROM `links`
   register: librenms_network_map_repaired_summary_query
   changed_when: false
+  failed_when: false
   no_log: true
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_auto_repair | bool
-    - librenms_network_map_needs_repair | bool
+    - librenms_network_map_needs_repair | default(false) | bool
 
 - name: Record LibreNMS network map topology summary after auto-repair
   set_fact:
@@ -169,6 +209,7 @@
       }}
   when:
     - librenms_network_map_repaired_summary_query is defined
+    - not (librenms_network_map_repaired_summary_query.failed | default(false))
     - librenms_network_map_repaired_summary_query.query_result is defined
 
 - name: Report LibreNMS network map auto-repair result
@@ -183,9 +224,10 @@
       matched remote ports={{ librenms_network_map_matched_remote_ports }}.
       Fallback network_map_items={{ librenms_network_map_fallback_items | to_json }}.
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_auto_repair | bool
     - librenms_network_map_initial_link_count is defined
-    - librenms_network_map_needs_repair | bool
+    - librenms_network_map_needs_repair | default(false) | bool
 
 - name: Read unmatched LibreNMS network map neighbors
   community.mysql.mysql_query:
@@ -204,8 +246,10 @@
         LIMIT {{ librenms_network_map_diagnostic_limit | int }}
   register: librenms_network_map_unmatched_neighbors_query
   changed_when: false
+  failed_when: false
   no_log: true
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_warn_when_no_links | bool
     - (librenms_network_map_matched_remote_devices | default(0) | int) == 0
 
@@ -218,6 +262,7 @@
       }}
   when:
     - librenms_network_map_unmatched_neighbors_query is defined
+    - not (librenms_network_map_unmatched_neighbors_query.failed | default(false))
     - librenms_network_map_unmatched_neighbors_query.query_result is defined
 
 - name: Read LibreNMS network map link details for diagnostics
@@ -250,8 +295,10 @@
         LIMIT {{ librenms_network_map_diagnostic_limit | int }}
   register: librenms_network_map_link_details_query
   changed_when: false
+  failed_when: false
   no_log: true
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_warn_when_no_links | bool
     - (librenms_network_map_matched_remote_devices | default(0) | int) == 0
 
@@ -264,6 +311,7 @@
       }}
   when:
     - librenms_network_map_link_details_query is defined
+    - not (librenms_network_map_link_details_query.failed | default(false))
     - librenms_network_map_link_details_query.query_result is defined
 
 - name: Warn when LibreNMS network map still has no matched remote devices
@@ -287,6 +335,7 @@
       Link details:
       {{ librenms_network_map_link_details | default([]) | to_nice_yaml(indent=2) }}
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_warn_when_no_links | bool
     - (librenms_network_map_matched_remote_devices | default(0) | int) == 0
 
@@ -302,6 +351,7 @@
   changed_when: false
   failed_when: false
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_warn_when_no_links | bool
     - librenms_network_map_collect_web_errors | bool
     - (librenms_network_map_matched_remote_devices | default(0) | int) > 0
@@ -322,6 +372,7 @@
   changed_when: false
   failed_when: false
   when:
+    - librenms_network_map_summary_available | bool
     - librenms_network_map_warn_when_no_links | bool
     - librenms_network_map_collect_web_errors | bool
     - (librenms_network_map_matched_remote_devices | default(0) | int) > 0
