@@ -318,7 +318,13 @@
   debug:
     msg: |-
       LibreNMS network map still has no matched remote devices after the
-      automated check{{ ((librenms_network_map_auto_repair | bool) and (librenms_network_map_needs_repair | bool)) | ternary(' and repair run', '') }}.
+      automated check{{
+        (
+          (librenms_network_map_auto_repair | bool)
+          and (librenms_network_map_needs_repair | bool)
+        )
+        | ternary(' and repair run', '')
+      }}.
       Links={{ librenms_network_map_link_count | default(0) }},
       matched remote devices={{ librenms_network_map_matched_remote_devices | default(0) }},
       matched remote ports={{ librenms_network_map_matched_remote_ports | default(0) }}.
