@@ -275,8 +275,16 @@ librenms_version: latest-stable
 librenms_update_channel: release
 librenms_update_enabled: true
 librenms_daily_timer_on_calendar: "*-*-* 03:00:00"
-librenms_daily_timer_randomized_delay: 0
+librenms_daily_timer_randomized_delay: 1800
+librenms_daily_self_heal_enabled: true
 ```
+
+The timer starts at 03:00 local time with up to 30 minutes of jitter by default.
+This avoids all HA nodes running update, git, and Composer work at the exact
+same second. Daily maintenance is executed through a self-heal wrapper that
+runs LibreNMS as the `librenms` user, checks PHP autoload health afterward, and
+repairs incomplete `vendor/` installs by rerunning LibreNMS' Composer wrapper,
+clearing Laravel caches, and restarting PHP-FPM.
 
 Disable automatic code updates while keeping daily maintenance tasks with:
 

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -u
+set -o pipefail
+
+LIBRENMS_DIR="{{ librenms_install_dir }}"
+LIBRENMS_USER="{{ librenms_user }}"
+PHP_FPM_SERVICE="{{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) }}"
+COMPOSER_INSTALL_TIMEOUT="{{ librenms_composer_install_timeout | int }}"
+COMPOSER_PROCESS_TIMEOUT="{{ librenms_composer_process_timeout | int }}"
+RESTART_PHP_FPM="{{ librenms_daily_self_heal_restart_php_fpm | bool | ternary('true', 'false') }}"
+
+export HOME="${LIBRENMS_DIR}"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+log() {
+    echo "librenms-daily-wrapper: $*"
+}
+
+run_as_librenms() {
+    runuser -u "${LIBRENMS_USER}" -- "$@"
+}
+
+run_daily() {
+    cd "${LIBRENMS_DIR}" || return 1
+    run_as_librenms /bin/bash "${LIBRENMS_DIR}/daily.sh"
+}
+
+check_autoload() {
+    cd "${LIBRENMS_DIR}" || return 1
+    run_as_librenms php -r '
+        require __DIR__ . "/vendor/autoload.php";
+        if (
+            is_file(__DIR__ . "/LibreNMS/Util/Version.php")
+            && !class_exists("LibreNMS\\Util\\Version")
+        ) {
+            exit(42);
+        }
+    '
+}
+
+composer_repair() {
+    cd "${LIBRENMS_DIR}" || return 1
+    log "running Composer dependency repair"
+    run_as_librenms env \
+        COMPOSER_PROCESS_TIMEOUT="${COMPOSER_PROCESS_TIMEOUT}" \
+        COMPOSER_MEMORY_LIMIT="-1" \
+        timeout "${COMPOSER_INSTALL_TIMEOUT}s" \
+        ./scripts/composer_wrapper.php \
+        install \
+        --no-dev \
+        --no-interaction \
+        --no-scripts
+}
+
+clear_laravel_cache() {
+    cd "${LIBRENMS_DIR}" || return 1
+    run_as_librenms php artisan optimize:clear
+}
+
+restart_php_fpm() {
+    if [ "${RESTART_PHP_FPM}" != "true" ] || [ -z "${PHP_FPM_SERVICE}" ]; then
+        return 0
+    fi
+
+    log "restarting ${PHP_FPM_SERVICE}"
+    systemctl restart "${PHP_FPM_SERVICE}"
+}
+
+daily_rc=0
+run_daily || daily_rc=$?
+
+if check_autoload; then
+    if [ "${daily_rc}" -ne 0 ]; then
+        log "daily.sh failed with rc=${daily_rc}, but autoload is healthy"
+    fi
+    exit "${daily_rc}"
+fi
+
+log "autoload health check failed after daily.sh; attempting self-heal"
+composer_repair || exit $?
+clear_laravel_cache || true
+restart_php_fpm || true
+
+if check_autoload; then
+    log "self-heal completed successfully"
+    exit 0
+fi
+
+log "self-heal did not restore LibreNMS autoload health"
+exit 1

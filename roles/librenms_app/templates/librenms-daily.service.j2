@@ -6,12 +6,21 @@ RequiresMountsFor={{ librenms_install_dir }}{% if librenms_rrd_mode == 'glusterf
 
 [Service]
 Type=oneshot
+{% if librenms_daily_self_heal_enabled | bool %}
+User=root
+Group=root
+{% else %}
 User={{ librenms_user }}
 Group={{ librenms_group }}
+{% endif %}
 WorkingDirectory={{ librenms_install_dir }}
 Environment=HOME={{ librenms_install_dir }}
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 {% if librenms_dispatcher_runtime_wait_enabled | bool %}
 ExecStartPre={{ librenms_dispatcher_runtime_wait_path }}
 {% endif %}
+{% if librenms_daily_self_heal_enabled | bool %}
+ExecStart={{ librenms_daily_self_heal_path }}
+{% else %}
 ExecStart=/bin/bash {{ librenms_install_dir }}/daily.sh
+{% endif %}

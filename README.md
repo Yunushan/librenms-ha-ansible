@@ -1275,7 +1275,8 @@ librenms_version: latest-stable     # latest stable tag; use master only for dev
 librenms_update_channel: release    # LibreNMS update channel managed in the DB
 librenms_update_enabled: true       # allow LibreNMS daily.sh to update release code
 librenms_daily_timer_on_calendar: "*-*-* 03:00:00"
-librenms_daily_timer_randomized_delay: 0
+librenms_daily_timer_randomized_delay: 1800
+librenms_daily_self_heal_enabled: true
 ```
 
 `latest-stable` resolves the newest numeric release tag, such as `26.4.0`, from the
@@ -1285,10 +1286,19 @@ pin this to an explicit released tag instead of tracking `master`.
 The role also sets LibreNMS' own `update_channel` to `release` and keeps
 `daily.sh` running with a systemd timer. This preserves LibreNMS' normal daily
 cleanup and update bookkeeping without tracking the development branch. By
-default, `daily.sh` runs at 03:00 in each host's local timezone and LibreNMS code
-updates are enabled on the release channel. Set `librenms_update_enabled: false`
-to keep code updates controlled only by Ansible, or pin `librenms_version` to an
-explicit released tag for repeatable production rebuilds.
+default, `daily.sh` starts at 03:00 in each host's local timezone with up to
+30 minutes of systemd jitter so HA nodes do not all run Composer/git work at the
+same second. LibreNMS code updates are enabled on the release channel. Set
+`librenms_update_enabled: false` to keep code updates controlled only by
+Ansible, or pin `librenms_version` to an explicit released tag for repeatable
+production rebuilds.
+
+The daily service runs through a small root-owned wrapper by default. The
+wrapper still executes LibreNMS maintenance as the `librenms` user, then checks
+PHP autoload health. If an update leaves `vendor/` incomplete, it reruns
+LibreNMS' Composer wrapper, clears Laravel caches, and restarts PHP-FPM so a
+single bad web node is repaired automatically instead of returning HTTP 500
+through HAProxy.
 
 ### Network map auto-repair
 
