@@ -291,6 +291,12 @@ If an update leaves one node with broken Composer dependencies or a Laravel boot
 error, that node is marked down for browser traffic while the healthy nodes keep
 serving the VIP.
 
+In Gluster-backed HA mode, the LibreNMS web validation page can sample an RRD
+while `rrdcached` is actively writing it and report `RRD ERROR: could not lock
+RRD`. The web validation JSON filter suppresses only that transient lock class
+by default so the UI does not flap red during normal polling. Other RRD parse
+errors remain visible.
+
 Disable automatic code updates while keeping daily maintenance tasks with:
 
 ```yaml
