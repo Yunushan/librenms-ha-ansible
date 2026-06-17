@@ -193,7 +193,7 @@ firewall table and operational notes.
 | Ansible controller to `lnms*` | TCP 22 | SSH | Required for Ansible push execution |
 | Ansible or AWX controller to GitHub, Galaxy, mirrors | TCP 443 | HTTPS | Required for repo syncs, collections, packages, and container images |
 | Operators to VIP | TCP 80 / 443 | HTTP / HTTPS | `443/tcp` is used when HAProxy TLS is enabled |
-| VIP / HAProxy to web nodes | TCP 80 | HTTP backend | nginx and PHP-FPM health checks use node-local web endpoints |
+| VIP / HAProxy to web nodes | TCP 80 | HTTP backend | HAProxy checks the LibreNMS app route and nginx exposes node-local health endpoints |
 | LibreNMS app nodes to DB frontend or Galera nodes | TCP 3306 | MariaDB | Runtime DB access and Galera client traffic |
 | Galera nodes to Galera nodes | TCP 4444, TCP/UDP 4567, TCP 4568 | Galera replication | SST, replication, and IST between DB peers |
 | LibreNMS app nodes to Redis Sentinel nodes | TCP 26379 | Redis Sentinel | LibreNMS discovers the active Redis master through Sentinel |
@@ -1371,7 +1371,7 @@ librenms_vip_enabled: true
 librenms_vip_ip: 10.10.10.10
 librenms_vip_cidr: 24
 librenms_vip_interface: ""        # empty = use the default IPv4 route interface
-librenms_haproxy_web_check_path: /php-fpm-ping
+librenms_haproxy_web_check_path: /about
 librenms_haproxy_timeout_connect: 3s
 librenms_haproxy_timeout_server: 180s
 librenms_haproxy_web_check_interval: 2s
@@ -1383,8 +1383,11 @@ librenms_haproxy_db_check_fall: 2
 Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.
 
 For failover tests, HAProxy retries and redispatches failed backend selections
-by default. With the default checks above, a failed web or DB backend is usually
-removed from rotation after roughly four seconds.
+by default. The default web check uses LibreNMS' `/about` route instead of the
+PHP-FPM ping endpoint, so a node with an incomplete post-update `vendor/` tree
+is removed from browser rotation instead of intermittently serving HTTP 500.
+With the default checks above, a failed web or DB backend is usually removed
+from rotation after roughly four seconds.
 
 ### Redis failover tuning
 
@@ -1497,11 +1500,14 @@ librenms_vip_app_probe_enabled: true
 librenms_vip_app_probe_fail_deployment: true
 ```
 
-The blocking health check is the PHP-FPM-backed nginx ping endpoint. The full
-LibreNMS page probe is non-blocking by default because it can depend on DB,
-Redis, VIP, or browser-facing routing that may still be converging. Set
-`librenms_app_probe_fail_deployment: true` only when you want the playbook to
-fail if the node-local full page does not return HTTP 2xx/3xx.
+The load balancer uses the LibreNMS `/about` route for backend health checks by
+default. This exercises PHP autoloading, Laravel boot, and the LibreNMS app
+enough to catch broken post-update dependencies before users are sent to that
+node. The PHP-FPM-backed nginx ping endpoint remains available as a lightweight
+node-local diagnostic. The full LibreNMS page probe is non-blocking by default
+because it can depend on DB, Redis, VIP, or browser-facing routing that may still
+be converging. Set `librenms_app_probe_fail_deployment: true` only when you want
+the playbook to fail if the node-local full page does not return HTTP 2xx/3xx.
 
 For HA deployments, the load-balancer role also probes the full application
 through the VIP after HAProxy and Keepalived are running. That VIP probe is

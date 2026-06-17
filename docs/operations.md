@@ -286,6 +286,11 @@ runs LibreNMS as the `librenms` user, checks PHP autoload health afterward, and
 repairs incomplete `vendor/` installs by rerunning LibreNMS' Composer wrapper,
 clearing Laravel caches, and restarting PHP-FPM.
 
+HAProxy also checks the LibreNMS `/about` route for each web backend by default.
+If an update leaves one node with broken Composer dependencies or a Laravel boot
+error, that node is marked down for browser traffic while the healthy nodes keep
+serving the VIP.
+
 Disable automatic code updates while keeping daily maintenance tasks with:
 
 ```yaml
