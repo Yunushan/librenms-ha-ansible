@@ -277,6 +277,9 @@ librenms_update_enabled: true
 librenms_daily_timer_on_calendar: "*-*-* 03:00:00"
 librenms_daily_timer_randomized_delay: 1800
 librenms_daily_self_heal_enabled: true
+librenms_manage_scheduled_backups: true
+librenms_backup_pre_upgrade_enabled: true
+librenms_backup_pre_upgrade_required: true
 ```
 
 The timer starts at 03:00 local time with up to 30 minutes of jitter by default.
@@ -285,6 +288,14 @@ same second. Daily maintenance is executed through a self-heal wrapper that
 runs LibreNMS as the `librenms` user, checks PHP autoload health afterward, and
 repairs incomplete `vendor/` installs by rerunning LibreNMS' Composer wrapper,
 clearing Laravel caches, and restarting PHP-FPM.
+
+Before the wrapper runs `daily.sh`, it creates a local pre-upgrade DB/config
+backup with `librenms-ha-backup pre-upgrade`. The update stops if that backup
+fails while `librenms_backup_pre_upgrade_required` is true. This protects the
+automatic update path from continuing into code or schema changes without a
+fresh rollback artifact. Routine scheduled backups are also managed by
+`site.yml`: daily backups at 02:30 and weekly backups on Sunday at 02:00 on
+`librenms_backup_scheduled_host`.
 
 HAProxy also checks the LibreNMS `/about` route for each web backend by default.
 If an update leaves one node with broken Composer dependencies or a Laravel boot
@@ -572,6 +583,32 @@ snmpwalk -v3 -l authPriv -u <user> -a SHA -A '<auth-pass>' \
 `backup.yml` creates database/config backups under
 `/var/backups/librenms-ha/<timestamp>/`. Copy at least one recent backup outside
 the cluster before OS upgrades or schema work.
+
+`site.yml` also installs scheduled DB/config backups and automatic-update
+guardrails:
+
+- daily backups: `/var/backups/librenms-ha/daily/<timestamp>/`, 7 retained
+- weekly backups: `/var/backups/librenms-ha/weekly/<timestamp>/`, 4 retained
+- pre-upgrade backups:
+  `/var/backups/librenms-ha/pre-upgrade/<timestamp>/`, 5 retained
+
+Daily and weekly backups run on `librenms_backup_scheduled_host`, which defaults
+to the Galera bootstrap host. Pre-upgrade backups run locally on each node
+before that node's `librenms-daily.service` executes LibreNMS `daily.sh`.
+
+Trigger a scheduled backup manually:
+
+```bash
+ansible lnms1 -i inventories/ha/hosts.yml -b -m shell -a \
+  "systemctl start librenms-backup-daily.service"
+```
+
+Trigger the same pre-upgrade guard manually:
+
+```bash
+ansible librenms_nodes -i inventories/ha/hosts.yml -b -m shell -a \
+  "/usr/local/sbin/librenms-ha-backup pre-upgrade"
+```
 
 Validate a backup without restoring it:
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+{% set pre_upgrade_backup_enabled = librenms_manage_scheduled_backups | bool and librenms_backup_pre_upgrade_enabled | bool %}
 set -u
 set -o pipefail
 
@@ -8,6 +9,9 @@ PHP_FPM_SERVICE="{{ librenms_php_fpm_service_effective | default(librenms_php_fp
 COMPOSER_INSTALL_TIMEOUT="{{ librenms_composer_install_timeout | int }}"
 COMPOSER_PROCESS_TIMEOUT="{{ librenms_composer_process_timeout | int }}"
 RESTART_PHP_FPM="{{ librenms_daily_self_heal_restart_php_fpm | bool | ternary('true', 'false') }}"
+BACKUP_WRAPPER="{{ librenms_backup_wrapper_path }}"
+PRE_UPGRADE_BACKUP_ENABLED="{{ pre_upgrade_backup_enabled | ternary('true', 'false') }}"
+PRE_UPGRADE_BACKUP_REQUIRED="{{ librenms_backup_pre_upgrade_required | bool | ternary('true', 'false') }}"
 
 export HOME="${LIBRENMS_DIR}"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -23,6 +27,26 @@ run_as_librenms() {
 run_daily() {
     cd "${LIBRENMS_DIR}" || return 1
     run_as_librenms /bin/bash "${LIBRENMS_DIR}/daily.sh"
+}
+
+run_pre_upgrade_backup() {
+    if [ "${PRE_UPGRADE_BACKUP_ENABLED}" != "true" ]; then
+        return 0
+    fi
+
+    if [ ! -x "${BACKUP_WRAPPER}" ]; then
+        log "pre-upgrade backup wrapper is not installed at ${BACKUP_WRAPPER}"
+        [ "${PRE_UPGRADE_BACKUP_REQUIRED}" != "true" ]
+        return $?
+    fi
+
+    log "running pre-upgrade backup"
+    if "${BACKUP_WRAPPER}" pre-upgrade; then
+        return 0
+    fi
+
+    log "pre-upgrade backup failed"
+    [ "${PRE_UPGRADE_BACKUP_REQUIRED}" != "true" ]
 }
 
 check_autoload() {
@@ -67,6 +91,7 @@ restart_php_fpm() {
 }
 
 daily_rc=0
+run_pre_upgrade_backup || exit $?
 run_daily || daily_rc=$?
 
 if check_autoload; then

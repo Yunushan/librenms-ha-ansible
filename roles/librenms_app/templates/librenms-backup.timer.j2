@@ -1,0 +1,10 @@
+[Unit]
+Description=LibreNMS {{ librenms_backup_unit_category }} backup
+
+[Timer]
+OnCalendar={{ librenms_backup_timer_on_calendar }}
+RandomizedDelaySec={{ librenms_backup_timer_randomized_delay }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

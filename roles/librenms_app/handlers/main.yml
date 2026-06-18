@@ -107,3 +107,20 @@
     - librenms_manage_daily_maintenance | bool
     - ansible_service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
+
+- name: Restart LibreNMS backup timers
+  service:
+    name: "librenms-backup-{{ item.name }}.timer"
+    state: restarted
+    enabled: true
+  loop:
+    - name: daily
+      enabled: "{{ librenms_backup_daily_enabled }}"
+    - name: weekly
+      enabled: "{{ librenms_backup_weekly_enabled }}"
+  when:
+    - librenms_manage_scheduled_backups | bool
+    - item.enabled | bool
+    - ansible_service_mgr == 'systemd'
+    - librenms_bootstrap_completed_effective | bool
+    - inventory_hostname == librenms_backup_scheduled_host

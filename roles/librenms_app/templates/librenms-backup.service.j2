@@ -1,0 +1,12 @@
+[Unit]
+Description=LibreNMS {{ librenms_backup_unit_category }} backup
+Wants=network-online.target remote-fs.target
+After=network-online.target remote-fs.target mariadb.service haproxy.service
+RequiresMountsFor={{ librenms_install_dir }}{% if librenms_backup_include_rrd | bool %} {{ librenms_backup_rrd_path }}{% endif %}
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart={{ librenms_backup_wrapper_path }} {{ librenms_backup_unit_category }}

@@ -1117,6 +1117,20 @@ source hosts and backs up:
 - core LibreNMS and service configuration as `librenms-config.tar.gz`
 - a `manifest.yml` describing the backup source hosts and files
 
+`site.yml` also deploys automated backup guardrails for HA deployments:
+
+- daily DB/config backups under `/var/backups/librenms-ha/daily/<timestamp>/`
+- weekly DB/config backups under `/var/backups/librenms-ha/weekly/<timestamp>/`
+- required pre-upgrade DB/config backups under
+  `/var/backups/librenms-ha/pre-upgrade/<timestamp>/` before `daily.sh`
+  performs automatic LibreNMS update work
+
+The default retention keeps 7 daily backups, 4 weekly backups, and 5
+pre-upgrade backups. Scheduled daily and weekly backups run on
+`librenms_backup_scheduled_host`, which defaults to `librenms_db_bootstrap_host`.
+Pre-upgrade backups run locally on each node before that node starts its daily
+maintenance update.
+
 RRD archives can be large, so they are optional:
 
 ```bash
@@ -1133,6 +1147,10 @@ librenms_backup_host: lnms2
 librenms_backup_app_host: lnms2
 librenms_backup_rrd_host: lnms2
 librenms_backup_include_rrd: false
+librenms_backup_scheduled_host: lnms1
+librenms_backup_daily_retention: 7
+librenms_backup_weekly_retention: 4
+librenms_backup_pre_upgrade_retention: 5
 ```
 
 Keep at least one recent backup outside the cluster. Backups stored only on the
@@ -1146,6 +1164,14 @@ Validate a backup before relying on it:
 ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
   --ask-become-pass \
   -e librenms_restore_test_backup_dir=/var/backups/librenms-ha/<timestamp>
+```
+
+For scheduled backups, include the category in the path, for example:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
+  --ask-become-pass \
+  -e librenms_restore_test_backup_dir=/var/backups/librenms-ha/daily/<timestamp>
 ```
 
 This does not restore data. It checks the manifest and verifies the database,

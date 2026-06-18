@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CATEGORY="${1:-daily}"
+BACKUP_ROOT={{ librenms_backup_root | quote }}
+BACKUP_COORDINATOR="{{ librenms_backup_scheduled_host }}"
+THIS_HOST="{{ inventory_hostname }}"
+SCHEDULED_ON_THIS_HOST="{{ (inventory_hostname == librenms_backup_scheduled_host) | ternary('true', 'false') }}"
+
+INCLUDE_DATABASE="{{ librenms_backup_include_database | bool | ternary('true', 'false') }}"
+INCLUDE_CONFIG="{{ librenms_backup_include_config | bool | ternary('true', 'false') }}"
+INCLUDE_RRD="{{ librenms_backup_include_rrd | bool | ternary('true', 'false') }}"
+DATABASE_FILENAME={{ librenms_backup_database_filename | quote }}
+CONFIG_FILENAME={{ librenms_backup_config_filename | quote }}
+RRD_FILENAME={{ librenms_backup_rrd_filename | quote }}
+MANIFEST_FILENAME={{ librenms_backup_manifest_filename | quote }}
+RRD_PATH={{ librenms_backup_rrd_path | quote }}
+
+DB_MODE={{ librenms_db_mode | quote }}
+DB_HOST={{ librenms_db_host | quote }}
+DB_PORT={{ librenms_db_port | int }}
+DB_NAME={{ librenms_db_name | quote }}
+DB_USER={{ librenms_db_user | quote }}
+{% if librenms_db_mode in ['local', 'galera'] %}
+DB_PASSWORD=""
+{% else %}
+DB_PASSWORD={{ librenms_db_password | quote }}
+{% endif %}
+MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
+DUMP_EXTRA_ARGS={{ librenms_backup_database_dump_extra_args | quote }}
+
+DAILY_RETENTION={{ librenms_backup_daily_retention | int }}
+WEEKLY_RETENTION={{ librenms_backup_weekly_retention | int }}
+PRE_UPGRADE_RETENTION={{ librenms_backup_pre_upgrade_retention | int }}
+
+CONFIG_PATHS=(
+{% for path in librenms_backup_config_paths %}
+  {{ path | quote }}
+{% endfor %}
+)
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+log() {
+    echo "librenms-ha-backup: $*"
+}
+
+usage() {
+    echo "usage: $0 daily|weekly|pre-upgrade" >&2
+}
+
+retention_for_category() {
+    case "${CATEGORY}" in
+        daily) echo "${DAILY_RETENTION}" ;;
+        weekly) echo "${WEEKLY_RETENTION}" ;;
+        pre-upgrade) echo "${PRE_UPGRADE_RETENTION}" ;;
+        *)
+            usage
+            return 64
+            ;;
+    esac
+}
+
+should_run_on_this_host() {
+    case "${CATEGORY}" in
+        daily|weekly)
+            [ "${SCHEDULED_ON_THIS_HOST}" = "true" ]
+            ;;
+        pre-upgrade)
+            # Pre-upgrade backups are local to each updating app node.
+            true
+            ;;
+        *)
+            usage
+            return 64
+            ;;
+    esac
+}
+
+safe_realpath() {
+    realpath -m "$1"
+}
+
+prepare_paths() {
+    RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+    CATEGORY_DIR="${BACKUP_ROOT}/${CATEGORY}"
+    BACKUP_DIR="${CATEGORY_DIR}/${RUN_ID}"
+    BACKUP_ROOT_REAL="$(safe_realpath "${BACKUP_ROOT}")"
+    CATEGORY_DIR_REAL="$(safe_realpath "${CATEGORY_DIR}")"
+    BACKUP_DIR_REAL="$(safe_realpath "${BACKUP_DIR}")"
+
+    if [ -z "${BACKUP_ROOT_REAL}" ] || [ "${BACKUP_ROOT_REAL}" = "/" ]; then
+        log "refusing unsafe backup root: ${BACKUP_ROOT}"
+        return 1
+    fi
+
+    case "${CATEGORY_DIR_REAL}" in
+        "${BACKUP_ROOT_REAL}"/*) ;;
+        *)
+            log "refusing unsafe category directory: ${CATEGORY_DIR}"
+            return 1
+            ;;
+    esac
+
+    case "${BACKUP_DIR_REAL}" in
+        "${CATEGORY_DIR_REAL}"/*) ;;
+        *)
+            log "refusing unsafe backup directory: ${BACKUP_DIR}"
+            return 1
+            ;;
+    esac
+
+    mkdir -p "${BACKUP_DIR}"
+    chmod 0750 "${BACKUP_ROOT}" "${CATEGORY_DIR}" "${BACKUP_DIR}"
+}
+
+dump_database() {
+    [ "${INCLUDE_DATABASE}" = "true" ] || return 0
+
+    local target="${BACKUP_DIR}/${DATABASE_FILENAME}"
+    local tmp="${target}.tmp"
+    local dump_args=()
+
+    # shellcheck disable=SC2206
+    dump_args=(${DUMP_EXTRA_ARGS})
+
+    log "dumping database ${DB_NAME} to ${target}"
+    if [ "${DB_MODE}" = "local" ] || [ "${DB_MODE}" = "galera" ]; then
+        mysqldump \
+            --protocol=socket \
+            --socket="${MARIADB_SOCKET}" \
+            "${dump_args[@]}" \
+            "${DB_NAME}" \
+            | gzip -c > "${tmp}"
+    else
+        if [ -z "${DB_HOST}" ]; then
+            log "external database backup requested, but DB host is empty"
+            return 1
+        fi
+
+        MYSQL_PWD="${DB_PASSWORD}" mysqldump \
+            --host="${DB_HOST}" \
+            --port="${DB_PORT}" \
+            --user="${DB_USER}" \
+            "${dump_args[@]}" \
+            "${DB_NAME}" \
+            | gzip -c > "${tmp}"
+    fi
+
+    mv -f "${tmp}" "${target}"
+    chmod 0640 "${target}"
+}
+
+archive_config() {
+    [ "${INCLUDE_CONFIG}" = "true" ] || return 0
+
+    local target="${BACKUP_DIR}/${CONFIG_FILENAME}"
+    local tmp="${target}.tmp"
+    local list_file
+    list_file="$(mktemp)"
+
+    for path in "${CONFIG_PATHS[@]}"; do
+        if [ -e "${path}" ]; then
+            printf '%s\0' "${path}" >> "${list_file}"
+        fi
+    done
+
+    if [ ! -s "${list_file}" ]; then
+        rm -f "${list_file}"
+        log "no configured config paths exist; skipping config archive"
+        return 0
+    fi
+
+    log "archiving config paths to ${target}"
+    tar \
+        --create \
+        --gzip \
+        --file "${tmp}" \
+        --null \
+        --files-from "${list_file}" \
+        --ignore-failed-read \
+        --warning=no-file-changed
+    rm -f "${list_file}"
+    mv -f "${tmp}" "${target}"
+    chmod 0640 "${target}"
+}
+
+archive_rrd() {
+    [ "${INCLUDE_RRD}" = "true" ] || return 0
+
+    if [ ! -e "${RRD_PATH}" ]; then
+        log "RRD path ${RRD_PATH} does not exist; skipping RRD archive"
+        return 0
+    fi
+
+    local target="${BACKUP_DIR}/${RRD_FILENAME}"
+    local tmp="${target}.tmp"
+
+    log "archiving RRD path ${RRD_PATH} to ${target}"
+    tar \
+        --create \
+        --gzip \
+        --file "${tmp}" \
+        --ignore-failed-read \
+        --warning=no-file-changed \
+        "${RRD_PATH}"
+    mv -f "${tmp}" "${target}"
+    chmod 0640 "${target}"
+}
+
+write_manifest() {
+    local target="${BACKUP_DIR}/${MANIFEST_FILENAME}"
+
+    cat > "${target}" <<MANIFEST
+backup_run_id: "${RUN_ID}"
+backup_category: "${CATEGORY}"
+backup_dir: "${BACKUP_DIR}"
+generated_at: "$(date -Iseconds)"
+host: "${THIS_HOST}"
+backup_coordinator: "${BACKUP_COORDINATOR}"
+database:
+  included: ${INCLUDE_DATABASE}
+  file: "${DATABASE_FILENAME}"
+  mode: "${DB_MODE}"
+  name: "${DB_NAME}"
+config:
+  included: ${INCLUDE_CONFIG}
+  file: "${CONFIG_FILENAME}"
+  paths:
+MANIFEST
+
+    for path in "${CONFIG_PATHS[@]}"; do
+        if [ -e "${path}" ]; then
+            printf '    - "%s"\n' "${path}" >> "${target}"
+        fi
+    done
+
+    cat >> "${target}" <<MANIFEST
+rrd:
+  included: ${INCLUDE_RRD}
+  path: "${RRD_PATH}"
+  file: "${RRD_FILENAME}"
+MANIFEST
+
+    chmod 0640 "${target}"
+}
+
+prune_retention() {
+    local retain="$1"
+    local count=0
+    local name target target_real
+
+    if [ "${retain}" -le 0 ]; then
+        log "retention disabled for ${CATEGORY}"
+        return 0
+    fi
+
+    while IFS= read -r name; do
+        count=$((count + 1))
+        if [ "${count}" -le "${retain}" ]; then
+            continue
+        fi
+
+        target="${CATEGORY_DIR}/${name}"
+        target_real="$(safe_realpath "${target}")"
+        case "${target_real}" in
+            "${CATEGORY_DIR_REAL}"/*)
+                log "pruning old ${CATEGORY} backup ${target}"
+                rm -rf -- "${target_real}"
+                ;;
+            *)
+                log "refusing to prune unsafe path ${target}"
+                return 1
+                ;;
+        esac
+    done < <(find "${CATEGORY_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r)
+}
+
+main() {
+    local retain
+
+    retain="$(retention_for_category)"
+    if ! should_run_on_this_host; then
+        log "skipping ${CATEGORY} backup on ${THIS_HOST}; coordinator is ${BACKUP_COORDINATOR}"
+        return 0
+    fi
+
+    exec 9>/run/librenms-ha-backup.lock
+    if ! flock -n 9; then
+        log "another backup is already running"
+        return 1
+    fi
+
+    prepare_paths
+    dump_database
+    archive_config
+    archive_rrd
+    write_manifest
+    prune_retention "${retain}"
+    log "${CATEGORY} backup completed at ${BACKUP_DIR}"
+}
+
+main "$@"

@@ -2240,6 +2240,66 @@
     - librenms_manage_scheduler | bool
     - ansible_service_mgr == 'systemd'
 
+- name: Deploy LibreNMS HA backup wrapper
+  template:
+    src: librenms-ha-backup.sh.j2
+    dest: "{{ librenms_backup_wrapper_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
+  when:
+    - librenms_manage_scheduled_backups | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy LibreNMS scheduled backup service files
+  template:
+    src: librenms-backup.service.j2
+    dest: "/etc/systemd/system/librenms-backup-{{ item.name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - name: daily
+      enabled: "{{ librenms_backup_daily_enabled }}"
+    - name: weekly
+      enabled: "{{ librenms_backup_weekly_enabled }}"
+  vars:
+    librenms_backup_unit_category: "{{ item.name }}"
+  notify: Restart LibreNMS backup timers
+  when:
+    - librenms_manage_scheduled_backups | bool
+    - item.enabled | bool
+    - ansible_service_mgr == 'systemd'
+    - inventory_hostname == librenms_backup_scheduled_host
+
+- name: Deploy LibreNMS scheduled backup timer files
+  template:
+    src: librenms-backup.timer.j2
+    dest: "/etc/systemd/system/librenms-backup-{{ item.name }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - name: daily
+      enabled: "{{ librenms_backup_daily_enabled }}"
+      on_calendar: "{{ librenms_backup_daily_on_calendar }}"
+      randomized_delay: "{{ librenms_backup_daily_randomized_delay }}"
+    - name: weekly
+      enabled: "{{ librenms_backup_weekly_enabled }}"
+      on_calendar: "{{ librenms_backup_weekly_on_calendar }}"
+      randomized_delay: "{{ librenms_backup_weekly_randomized_delay }}"
+  vars:
+    librenms_backup_unit_category: "{{ item.name }}"
+    librenms_backup_timer_on_calendar: "{{ item.on_calendar }}"
+    librenms_backup_timer_randomized_delay: "{{ item.randomized_delay }}"
+  notify: Restart LibreNMS backup timers
+  when:
+    - librenms_manage_scheduled_backups | bool
+    - item.enabled | bool
+    - ansible_service_mgr == 'systemd'
+    - inventory_hostname == librenms_backup_scheduled_host
+
 - name: Deploy daily maintenance self-heal wrapper
   template:
     src: librenms-daily-wrapper.sh.j2
@@ -2433,6 +2493,22 @@
   when:
     - librenms_manage_daily_maintenance | bool
     - ansible_service_mgr == 'systemd'
+
+- name: Enable and start scheduled backup timers
+  service:
+    name: "librenms-backup-{{ item.name }}.timer"
+    state: "{{ 'started' if librenms_bootstrap_completed_effective | bool else 'stopped' }}"
+    enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
+  loop:
+    - name: daily
+      enabled: "{{ librenms_backup_daily_enabled }}"
+    - name: weekly
+      enabled: "{{ librenms_backup_weekly_enabled }}"
+  when:
+    - librenms_manage_scheduled_backups | bool
+    - item.enabled | bool
+    - ansible_service_mgr == 'systemd'
+    - inventory_hostname == librenms_backup_scheduled_host
 
 - name: Enable and start dispatcher service
   service:
