@@ -289,6 +289,15 @@ runs LibreNMS as the `librenms` user, checks PHP autoload health afterward, and
 repairs incomplete `vendor/` installs by rerunning LibreNMS' Composer wrapper,
 clearing Laravel caches, and restarting PHP-FPM.
 
+The wrapper also serializes local runs with a `flock` lock. Before `daily.sh`
+starts, it skips cleanly if another `librenms`-owned Git, Composer, or daily
+process is already active. If no such process is active, it removes stale
+LibreNMS `.git/*.lock` files, prunes deleted upstream refs, and fetches current
+tags. If `daily.sh` still reports a Git/ref lock update failure, the wrapper
+repairs Git metadata and retries `daily.sh` once. Real upstream/network errors
+can still fail and alert, but stale local Git state should not require manual
+cleanup.
+
 Before the wrapper runs `daily.sh`, it creates a local pre-upgrade DB/config
 backup with `librenms-ha-backup pre-upgrade`. The update stops if that backup
 fails while `librenms_backup_pre_upgrade_required` is true. This protects the
@@ -312,6 +321,14 @@ Disable automatic code updates while keeping daily maintenance tasks with:
 
 ```yaml
 librenms_update_enabled: false
+```
+
+Disable the automatic Git metadata repair while keeping the wrapper with:
+
+```yaml
+librenms_daily_self_heal_git_lock_cleanup: false
+librenms_daily_self_heal_git_metadata_repair: false
+librenms_daily_self_heal_git_retry_after_repair: false
 ```
 
 For a controlled version pin, set `librenms_version` to an explicit released tag

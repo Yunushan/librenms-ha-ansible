@@ -1131,6 +1131,11 @@ pre-upgrade backups. Scheduled daily and weekly backups run on
 Pre-upgrade backups run locally on each node before that node starts its daily
 maintenance update.
 
+The managed daily maintenance wrapper also prevents overlapping local update
+runs, removes stale LibreNMS Git lock files only when no `librenms` Git,
+Composer, or daily process is active, refreshes upstream Git refs/tags before
+`daily.sh`, and retries once after Git/ref lock update failures.
+
 RRD archives can be large, so they are optional:
 
 ```bash

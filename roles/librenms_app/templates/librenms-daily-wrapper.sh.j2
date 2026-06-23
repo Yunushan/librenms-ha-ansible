@@ -5,13 +5,18 @@ set -o pipefail
 
 LIBRENMS_DIR="{{ librenms_install_dir }}"
 LIBRENMS_USER="{{ librenms_user }}"
+WRAPPER_LOCK_PATH="{{ librenms_daily_self_heal_lock_path }}"
 PHP_FPM_SERVICE="{{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) }}"
 COMPOSER_INSTALL_TIMEOUT="{{ librenms_composer_install_timeout | int }}"
 COMPOSER_PROCESS_TIMEOUT="{{ librenms_composer_process_timeout | int }}"
 RESTART_PHP_FPM="{{ librenms_daily_self_heal_restart_php_fpm | bool | ternary('true', 'false') }}"
+GIT_LOCK_CLEANUP="{{ librenms_daily_self_heal_git_lock_cleanup | bool | ternary('true', 'false') }}"
+GIT_METADATA_REPAIR="{{ librenms_daily_self_heal_git_metadata_repair | bool | ternary('true', 'false') }}"
+GIT_RETRY_AFTER_REPAIR="{{ librenms_daily_self_heal_git_retry_after_repair | bool | ternary('true', 'false') }}"
 BACKUP_WRAPPER="{{ librenms_backup_wrapper_path }}"
 PRE_UPGRADE_BACKUP_ENABLED="{{ pre_upgrade_backup_enabled | ternary('true', 'false') }}"
 PRE_UPGRADE_BACKUP_REQUIRED="{{ librenms_backup_pre_upgrade_required | bool | ternary('true', 'false') }}"
+DAILY_OUTPUT_LOG=""
 
 export HOME="${LIBRENMS_DIR}"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -24,9 +29,68 @@ run_as_librenms() {
     runuser -u "${LIBRENMS_USER}" -- "$@"
 }
 
+cleanup_temp() {
+    if [ -n "${DAILY_OUTPUT_LOG}" ] && [ -f "${DAILY_OUTPUT_LOG}" ]; then
+        rm -f "${DAILY_OUTPUT_LOG}"
+    fi
+}
+
+git_process_active() {
+    command -v pgrep >/dev/null 2>&1 || return 1
+    pgrep -u "${LIBRENMS_USER}" -af \
+        'git|daily\.sh|composer|composer_wrapper\.php' >/dev/null 2>&1
+}
+
+has_git_lock_files() {
+    [ -d "${LIBRENMS_DIR}/.git" ] || return 1
+    find "${LIBRENMS_DIR}/.git" -name '*.lock' -type f -print -quit |
+        grep -q .
+}
+
+cleanup_stale_git_locks() {
+    [ "${GIT_LOCK_CLEANUP}" = "true" ] || return 0
+    [ -d "${LIBRENMS_DIR}/.git" ] || return 0
+    has_git_lock_files || return 0
+
+    if git_process_active; then
+        log "git lock files exist but a LibreNMS git/composer/daily process is active; keeping locks"
+        return 1
+    fi
+
+    log "removing stale LibreNMS git lock files"
+    if find "${LIBRENMS_DIR}/.git" -name '*.lock' -type f -print -delete; then
+        return 0
+    fi
+
+    log "failed to remove stale LibreNMS git lock files"
+    return 2
+}
+
+repair_git_metadata() {
+    [ "${GIT_METADATA_REPAIR}" = "true" ] || return 0
+    [ -d "${LIBRENMS_DIR}/.git" ] || return 0
+
+    cleanup_stale_git_locks || return 1
+
+    log "refreshing LibreNMS git metadata"
+    run_as_librenms git -C "${LIBRENMS_DIR}" remote prune origin || true
+    cleanup_stale_git_locks || return 1
+    run_as_librenms git -C "${LIBRENMS_DIR}" fetch --prune --tags origin
+}
+
 run_daily() {
     cd "${LIBRENMS_DIR}" || return 1
-    run_as_librenms /bin/bash "${LIBRENMS_DIR}/daily.sh"
+    : > "${DAILY_OUTPUT_LOG}"
+    run_as_librenms /bin/bash "${LIBRENMS_DIR}/daily.sh" 2>&1 |
+        tee "${DAILY_OUTPUT_LOG}"
+    return "${PIPESTATUS[0]}"
+}
+
+daily_output_has_git_failure() {
+    [ -s "${DAILY_OUTPUT_LOG}" ] || return 1
+    grep -Eiq \
+        'cannot lock ref|unable to create .+\.lock|Fetching new release information[[:space:]]+FAIL|Updating to latest release[[:space:]]+FAIL' \
+        "${DAILY_OUTPUT_LOG}"
 }
 
 run_pre_upgrade_backup() {
@@ -90,9 +154,43 @@ restart_php_fpm() {
     systemctl restart "${PHP_FPM_SERVICE}"
 }
 
+trap cleanup_temp EXIT
+
+exec 8>"${WRAPPER_LOCK_PATH}"
+if ! flock -n 8; then
+    log "another daily wrapper run is already active; skipping this trigger"
+    exit 0
+fi
+
+DAILY_OUTPUT_LOG="$(mktemp /tmp/librenms-daily-wrapper.XXXXXX)"
+
 daily_rc=0
+cleanup_rc=0
+if git_process_active; then
+    log "a LibreNMS git/composer/daily process is already active; skipping this trigger"
+    exit 0
+fi
+
+cleanup_stale_git_locks || cleanup_rc=$?
+if [ "${cleanup_rc}" -eq 1 ]; then
+    exit 0
+elif [ "${cleanup_rc}" -ne 0 ]; then
+    exit "${cleanup_rc}"
+fi
+
+repair_git_metadata || log "git metadata preflight failed; continuing with daily.sh"
 run_pre_upgrade_backup || exit $?
 run_daily || daily_rc=$?
+
+if [ "${GIT_RETRY_AFTER_REPAIR}" = "true" ] && daily_output_has_git_failure; then
+    log "daily.sh reported a git/update failure; repairing git metadata and retrying once"
+    if repair_git_metadata; then
+        daily_rc=0
+        run_daily || daily_rc=$?
+    else
+        log "git metadata repair failed; not retrying daily.sh"
+    fi
+fi
 
 if check_autoload; then
     if [ "${daily_rc}" -ne 0 ]; then

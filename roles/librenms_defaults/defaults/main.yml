@@ -9,7 +9,11 @@ librenms_daily_timer_on_calendar: "*-*-* 03:00:00"
 librenms_daily_timer_randomized_delay: 1800
 librenms_daily_self_heal_enabled: true
 librenms_daily_self_heal_path: /usr/local/sbin/librenms-daily-wrapper
+librenms_daily_self_heal_lock_path: /run/librenms-daily-wrapper.lock
 librenms_daily_self_heal_restart_php_fpm: "{{ librenms_manage_php_fpm }}"
+librenms_daily_self_heal_git_lock_cleanup: true
+librenms_daily_self_heal_git_metadata_repair: true
+librenms_daily_self_heal_git_retry_after_repair: true
 librenms_daily_run_once_after_deploy: true
 librenms_daily_maintenance_bootstrap_marker: /var/lib/librenms-ha-ansible/daily_maintenance_bootstrapped
 librenms_manage_scheduled_backups: "{{ librenms_manage_daily_maintenance }}"

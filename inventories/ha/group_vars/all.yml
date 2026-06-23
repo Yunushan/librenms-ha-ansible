@@ -116,6 +116,9 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_backup_pre_upgrade_required: true
 # librenms_backup_pre_upgrade_retention: 5
 # librenms_backup_include_rrd: false
+# librenms_daily_self_heal_git_lock_cleanup: true
+# librenms_daily_self_heal_git_metadata_repair: true
+# librenms_daily_self_heal_git_retry_after_repair: true
 
 # Galera recovery guard. Set both values only when there is no Galera Primary
 # component and galera-recover.yml has reported the selected bootstrap host.
