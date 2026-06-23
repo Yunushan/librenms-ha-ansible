@@ -1134,7 +1134,9 @@ maintenance update.
 The managed daily maintenance wrapper also prevents overlapping local update
 runs, removes stale LibreNMS Git lock files only when no `librenms` Git,
 Composer, or daily process is active, refreshes upstream Git refs/tags before
-`daily.sh`, and retries once after Git/ref lock update failures.
+`daily.sh`, and retries once after Git/ref lock update failures. After each
+daily run it clears Laravel caches and restarts PHP-FPM so web workers do not
+keep stale generated-cache or opcache paths after an update.
 
 RRD archives can be large, so they are optional:
 

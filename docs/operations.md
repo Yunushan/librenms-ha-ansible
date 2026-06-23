@@ -298,6 +298,11 @@ repairs Git metadata and retries `daily.sh` once. Real upstream/network errors
 can still fail and alert, but stale local Git state should not require manual
 cleanup.
 
+After each `daily.sh` run, the wrapper clears Laravel caches and restarts
+PHP-FPM by default. This prevents web requests from holding stale generated
+cache or opcache references after an update, such as missing
+`bootstrap/cache/routes-v*.php` files.
+
 Before the wrapper runs `daily.sh`, it creates a local pre-upgrade DB/config
 backup with `librenms-ha-backup pre-upgrade`. The update stops if that backup
 fails while `librenms_backup_pre_upgrade_required` is true. This protects the
@@ -329,6 +334,7 @@ Disable the automatic Git metadata repair while keeping the wrapper with:
 librenms_daily_self_heal_git_lock_cleanup: false
 librenms_daily_self_heal_git_metadata_repair: false
 librenms_daily_self_heal_git_retry_after_repair: false
+librenms_daily_self_heal_clear_laravel_cache_after_daily: false
 ```
 
 For a controlled version pin, set `librenms_version` to an explicit released tag
