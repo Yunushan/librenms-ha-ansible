@@ -7,12 +7,27 @@
   failed_when: false
   listen: Restart Redis
 
+- name: Wait for Redis service to become active after restart
+  systemd:
+    name: "{{ librenms_redis_service_name }}"
+  register: redis_service_state_after_restart
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 2
+  until: >-
+    (redis_service_state_after_restart.status.ActiveState | default(''))
+    == 'active'
+  listen: Restart Redis
+
 - name: Capture Redis service status
   command: "systemctl status {{ librenms_redis_service_name }} --no-pager -l"
   register: redis_service_status
   changed_when: false
   failed_when: false
-  when: redis_restart_result is failed
+  when: >-
+    (redis_service_state_after_restart.status.ActiveState | default(''))
+    != 'active'
   listen: Restart Redis
 
 - name: Capture Redis service journal
@@ -20,7 +35,9 @@
   register: redis_service_journal
   changed_when: false
   failed_when: false
-  when: redis_restart_result is failed
+  when: >-
+    (redis_service_state_after_restart.status.ActiveState | default(''))
+    != 'active'
   listen: Restart Redis
 
 - name: Fail with Redis service diagnostics
@@ -35,7 +52,9 @@
       journalctl:
       {{ redis_service_journal.stdout | default('') }}
       {{ redis_service_journal.stderr | default('') }}
-  when: redis_restart_result is failed
+  when: >-
+    (redis_service_state_after_restart.status.ActiveState | default(''))
+    != 'active'
   listen: Restart Redis
 
 - name: Restart Redis Sentinel service
@@ -47,6 +66,20 @@
   when: librenms_redis_mode == 'sentinel'
   listen: Restart Redis Sentinel
 
+- name: Wait for Redis Sentinel service to become active after restart
+  systemd:
+    name: "{{ librenms_redis_sentinel_service_name_effective }}"
+  register: redis_sentinel_service_state_after_restart
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 2
+  until: >-
+    (redis_sentinel_service_state_after_restart.status.ActiveState | default(''))
+    == 'active'
+  when: librenms_redis_mode == 'sentinel'
+  listen: Restart Redis Sentinel
+
 - name: Capture Redis Sentinel service status
   command: "systemctl status {{ librenms_redis_sentinel_service_name_effective }} --no-pager -l"
   register: redis_sentinel_service_status
@@ -54,7 +87,9 @@
   failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
-    - redis_sentinel_restart_result is failed
+    - >-
+      (redis_sentinel_service_state_after_restart.status.ActiveState
+      | default('')) != 'active'
   listen: Restart Redis Sentinel
 
 - name: Capture Redis Sentinel service journal
@@ -64,7 +99,9 @@
   failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
-    - redis_sentinel_restart_result is failed
+    - >-
+      (redis_sentinel_service_state_after_restart.status.ActiveState
+      | default('')) != 'active'
   listen: Restart Redis Sentinel
 
 - name: Fail with Redis Sentinel service diagnostics
@@ -81,5 +118,7 @@
       {{ redis_sentinel_service_journal.stderr | default('') }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - redis_sentinel_restart_result is failed
+    - >-
+      (redis_sentinel_service_state_after_restart.status.ActiveState
+      | default('')) != 'active'
   listen: Restart Redis Sentinel

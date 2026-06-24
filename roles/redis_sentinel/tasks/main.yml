@@ -184,6 +184,69 @@
   meta: flush_handlers
   when: librenms_redis_mode == 'sentinel'
 
+- name: Ensure Redis server dependency is started before configuring Sentinel
+  service:
+    name: "{{ librenms_redis_service_name }}"
+    state: started
+    enabled: true
+  register: librenms_redis_server_dependency_start
+  failed_when: false
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Wait for Redis server dependency before configuring Sentinel
+  systemd:
+    name: "{{ librenms_redis_service_name }}"
+  register: librenms_redis_server_dependency_state
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 2
+  until: >-
+    (librenms_redis_server_dependency_state.status.ActiveState | default(''))
+    == 'active'
+  when: librenms_redis_mode == 'sentinel'
+
+- name: Capture Redis server dependency status before Sentinel
+  command: "systemctl status {{ librenms_redis_service_name }} --no-pager -l"
+  register: librenms_redis_server_dependency_status
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - >-
+      (librenms_redis_server_dependency_state.status.ActiveState
+      | default('')) != 'active'
+
+- name: Capture Redis server dependency journal before Sentinel
+  command: "journalctl -u {{ librenms_redis_service_name }} -n 50 --no-pager"
+  register: librenms_redis_server_dependency_journal
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - >-
+      (librenms_redis_server_dependency_state.status.ActiveState
+      | default('')) != 'active'
+
+- name: Fail when Redis server dependency is not active before Sentinel
+  fail:
+    msg: |-
+      Cannot configure Redis Sentinel because {{ librenms_redis_service_name }}
+      is not active.
+
+      systemctl status:
+      {{ librenms_redis_server_dependency_status.stdout | default('') }}
+      {{ librenms_redis_server_dependency_status.stderr | default('') }}
+
+      journalctl:
+      {{ librenms_redis_server_dependency_journal.stdout | default('') }}
+      {{ librenms_redis_server_dependency_journal.stderr | default('') }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - >-
+      (librenms_redis_server_dependency_state.status.ActiveState
+      | default('')) != 'active'
+
 - name: Query local Redis replication state
   no_log: true
   command: >-
