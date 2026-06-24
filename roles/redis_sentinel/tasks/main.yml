@@ -41,6 +41,101 @@
   when:
     - librenms_redis_mode in ['local', 'sentinel']
 
+- name: Enable memory overcommit for Redis
+  ansible.posix.sysctl:
+    name: vm.overcommit_memory
+    value: "1"
+    state: present
+    reload: true
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - librenms_redis_manage_overcommit_memory | bool
+
+- name: Check Redis state before disabled persistence cleanup
+  systemd:
+    name: "{{ librenms_redis_service_name }}"
+  register: librenms_redis_state_before_persistence_cleanup
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_service_mgr == 'systemd'
+    - not (librenms_redis_persistence_enabled | bool)
+    - librenms_redis_remove_persistence_files_when_disabled | bool
+
+- name: Kill Redis while it is loading stale persistence data  # noqa: command-instead-of-module
+  command: "systemctl kill -s SIGKILL {{ librenms_redis_service_name }}"
+  register: librenms_redis_kill_for_persistence_cleanup
+  changed_when: librenms_redis_kill_for_persistence_cleanup.rc == 0
+  failed_when: false
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_service_mgr == 'systemd'
+    - not (librenms_redis_persistence_enabled | bool)
+    - librenms_redis_remove_persistence_files_when_disabled | bool
+    - >-
+      (librenms_redis_state_before_persistence_cleanup.status.ActiveState
+      | default('')) in ['activating', 'deactivating']
+
+- name: Reset Redis failed state after persistence cleanup kill  # noqa: command-instead-of-module
+  command: "systemctl reset-failed {{ librenms_redis_service_name }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_kill_for_persistence_cleanup is defined
+    - librenms_redis_kill_for_persistence_cleanup is changed
+
+- name: Stop Redis after persistence cleanup kill
+  service:
+    name: "{{ librenms_redis_service_name }}"
+    state: stopped
+  failed_when: false
+  when:
+    - librenms_redis_kill_for_persistence_cleanup is defined
+    - librenms_redis_kill_for_persistence_cleanup is changed
+
+- name: Wait for Redis loading process to stop before persistence cleanup
+  systemd:
+    name: "{{ librenms_redis_service_name }}"
+  register: librenms_redis_state_before_stale_file_removal
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 2
+  until: >-
+    (librenms_redis_state_before_stale_file_removal.status.ActiveState
+    | default('')) not in ['activating', 'deactivating']
+  when:
+    - librenms_redis_kill_for_persistence_cleanup is defined
+    - librenms_redis_kill_for_persistence_cleanup is changed
+
+- name: Find stale Redis persistence files when persistence is disabled
+  find:
+    paths: "{{ librenms_redis_data_dir }}"
+    file_type: any
+    patterns:
+      - dump.rdb
+      - appendonly.aof
+      - appendonlydir
+  register: librenms_redis_stale_persistence_files
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - not (librenms_redis_persistence_enabled | bool)
+    - librenms_redis_remove_persistence_files_when_disabled | bool
+
+- name: Remove stale Redis persistence files when persistence is disabled
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_redis_stale_persistence_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  notify: Restart Redis
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - not (librenms_redis_persistence_enabled | bool)
+    - librenms_redis_remove_persistence_files_when_disabled | bool
+
 - name: Ensure Redis Sentinel config parent directory exists for managed systemd service
   file:
     path: "{{ librenms_redis_sentinel_conf_path_effective | dirname }}"

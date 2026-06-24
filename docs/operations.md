@@ -594,8 +594,10 @@ ansible librenms_nodes -i inventories/ha/hosts.yml -b -m shell -a \
   "systemctl show redis-server -p ActiveState -p SubState -p MainPID --no-pager; systemctl status redis-server --no-pager -l | head -30"
 ```
 
-`deactivating (stop-sigterm)` with `Saving the final RDB snapshot` is not a
-normal short restart. The default role disables Redis RDB/AOF persistence and
+`deactivating (stop-sigterm)` with `Saving the final RDB snapshot`, or
+`activating (start)` with `Redis is loading...` from an old multi-GB `dump.rdb`,
+is not a normal short restart. The default role disables Redis RDB/AOF
+persistence, removes stale persistence files when persistence is disabled, and
 sets bounded systemd start/stop timeouts so future maintenance cannot hang on a
 large runtime cache snapshot. The role also clears an already-stuck Redis stop
 job when `librenms_redis_clear_stuck_stop_job: true`.

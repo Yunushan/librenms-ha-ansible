@@ -227,8 +227,10 @@ librenms_redis_systemd_timeout_start_sec: 30
 librenms_redis_systemd_timeout_stop_sec: 30
 librenms_redis_clear_stuck_stop_job: true
 librenms_redis_persistence_enabled: false
+librenms_redis_remove_persistence_files_when_disabled: true
 librenms_redis_save_rules: []
 librenms_redis_appendonly: false
+librenms_redis_manage_overcommit_memory: true
 librenms_redis_custom_conf_path: "{{ librenms_redis_data_dir }}/librenms-redis.conf"
 librenms_redis_conf_path_effective: >-
   {{

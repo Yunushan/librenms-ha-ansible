@@ -1436,8 +1436,10 @@ librenms_redis_systemd_timeout_start_sec: 30
 librenms_redis_systemd_timeout_stop_sec: 30
 librenms_redis_clear_stuck_stop_job: true
 librenms_redis_persistence_enabled: false
+librenms_redis_remove_persistence_files_when_disabled: true
 librenms_redis_save_rules: []
 librenms_redis_appendonly: false
+librenms_redis_manage_overcommit_memory: true
 ```
 
 If the Redis master node disappears, Sentinel needs a short window to agree on
@@ -1455,6 +1457,8 @@ LibreNMS uses Redis for runtime cache, sessions, locks, and queues, so large RDB
 snapshots are usually not worth blocking Redis restarts. To persist Redis data
 anyway, set `librenms_redis_persistence_enabled: true` and define either
 `librenms_redis_save_rules` or `librenms_redis_appendonly: true`.
+When persistence is disabled, the role removes stale Redis persistence files
+such as `dump.rdb` so Redis does not spend minutes loading old cache data.
 When `librenms_redis_clear_stuck_stop_job` is enabled, the role also clears a
 Redis unit that is already stuck in systemd's `deactivating/stop-sigterm` state
 before continuing service management.
