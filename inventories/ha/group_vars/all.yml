@@ -20,6 +20,13 @@ librenms_redis_master_host: lnms1
 librenms_redis_password: CHANGE_ME_REDIS_PASSWORD
 librenms_redis_sentinel_password: CHANGE_ME_SENTINEL_PASSWORD
 librenms_redis_sentinel_service: mymaster
+# LibreNMS uses Redis for cache, sessions, locks, and queues. In HA Sentinel
+# mode, keep Redis persistence disabled by default so RDB snapshots cannot make
+# Redis restarts hang during deploys or automatic maintenance.
+librenms_redis_persistence_enabled: false
+librenms_redis_clear_stuck_stop_job: true
+librenms_redis_systemd_timeout_start_sec: 30
+librenms_redis_systemd_timeout_stop_sec: 30
 
 librenms_rrd_mode: glusterfs
 librenms_gluster_bootstrap_host: lnms1

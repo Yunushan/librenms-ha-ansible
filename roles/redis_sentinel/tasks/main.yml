@@ -101,6 +101,47 @@
     - librenms_redis_mode in ['local', 'sentinel']
     - ansible_service_mgr == 'systemd'
 
+- name: Check Redis server systemd state before service management
+  command: "systemctl show {{ librenms_redis_service_name }} -p ActiveState -p SubState --no-pager"
+  register: librenms_redis_server_systemd_state
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_service_mgr == 'systemd'
+
+- name: Clear Redis server stuck stop job before service management
+  command: "systemctl kill -s SIGKILL {{ librenms_redis_service_name }}"
+  register: librenms_redis_clear_stuck_stop_job_result
+  changed_when: librenms_redis_clear_stuck_stop_job_result.rc == 0
+  failed_when: false
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_service_mgr == 'systemd'
+    - librenms_redis_clear_stuck_stop_job | bool
+    - (librenms_redis_server_systemd_state.stdout | default('')) is search('ActiveState=deactivating')
+    - (librenms_redis_server_systemd_state.stdout | default('')) is search('SubState=stop-sigterm')
+
+- name: Reset Redis server failed state after clearing stuck stop job
+  command: "systemctl reset-failed {{ librenms_redis_service_name }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_clear_stuck_stop_job_result is defined
+    - librenms_redis_clear_stuck_stop_job_result is changed
+
+- name: Wait for Redis server stuck stop job to clear
+  command: "systemctl show {{ librenms_redis_service_name }} -p ActiveState --value --no-pager"
+  register: librenms_redis_server_state_after_clear
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 2
+  until: (librenms_redis_server_state_after_clear.stdout | default('') | trim) != 'deactivating'
+  when:
+    - librenms_redis_clear_stuck_stop_job_result is defined
+    - librenms_redis_clear_stuck_stop_job_result is changed
+
 - name: Enable and start Redis server
   when: librenms_redis_mode in ['local', 'sentinel']
   block:

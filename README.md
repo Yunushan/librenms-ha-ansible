@@ -1432,6 +1432,12 @@ librenms_redis_sentinel_failover_timeout: 30000
 librenms_redis_sentinel_parallel_syncs: 1
 librenms_redis_restart_sec: 3
 librenms_redis_sentinel_restart_sec: 3
+librenms_redis_systemd_timeout_start_sec: 30
+librenms_redis_systemd_timeout_stop_sec: 30
+librenms_redis_clear_stuck_stop_job: true
+librenms_redis_persistence_enabled: false
+librenms_redis_save_rules: []
+librenms_redis_appendonly: false
 ```
 
 If the Redis master node disappears, Sentinel needs a short window to agree on
@@ -1443,6 +1449,15 @@ for slower networks.
 `librenms_redis_sentinel_timeout` is also the Redis socket timeout used by
 LibreNMS when Sentinel mode is enabled. Keep it longer than blocking queue reads
 so dispatcher workers do not time out while waiting on an empty Redis queue.
+
+Redis persistence is disabled by default for the managed LibreNMS Redis nodes.
+LibreNMS uses Redis for runtime cache, sessions, locks, and queues, so large RDB
+snapshots are usually not worth blocking Redis restarts. To persist Redis data
+anyway, set `librenms_redis_persistence_enabled: true` and define either
+`librenms_redis_save_rules` or `librenms_redis_appendonly: true`.
+When `librenms_redis_clear_stuck_stop_job` is enabled, the role also clears a
+Redis unit that is already stuck in systemd's `deactivating/stop-sigterm` state
+before continuing service management.
 
 On systemd hosts, the role runs Sentinel through the distro-native
 `redis-sentinel.service` with a LibreNMS drop-in that points the unit at a

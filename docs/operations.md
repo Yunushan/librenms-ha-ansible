@@ -586,6 +586,30 @@ redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster
 All reachable Sentinels should agree on one master. Exactly one Redis node should
 accept writes as master.
 
+If a playbook appears stuck on `Restart Redis service`, check whether Redis is
+waiting on a shutdown snapshot:
+
+```bash
+ansible librenms_nodes -i inventories/ha/hosts.yml -b -m shell -a \
+  "systemctl show redis-server -p ActiveState -p SubState -p MainPID --no-pager; systemctl status redis-server --no-pager -l | head -30"
+```
+
+`deactivating (stop-sigterm)` with `Saving the final RDB snapshot` is not a
+normal short restart. The default role disables Redis RDB/AOF persistence and
+sets bounded systemd start/stop timeouts so future maintenance cannot hang on a
+large runtime cache snapshot. The role also clears an already-stuck Redis stop
+job when `librenms_redis_clear_stuck_stop_job: true`.
+
+If you need to clear one host by hand before pulling the fixed playbook, run:
+
+```bash
+ansible lnms1 -i inventories/ha/hosts.yml -b -m shell -a \
+  "systemctl kill -s SIGKILL redis-server || true; sleep 3; systemctl reset-failed redis-server; systemctl start redis-server"
+```
+
+This can drop Redis cache/session state on that node, but Sentinel and LibreNMS
+will rebuild runtime data. Browser sessions may need to log in again.
+
 ## SNMPv3 Graph Gaps
 
 SNMPv3 polling can show gaps after a node outage if the dispatcher was down,
