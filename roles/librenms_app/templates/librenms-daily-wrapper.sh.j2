@@ -175,6 +175,7 @@ clear_daily_update_failure_notification() {
 
     cd "${LIBRENMS_DIR}" || return 1
     runuser -u "${LIBRENMS_USER}" -- env LIBRENMS_DAILY_NODE="${local_host}" php -r '
+        $init_modules = [];
         require getcwd() . "/includes/init.php";
 
         $node = getenv("LIBRENMS_DAILY_NODE") ?: gethostname();
@@ -240,7 +241,7 @@ post_daily_web_cache_repair
 
 if check_autoload; then
     if [ "${daily_rc}" -eq 0 ]; then
-        cleared_count="$(clear_daily_update_failure_notification 2>/dev/null)" &&
+        cleared_count="$(clear_daily_update_failure_notification 2>/dev/null | tail -n 1)" &&
             log "cleared ${cleared_count:-0} stale daily.sh failure notification(s)" ||
             log "failed to clear stale daily.sh failure notification"
     fi
@@ -248,7 +249,7 @@ if check_autoload; then
     if [ "${daily_rc}" -ne 0 ]; then
         log "daily.sh failed with rc=${daily_rc}, but autoload is healthy"
         if [ "${HEALTHY_UPDATE_FAILURE_IS_SUCCESS}" = "true" ] && daily_output_has_repairable_update_failure; then
-            cleared_count="$(clear_daily_update_failure_notification 2>/dev/null)" &&
+            cleared_count="$(clear_daily_update_failure_notification 2>/dev/null | tail -n 1)" &&
                 log "cleared ${cleared_count:-0} matching healthy daily.sh failure notification(s)" ||
                 log "failed to clear matching healthy daily.sh failure notification"
             log "treating healthy Git/release update failure as successful after self-heal checks"
