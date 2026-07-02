@@ -17,6 +17,7 @@ GIT_RETRY_AFTER_REPAIR="{{ librenms_daily_self_heal_git_retry_after_repair | boo
 CLEAR_CACHE_AFTER_DAILY="{{ librenms_daily_self_heal_clear_laravel_cache_after_daily | bool | ternary('true', 'false') }}"
 HEALTHY_UPDATE_FAILURE_IS_SUCCESS="{{ librenms_daily_self_heal_treat_healthy_update_failure_as_success | bool | ternary('true', 'false') }}"
 CLEAR_HEALTHY_UPDATE_FAILURE_NOTIFICATION="{{ clear_healthy_update_failure_notification | ternary('true', 'false') }}"
+HEALTHY_FAILURE_NOTIFICATION_CLEANUP_DAYS="{{ librenms_daily_self_heal_notification_cleanup_days | int }}"
 BACKUP_WRAPPER="{{ librenms_backup_wrapper_path }}"
 PRE_UPGRADE_BACKUP_ENABLED="{{ pre_upgrade_backup_enabled | ternary('true', 'false') }}"
 PRE_UPGRADE_BACKUP_REQUIRED="{{ librenms_backup_pre_upgrade_required | bool | ternary('true', 'false') }}"
@@ -174,11 +175,15 @@ clear_daily_update_failure_notification() {
     [ -n "${local_host}" ] || return 0
 
     cd "${LIBRENMS_DIR}" || return 1
-    runuser -u "${LIBRENMS_USER}" -- env LIBRENMS_DAILY_NODE="${local_host}" php -r '
+    runuser -u "${LIBRENMS_USER}" -- env \
+        LIBRENMS_DAILY_NODE="${local_host}" \
+        LIBRENMS_DAILY_NOTIFICATION_CLEANUP_DAYS="${HEALTHY_FAILURE_NOTIFICATION_CLEANUP_DAYS}" \
+        php -r '
         $init_modules = [];
         require getcwd() . "/includes/init.php";
 
         $node = getenv("LIBRENMS_DAILY_NODE") ?: gethostname();
+        $days = max(1, (int) (getenv("LIBRENMS_DAILY_NOTIFICATION_CLEANUP_DAYS") ?: 30));
         $patterns = [
             "%failed on {$node}%",
             "%failed on " . gethostname() . "%",
@@ -187,7 +192,7 @@ clear_daily_update_failure_notification() {
         $deleted = \Illuminate\Support\Facades\DB::table("notifications")
             ->where("source", "daily.sh")
             ->where("title", "Error: Daily update failed")
-            ->where("datetime", ">=", \Illuminate\Support\Facades\DB::raw("DATE_SUB(NOW(), INTERVAL 2 DAY)"))
+            ->where("datetime", ">=", \Illuminate\Support\Facades\DB::raw("DATE_SUB(NOW(), INTERVAL {$days} DAY)"))
             ->where(function ($query) use ($patterns) {
                 foreach ($patterns as $pattern) {
                     $query->orWhere("body", "like", $pattern);

@@ -131,6 +131,7 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_daily_self_heal_clear_laravel_cache_after_daily: true
 # librenms_daily_self_heal_treat_healthy_update_failure_as_success: true
 # librenms_daily_self_heal_clear_healthy_update_failure_notification: true
+# librenms_daily_self_heal_notification_cleanup_days: 30
 
 # Galera recovery guard. Set both values only when there is no Galera Primary
 # component and galera-recover.yml has reported the selected bootstrap host.

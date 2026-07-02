@@ -1338,7 +1338,8 @@ stale daily-update failure notification for an already healthy node without
 hiding SQL schema, Composer, database, or broken autoload failures. In that
 same healthy repaired case, the wrapper also removes the matching recent
 `daily.sh` failure notification for the local node. A later successful healthy
-daily run also clears a matching stale notification from a previous run.
+daily run also clears a matching stale notification from a previous run. The
+default cleanup window is 30 days.
 
 ### Network map auto-repair
 

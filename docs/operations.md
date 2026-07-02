@@ -309,7 +309,9 @@ notifications while still failing SQL schema, Composer, database, or broken
 autoload states. For that same healthy repaired case, the wrapper removes the
 matching recent `daily.sh` failure notification for the local node, leaving
 unrelated or real failure notifications untouched. A later successful healthy
-daily run also clears a matching stale notification from a previous run.
+daily run also clears a matching stale notification from a previous run. The
+default cleanup window is 30 days and is controlled by
+`librenms_daily_self_heal_notification_cleanup_days`.
 
 Before the wrapper runs `daily.sh`, it creates a local pre-upgrade DB/config
 backup with `librenms-ha-backup pre-upgrade`. The update stops if that backup
@@ -345,6 +347,7 @@ librenms_daily_self_heal_git_retry_after_repair: false
 librenms_daily_self_heal_clear_laravel_cache_after_daily: false
 librenms_daily_self_heal_treat_healthy_update_failure_as_success: false
 librenms_daily_self_heal_clear_healthy_update_failure_notification: false
+librenms_daily_self_heal_notification_cleanup_days: 30
 ```
 
 For a controlled version pin, set `librenms_version` to an explicit released tag
