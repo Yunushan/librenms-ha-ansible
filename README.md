@@ -1331,7 +1331,14 @@ wrapper still executes LibreNMS maintenance as the `librenms` user, then checks
 PHP autoload health. If an update leaves `vendor/` incomplete, it reruns
 LibreNMS' Composer wrapper, clears Laravel caches, and restarts PHP-FPM so a
 single bad web node is repaired automatically instead of returning HTTP 500
-through HAProxy.
+through HAProxy. If `daily.sh` returns a transient non-zero result after those
+repairs but the autoload health check passes, the wrapper treats the run as
+successful for known Git/release-fetch failures by default. This prevents a
+stale daily-update failure notification for an already healthy node without
+hiding SQL schema, Composer, database, or broken autoload failures. In that
+same healthy repaired case, the wrapper also removes the matching recent
+`daily.sh` failure notification for the local node. A later successful healthy
+daily run also clears a matching stale notification from a previous run.
 
 ### Network map auto-repair
 

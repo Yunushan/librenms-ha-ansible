@@ -301,7 +301,15 @@ cleanup.
 After each `daily.sh` run, the wrapper clears Laravel caches and restarts
 PHP-FPM by default. This prevents web requests from holding stale generated
 cache or opcache references after an update, such as missing
-`bootstrap/cache/routes-v*.php` files.
+`bootstrap/cache/routes-v*.php` files. If `daily.sh` exits non-zero after these
+repairs but the wrapper confirms LibreNMS autoload health, the service exits
+successfully for known Git/release-fetch failures by default. This prevents
+transient update warnings from becoming persistent "Daily update failed" UI
+notifications while still failing SQL schema, Composer, database, or broken
+autoload states. For that same healthy repaired case, the wrapper removes the
+matching recent `daily.sh` failure notification for the local node, leaving
+unrelated or real failure notifications untouched. A later successful healthy
+daily run also clears a matching stale notification from a previous run.
 
 Before the wrapper runs `daily.sh`, it creates a local pre-upgrade DB/config
 backup with `librenms-ha-backup pre-upgrade`. The update stops if that backup
@@ -335,6 +343,8 @@ librenms_daily_self_heal_git_lock_cleanup: false
 librenms_daily_self_heal_git_metadata_repair: false
 librenms_daily_self_heal_git_retry_after_repair: false
 librenms_daily_self_heal_clear_laravel_cache_after_daily: false
+librenms_daily_self_heal_treat_healthy_update_failure_as_success: false
+librenms_daily_self_heal_clear_healthy_update_failure_notification: false
 ```
 
 For a controlled version pin, set `librenms_version` to an explicit released tag

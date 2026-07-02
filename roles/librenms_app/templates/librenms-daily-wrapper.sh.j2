@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 {% set pre_upgrade_backup_enabled = librenms_manage_scheduled_backups | bool and librenms_backup_pre_upgrade_enabled | bool %}
+{% set clear_healthy_update_failure_notification = librenms_daily_self_heal_clear_healthy_update_failure_notification | bool %}
 set -u
 set -o pipefail
 
@@ -14,6 +15,8 @@ GIT_LOCK_CLEANUP="{{ librenms_daily_self_heal_git_lock_cleanup | bool | ternary(
 GIT_METADATA_REPAIR="{{ librenms_daily_self_heal_git_metadata_repair | bool | ternary('true', 'false') }}"
 GIT_RETRY_AFTER_REPAIR="{{ librenms_daily_self_heal_git_retry_after_repair | bool | ternary('true', 'false') }}"
 CLEAR_CACHE_AFTER_DAILY="{{ librenms_daily_self_heal_clear_laravel_cache_after_daily | bool | ternary('true', 'false') }}"
+HEALTHY_UPDATE_FAILURE_IS_SUCCESS="{{ librenms_daily_self_heal_treat_healthy_update_failure_as_success | bool | ternary('true', 'false') }}"
+CLEAR_HEALTHY_UPDATE_FAILURE_NOTIFICATION="{{ clear_healthy_update_failure_notification | ternary('true', 'false') }}"
 BACKUP_WRAPPER="{{ librenms_backup_wrapper_path }}"
 PRE_UPGRADE_BACKUP_ENABLED="{{ pre_upgrade_backup_enabled | ternary('true', 'false') }}"
 PRE_UPGRADE_BACKUP_REQUIRED="{{ librenms_backup_pre_upgrade_required | bool | ternary('true', 'false') }}"
@@ -87,7 +90,7 @@ run_daily() {
     return "${PIPESTATUS[0]}"
 }
 
-daily_output_has_git_failure() {
+daily_output_has_repairable_update_failure() {
     [ -s "${DAILY_OUTPUT_LOG}" ] || return 1
     grep -Eiq \
         'cannot lock ref|unable to create .+\.lock|Fetching new release information[[:space:]]+FAIL|Updating to latest release[[:space:]]+FAIL' \
@@ -163,6 +166,38 @@ post_daily_web_cache_repair() {
     restart_php_fpm || log "PHP-FPM restart failed after daily maintenance"
 }
 
+clear_daily_update_failure_notification() {
+    [ "${CLEAR_HEALTHY_UPDATE_FAILURE_NOTIFICATION}" = "true" ] || return 0
+
+    local local_host
+    local_host="$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)"
+    [ -n "${local_host}" ] || return 0
+
+    cd "${LIBRENMS_DIR}" || return 1
+    runuser -u "${LIBRENMS_USER}" -- env LIBRENMS_DAILY_NODE="${local_host}" php -r '
+        require getcwd() . "/includes/init.php";
+
+        $node = getenv("LIBRENMS_DAILY_NODE") ?: gethostname();
+        $patterns = [
+            "%failed on {$node}%",
+            "%failed on " . gethostname() . "%",
+        ];
+
+        $deleted = \Illuminate\Support\Facades\DB::table("notifications")
+            ->where("source", "daily.sh")
+            ->where("title", "Error: Daily update failed")
+            ->where("datetime", ">=", \Illuminate\Support\Facades\DB::raw("DATE_SUB(NOW(), INTERVAL 2 DAY)"))
+            ->where(function ($query) use ($patterns) {
+                foreach ($patterns as $pattern) {
+                    $query->orWhere("body", "like", $pattern);
+                }
+            })
+            ->delete();
+
+        echo $deleted, PHP_EOL;
+    '
+}
+
 trap cleanup_temp EXIT
 
 exec 8>"${WRAPPER_LOCK_PATH}"
@@ -191,7 +226,7 @@ repair_git_metadata || log "git metadata preflight failed; continuing with daily
 run_pre_upgrade_backup || exit $?
 run_daily || daily_rc=$?
 
-if [ "${GIT_RETRY_AFTER_REPAIR}" = "true" ] && daily_output_has_git_failure; then
+if [ "${GIT_RETRY_AFTER_REPAIR}" = "true" ] && daily_output_has_repairable_update_failure; then
     log "daily.sh reported a git/update failure; repairing git metadata and retrying once"
     if repair_git_metadata; then
         daily_rc=0
@@ -204,8 +239,21 @@ fi
 post_daily_web_cache_repair
 
 if check_autoload; then
+    if [ "${daily_rc}" -eq 0 ]; then
+        cleared_count="$(clear_daily_update_failure_notification 2>/dev/null)" &&
+            log "cleared ${cleared_count:-0} stale daily.sh failure notification(s)" ||
+            log "failed to clear stale daily.sh failure notification"
+    fi
+
     if [ "${daily_rc}" -ne 0 ]; then
         log "daily.sh failed with rc=${daily_rc}, but autoload is healthy"
+        if [ "${HEALTHY_UPDATE_FAILURE_IS_SUCCESS}" = "true" ] && daily_output_has_repairable_update_failure; then
+            cleared_count="$(clear_daily_update_failure_notification 2>/dev/null)" &&
+                log "cleared ${cleared_count:-0} matching healthy daily.sh failure notification(s)" ||
+                log "failed to clear matching healthy daily.sh failure notification"
+            log "treating healthy Git/release update failure as successful after self-heal checks"
+            exit 0
+        fi
     fi
     exit "${daily_rc}"
 fi
