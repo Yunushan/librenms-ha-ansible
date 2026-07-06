@@ -1419,6 +1419,8 @@ librenms_haproxy_web_check_interval: 2s
 librenms_haproxy_web_check_fall: 2
 librenms_haproxy_db_check_interval: 2s
 librenms_haproxy_db_check_fall: 2
+librenms_haproxy_db_tcp_keepalive: true
+librenms_haproxy_db_shutdown_sessions_on_backend_down: true
 ```
 
 Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.
@@ -1429,6 +1431,11 @@ PHP-FPM ping endpoint, so a node with an incomplete post-update `vendor/` tree
 is removed from browser rotation instead of intermittently serving HTTP 500.
 With the default checks above, a failed web or DB backend is usually removed
 from rotation after roughly four seconds.
+
+For the Galera DB frontend, the default HAProxy config enables TCP keepalive and
+closes client sessions when a checked DB backend is marked down. This prevents
+long-lived LibreNMS PHP workers from continuing to use a dead MySQL connection
+after Galera or HAProxy failover.
 
 ### Redis failover tuning
 

@@ -50,6 +50,13 @@
   ~ ' fall ' ~ librenms_haproxy_db_check_fall
   ~ ' rise ' ~ librenms_haproxy_db_check_rise
 %}
+{% set librenms_haproxy_db_server_options =
+  'check' ~ (
+    ' on-marked-down shutdown-sessions'
+    if librenms_haproxy_db_shutdown_sessions_on_backend_down | bool
+    else ''
+  )
+%}
 {% set librenms_haproxy_rrdcached_backend_nodes =
   groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes)
 %}
@@ -124,12 +131,18 @@ backend librenms_web_nodes
 frontend librenms_db
     bind {{ librenms_haproxy_bind_address }}:{{ librenms_haproxy_db_port }}
     mode tcp
+{% if librenms_haproxy_db_tcp_keepalive | bool %}
+    option clitcpka
+{% endif %}
     timeout client {{ librenms_haproxy_db_timeout_client }}
     default_backend galera_nodes
 
 backend galera_nodes
     mode tcp
     balance roundrobin
+{% if librenms_haproxy_db_tcp_keepalive | bool %}
+    option srvtcpka
+{% endif %}
     timeout server {{ librenms_haproxy_db_timeout_server }}
     default-server {{ librenms_haproxy_db_default_server }}
 {% if librenms_haproxy_db_mysql_check_enabled | bool %}
@@ -138,7 +151,7 @@ backend galera_nodes
     option tcp-check
 {% endif %}
 {% for host in librenms_active_db_nodes %}
-    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_db_port }} check
+    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ librenms_db_port }} {{ librenms_haproxy_db_server_options }}
 {% endfor %}
 {% endif %}
 

@@ -19,6 +19,11 @@ FIX_WRITABLE_OWNERSHIP={{ (librenms_startup_repair_fix_writable_ownership | bool
 SERVICE_RECOVERY_ENABLED={{ (librenms_startup_repair_service_recovery_enabled | bool) | ternary('1', '0') }}
 SERVICE_RECOVERY_TIMEOUT={{ librenms_startup_repair_service_recovery_timeout | int }}
 SERVICE_RECOVERY_DELAY={{ librenms_startup_repair_service_recovery_delay | int }}
+PHP_FPM_SERVICE={{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) | quote }}
+RESTART_PHP_FPM_ON_DB_GONE_AWAY={{ (librenms_startup_repair_restart_php_fpm_on_db_gone_away | bool) | ternary('1', '0') }}
+DB_GONE_AWAY_LOG_LINES={{ librenms_startup_repair_db_gone_away_log_lines | int }}
+DB_GONE_AWAY_MARKER={{ librenms_startup_repair_db_gone_away_marker | quote }}
+DB_GONE_AWAY_DB_CHECK_TIMEOUT={{ librenms_startup_repair_db_gone_away_db_check_timeout | int }}
 SERVICE_RECOVERY_UNITS=(
 {% for unit in librenms_startup_repair_service_recovery_units | default([]) %}
 {% set rendered_unit = unit | trim %}
@@ -169,10 +174,56 @@ configure_librenms_runtime() {
   return 1
 }
 
+latest_db_gone_away_error() {
+  local log_file="${LIBRENMS_DIR}/logs/librenms.log"
+
+  [ -r "${log_file}" ] || return 1
+
+  tail -n "${DB_GONE_AWAY_LOG_LINES}" "${log_file}" 2>/dev/null \
+    | grep -E 'SQLSTATE\[HY000\].*\[2006\]|MySQL server has gone away|Lost connection to MySQL server' \
+    | tail -n 1
+}
+
+librenms_database_ready() {
+  run_as_librenms timeout "${DB_GONE_AWAY_DB_CHECK_TIMEOUT}" \
+    "${LIBRENMS_DIR}/lnms" config:get distributed_poller >/dev/null 2>&1
+}
+
+recover_php_fpm_after_db_gone_away() {
+  local latest_error
+  local handled_error
+  local marker_dir
+
+  [ "${RESTART_PHP_FPM_ON_DB_GONE_AWAY}" = "1" ] || return 0
+  [ -n "${PHP_FPM_SERVICE}" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+
+  latest_error=$(latest_db_gone_away_error || true)
+  [ -n "${latest_error}" ] || return 0
+
+  handled_error=$(cat "${DB_GONE_AWAY_MARKER}" 2>/dev/null || true)
+  [ "${latest_error}" != "${handled_error}" ] || return 0
+
+  if ! librenms_database_ready; then
+    log "detected LibreNMS DB gone-away error, but database is not ready yet"
+    return 0
+  fi
+
+  log "detected fresh LibreNMS DB gone-away error; restarting ${PHP_FPM_SERVICE}"
+  if systemctl restart "${PHP_FPM_SERVICE}" >/dev/null 2>&1; then
+    marker_dir=$(dirname "${DB_GONE_AWAY_MARKER}")
+    mkdir -p "${marker_dir}" >/dev/null 2>&1 || true
+    printf '%s\n' "${latest_error}" > "${DB_GONE_AWAY_MARKER}" 2>/dev/null || true
+  else
+    log "failed to restart ${PHP_FPM_SERVICE} after DB gone-away error"
+  fi
+}
+
 recover_systemd_units || true
 repair_writable_paths
 repair_git_rrd_placeholder
 ensure_systemd_units
 configure_librenms_runtime || true
+recover_php_fpm_after_db_gone_away || true
 
 exit 0

@@ -389,6 +389,8 @@ librenms_haproxy_retries: 2
 librenms_haproxy_redispatch: true
 librenms_haproxy_db_timeout_client: 8h
 librenms_haproxy_db_timeout_server: 8h
+librenms_haproxy_db_tcp_keepalive: true
+librenms_haproxy_db_shutdown_sessions_on_backend_down: true
 librenms_haproxy_web_check_interval: 1s
 librenms_haproxy_web_check_fall: 2
 librenms_haproxy_web_check_rise: 1
@@ -527,6 +529,10 @@ librenms_startup_repair_runtime_retries: 18
 librenms_startup_repair_runtime_delay: 10
 librenms_startup_repair_fix_git_rrd_placeholder: true
 librenms_startup_repair_fix_writable_ownership: true
+librenms_startup_repair_restart_php_fpm_on_db_gone_away: "{{ librenms_manage_php_fpm }}"
+librenms_startup_repair_db_gone_away_log_lines: 400
+librenms_startup_repair_db_gone_away_marker: /run/librenms-ha-startup-repair/db-gone-away.last
+librenms_startup_repair_db_gone_away_db_check_timeout: 10
 librenms_startup_repair_service_recovery_enabled: true
 librenms_startup_repair_service_recovery_timeout: 180
 librenms_startup_repair_service_recovery_delay: 5

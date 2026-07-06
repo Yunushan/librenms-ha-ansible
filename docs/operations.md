@@ -496,6 +496,12 @@ by default, which helps clean full-cluster restarts re-form without an operator
 bootstrap when Galera has valid saved state. It does not force an unsafe Galera
 bootstrap; if no `Primary` component forms, use `galera-recover.yml`.
 
+The same startup repair timer also watches recent `librenms.log` output for a
+fresh `MySQL server has gone away` / SQLSTATE `2006` error. If the LibreNMS DB
+probe is healthy again, it restarts PHP-FPM once for that new error so web
+workers do not keep serving stale database connections after a transient Galera
+or HAProxy event.
+
 After all nodes return, check the self-healing units before rerunning Ansible:
 
 ```bash
