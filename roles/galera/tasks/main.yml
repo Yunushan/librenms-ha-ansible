@@ -1129,6 +1129,12 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
     - (librenms_galera_backend_tcp_initial.state | default('')) != 'started'
+    - >-
+      not (
+        not librenms_galera_cluster_has_live_member | bool
+        and inventory_hostname == librenms_galera_bootstrap_effective_host
+        and librenms_galera_cluster_bootstrapped_this_run | default(false)
+      )
 
 - name: Wait for Galera node TCP listener after backend restart
   wait_for:
@@ -1141,6 +1147,12 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
     - (librenms_galera_backend_tcp_initial.state | default('')) != 'started'
+    - >-
+      not (
+        not librenms_galera_cluster_has_live_member | bool
+        and inventory_hostname == librenms_galera_bootstrap_effective_host
+        and librenms_galera_cluster_bootstrapped_this_run | default(false)
+      )
 
 - name: Wait for local Galera node to join the primary component
   shell: |-
@@ -1178,10 +1190,119 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
 
+- name: Re-bootstrap local Galera bootstrap host after failed primary join
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - not librenms_galera_cluster_has_live_member | bool
+    - inventory_hostname == librenms_galera_bootstrap_effective_host
+    - librenms_galera_cluster_bootstrapped_this_run | default(false)
+    - >-
+      not (
+        (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+        and (librenms_galera_local_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+      )
+  block:
+    - name: Stop MariaDB before local Galera rebootstrap # noqa: command-instead-of-module
+      shell: |-
+        set -o pipefail
+        timeout "{{ librenms_galera_stop_timeout | int }}" \
+          systemctl stop "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+
+        if pgrep -x mariadbd >/dev/null; then
+          systemctl kill --kill-who=all --signal=KILL \
+            "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+          pkill -KILL -x mariadbd >/dev/null 2>&1 || true
+        fi
+
+        systemctl reset-failed "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
+        systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
+      args:
+        executable: /bin/bash
+      register: librenms_galera_local_rebootstrap_stop
+      changed_when: librenms_galera_local_rebootstrap_stop.rc == 0
+
+    - name: Re-run Galera bootstrap on local bootstrap host # noqa: command-instead-of-module
+      shell: |-
+        set -euo pipefail
+
+        cleanup() {
+          systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
+        }
+        trap cleanup EXIT
+
+        systemctl reset-failed "{{ librenms_mariadb_service_name }}"
+        systemctl unset-environment MYSQLD_OPTS _WSREP_NEW_CLUSTER || true
+        systemctl set-environment MYSQLD_OPTS='--wsrep-cluster-address=gcomm://'
+        systemctl set-environment _WSREP_NEW_CLUSTER='--wsrep-new-cluster'
+        systemctl start "{{ librenms_mariadb_service_name }}"
+      args:
+        executable: /bin/bash
+      register: librenms_galera_local_rebootstrap_start
+      changed_when: librenms_galera_local_rebootstrap_start.rc == 0
+      failed_when: false
+
+    - name: Wait for MariaDB socket after local Galera rebootstrap
+      wait_for:
+        path: "{{ librenms_mariadb_socket }}"
+        timeout: "{{ librenms_galera_wait_timeout | int }}"
+      register: librenms_galera_local_rebootstrap_socket
+      failed_when: false
+
+    - name: Wait for re-bootstrapped local Galera host to form primary component
+      shell: |-
+        set -o pipefail
+
+        attempts=$(( {{ librenms_galera_wait_timeout | int }} / 5 ))
+        if [ "${attempts}" -lt 1 ]; then
+          attempts=1
+        fi
+
+        status=''
+        for attempt in $(seq 1 "${attempts}"); do
+          status=$(mysql --protocol=socket --socket="{{ librenms_mariadb_socket }}" -Nse \
+            "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" 2>&1 || true)
+
+          printf '%s\n' "${status}"
+
+          if printf '%s\n' "${status}" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \
+            && printf '%s\n' "${status}" | grep -Eq 'wsrep_ready[[:space:]]+ON'; then
+            exit 0
+          fi
+
+          if [ "${attempt}" -lt "${attempts}" ]; then
+            sleep 5
+          fi
+        done
+
+        exit 1
+      args:
+        executable: /bin/bash
+      register: librenms_galera_local_rebootstrap_status
+      changed_when: false
+      failed_when: false
+
+- name: Use local Galera status after local rebootstrap attempt
+  set_fact:
+    librenms_galera_local_status:
+      stdout: "{{ librenms_galera_local_rebootstrap_status.stdout | default('') }}"
+      stderr: "{{ librenms_galera_local_rebootstrap_status.stderr | default('') }}"
+      rc: "{{ librenms_galera_local_rebootstrap_status.rc | default(1) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_rebootstrap_status is defined
+    - not librenms_galera_local_rebootstrap_status.skipped | default(false)
+
 - name: Restart local Galera node after failed primary join
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
+    - >-
+      not (
+        not librenms_galera_cluster_has_live_member | bool
+        and inventory_hostname == librenms_galera_bootstrap_effective_host
+        and librenms_galera_cluster_bootstrapped_this_run | default(false)
+      )
     - >-
       not (
         (librenms_galera_local_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
@@ -1443,6 +1564,12 @@
 
       Socket wait after restart:
       {{ librenms_galera_local_restart_socket | default({}) }}
+
+      Local rebootstrap attempt:
+      {{ librenms_galera_local_rebootstrap_start | default({}) }}
+
+      Socket wait after local rebootstrap:
+      {{ librenms_galera_local_rebootstrap_socket | default({}) }}
 
       Diagnostics:
       {{ librenms_galera_local_diagnostics.stdout | default('') }}
