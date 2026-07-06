@@ -69,6 +69,18 @@
     librenms_galera_cluster_has_live_member: "{{ (librenms_galera_live_members | length) > 0 }}"
   when: librenms_db_mode == 'galera'
 
+- name: Determine Galera recovery target nodes
+  set_fact:
+    librenms_galera_recovery_target_nodes: >-
+      {{
+        librenms_galera_reachable_db_nodes | default([])
+        if (librenms_galera_reachable_db_nodes | default([]) | length) > 0
+        else librenms_active_db_nodes
+      }}
+  when:
+    - librenms_db_mode == 'galera'
+    - not librenms_galera_cluster_has_live_member | bool
+
 - name: Quiesce LibreNMS workers while Galera is degraded
   shell: |-
     set -o pipefail
@@ -118,7 +130,7 @@
           }
         }
       - /var/lib/mysql/grastate.dat
-  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
+  loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_saved_state
   changed_when: false
@@ -140,18 +152,123 @@
       }}
   when: librenms_db_mode == 'galera'
 
-- name: Stop local MariaDB before Galera recovery position probe
+- name: Stop MariaDB before Galera recovery position probes
   service:
     name: "{{ librenms_mariadb_service_name }}"
     state: stopped
+  loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
+  delegate_to: "{{ item }}"
   register: librenms_galera_recovery_stop
   failed_when: false
+  ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
-    - inventory_hostname in librenms_active_db_nodes
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_auto_recover_unsafe_bootstrap | bool
+
+- name: Wait for MariaDB processes to stop before recovery probes
+  shell: |-
+    seconds=0
+    while pgrep -x mariadbd >/dev/null; do
+      if [ "${seconds}" -ge "{{ librenms_galera_stop_timeout | int }}" ]; then
+        exit 1
+      fi
+      seconds=$((seconds + 1))
+      sleep 1
+    done
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recovery_stop_wait
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+
+- name: Force kill stale MariaDB processes before recovery probes
+  command:
+    argv:
+      - pkill
+      - -KILL
+      - -x
+      - mariadbd
+  loop: >-
+    {{
+      librenms_galera_recovery_stop_wait.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  register: librenms_galera_recovery_force_kill_mariadb
+  changed_when: (librenms_galera_recovery_force_kill_mariadb.rc | default(1)) == 0
+  failed_when: false
+  ignore_unreachable: true
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+    - librenms_galera_force_kill_stale_mariadb | bool
+
+- name: Reset MariaDB unit state after forced recovery stop # noqa: command-instead-of-module
+  command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_mariadb_service_name }}"
+  loop: >-
+    {{
+      librenms_galera_recovery_force_kill_mariadb.results | default([])
+      | selectattr('rc', 'equalto', 0)
+      | map(attribute='item')
+      | list
+    }}
+  delegate_to: "{{ item }}"
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+    - librenms_galera_force_kill_stale_mariadb | bool
+
+- name: Fail when MariaDB is still running before recovery probes
+  fail:
+    msg: |-
+      MariaDB did not stop on all Galera recovery target nodes.
+
+      Stop wait results:
+      {{ librenms_galera_recovery_stop_wait.results | default([]) }}
+
+      Refusing to run galera_recovery while mariadbd is still running. Stop the
+      listed processes manually, or enable librenms_galera_force_kill_stale_mariadb.
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_auto_recover_unsafe_bootstrap | bool
+    - not librenms_galera_force_kill_stale_mariadb | bool
+    - >-
+      (
+        librenms_galera_recovery_stop_wait.results | default([])
+        | selectattr('rc', 'ne', 0)
+        | list
+        | length
+      ) > 0
 
 - name: Recover Galera positions when no node is marked safe to bootstrap
   shell: |-
@@ -169,7 +286,7 @@
       }'
   args:
     executable: /bin/bash
-  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
+  loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_recovered_state
   changed_when: false
@@ -282,8 +399,17 @@
       Recovery tie breaker:
       {{ librenms_galera_recovery_tie_breaker }}
 
-      Local MariaDB stop before recovery:
+      Recovery target nodes:
+      {{ librenms_galera_recovery_target_nodes | default([]) }}
+
+      MariaDB stop before recovery:
       {{ librenms_galera_recovery_stop | default({}) }}
+
+      MariaDB stop wait before recovery:
+      {{ librenms_galera_recovery_stop_wait.results | default([]) }}
+
+      MariaDB force kill before recovery:
+      {{ librenms_galera_recovery_force_kill_mariadb.results | default([]) }}
 
       Raw galera_recovery results:
       {{ librenms_galera_recovered_state.results | default([]) }}
@@ -395,7 +521,7 @@
     state: stopped
   loop: >-
     {{
-      (librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes))
+      (librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes))
       | difference([librenms_galera_bootstrap_effective_host])
     }}
   delegate_to: "{{ item }}"
@@ -431,7 +557,7 @@
     exit 1
   args:
     executable: /bin/bash
-  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
+  loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_stop_process_check
   changed_when: false
@@ -498,7 +624,7 @@
     systemctl reset-failed "{{ librenms_mariadb_service_name }}" >/dev/null 2>&1 || true
   args:
     executable: /bin/bash
-  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
+  loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_clear_stuck_jobs
   changed_when: librenms_galera_clear_stuck_jobs.rc == 0
@@ -523,7 +649,7 @@
     exit 1
   args:
     executable: /bin/bash
-  loop: "{{ librenms_galera_reachable_db_nodes | default(librenms_active_db_nodes) }}"
+  loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_final_stop_process_check
   changed_when: false
