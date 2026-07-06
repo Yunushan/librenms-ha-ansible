@@ -819,16 +819,279 @@
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
   register: librenms_redis_sentinel_consensus_write_check
   changed_when: false
+  failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
 
+- name: Initialize Redis Sentinel consensus repair state
+  set_fact:
+    librenms_redis_sentinel_repair_attempted: false
+    librenms_redis_sentinel_repair_consensus_ok: false
+    librenms_redis_sentinel_repair_write_ok: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+
+- name: Set Redis Sentinel configured repair endpoint
+  set_fact:
+    librenms_redis_sentinel_repair_attempted: true
+    librenms_redis_sentinel_repair_master_host: "{{ librenms_redis_master_host }}"
+    librenms_redis_sentinel_repair_master_addr: >-
+      {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }}
+    librenms_redis_sentinel_repair_master_port: "6379"
+    librenms_redis_sentinel_repair_expected_master: >-
+      {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }}:6379
+    librenms_redis_sentinel_repair_non_master_nodes: "{{ librenms_active_redis_nodes | difference([librenms_redis_master_host]) }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - librenms_redis_sentinel_enforce_configured_master | bool
+
+- name: Set Redis Sentinel repair replica nodes
+  set_fact:
+    librenms_redis_sentinel_repair_replica_nodes: "{{ librenms_redis_sentinel_repair_non_master_nodes | intersect(ansible_play_hosts) }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - librenms_redis_sentinel_enforce_configured_master | bool
+
+- name: Repair Redis Sentinel consensus master after failed write check
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - librenms_redis_sentinel_enforce_configured_master | bool
+  block:
+    - name: Promote configured Redis master after failed consensus write
+      no_log: true
+      command: >-
+        redis-cli -h 127.0.0.1 -p 6379
+        REPLICAOF NO ONE
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_password }}"
+      delegate_to: "{{ librenms_redis_sentinel_repair_master_host }}"
+      register: librenms_redis_sentinel_repair_promote_master
+      changed_when: >-
+        (librenms_redis_sentinel_repair_promote_master.stdout
+        | default('') | trim) == 'OK'
+      failed_when: false
+
+    - name: Point Redis replicas at configured master after failed consensus write
+      no_log: true
+      command: >-
+        redis-cli -h 127.0.0.1 -p 6379
+        REPLICAOF {{ librenms_redis_sentinel_repair_master_addr | quote }}
+        {{ librenms_redis_sentinel_repair_master_port | quote }}
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_password }}"
+      loop: "{{ librenms_redis_sentinel_repair_replica_nodes }}"
+      delegate_to: "{{ item }}"
+      ignore_unreachable: true
+      register: librenms_redis_sentinel_repair_follow_master
+      changed_when: >-
+        (librenms_redis_sentinel_repair_follow_master.stdout
+        | default('') | trim) == 'OK'
+      failed_when: false
+
+    - name: Reset Redis Sentinel state after failed consensus write
+      no_log: true
+      command: >-
+        redis-cli -h 127.0.0.1 -p 26379
+        {% if librenms_redis_sentinel_username | length > 0 %}
+        --user {{ librenms_redis_sentinel_username | quote }}
+        {% endif %}
+        SENTINEL reset {{ librenms_redis_sentinel_service | quote }}
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+      loop: "{{ librenms_redis_sentinel_consensus_query_nodes }}"
+      delegate_to: "{{ item }}"
+      ignore_unreachable: true
+      register: librenms_redis_sentinel_repair_reset
+      changed_when: >-
+        (librenms_redis_sentinel_repair_reset.stdout | default('0') | int) > 0
+      failed_when: false
+
+    - name: Flush Redis Sentinel config after failed consensus write
+      no_log: true
+      command: >-
+        redis-cli -h 127.0.0.1 -p 26379
+        {% if librenms_redis_sentinel_username | length > 0 %}
+        --user {{ librenms_redis_sentinel_username | quote }}
+        {% endif %}
+        SENTINEL FLUSHCONFIG
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+      loop: "{{ librenms_redis_sentinel_consensus_query_nodes }}"
+      delegate_to: "{{ item }}"
+      ignore_unreachable: true
+      register: librenms_redis_sentinel_repair_flushconfig
+      changed_when: false
+      failed_when: false
+
+    - name: Verify Redis Sentinels report configured master after repair
+      no_log: true
+      shell: |-
+        set -euo pipefail
+
+        attempts={{ librenms_redis_sentinel_consensus_retries | int }}
+        delay={{ librenms_redis_sentinel_consensus_delay | int }}
+        expected={{ librenms_redis_sentinel_repair_expected_master | quote }}
+        attempt=1
+        reported=":"
+
+        while [ "${attempt}" -le "${attempts}" ]; do
+          mapfile -t lines < <(
+            redis-cli \
+              -h 127.0.0.1 \
+              -p 26379 \
+        {% if librenms_redis_sentinel_username | length > 0 %}
+              --user {{ librenms_redis_sentinel_username | quote }} \
+        {% endif %}
+              SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }} \
+              2>/dev/null || true
+          )
+
+          reported="${lines[0]:-}:${lines[1]:-}"
+          if [ "${reported}" = "${expected}" ]; then
+            echo "${reported}"
+            exit 0
+          fi
+
+          if [ "${attempt}" -lt "${attempts}" ]; then
+            sleep "${delay}"
+          fi
+          attempt=$((attempt + 1))
+        done
+
+        echo "${reported}"
+        exit 1
+      args:
+        executable: /bin/bash
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+      loop: "{{ librenms_redis_sentinel_consensus_query_nodes }}"
+      delegate_to: "{{ item }}"
+      ignore_unreachable: true
+      register: librenms_redis_sentinel_repair_consensus_queries
+      changed_when: false
+      failed_when: false
+
+    - name: Verify configured Redis master accepts cache writes after repair
+      no_log: true
+      shell: |-
+        set -euo pipefail
+
+        attempts={{ librenms_redis_sentinel_consensus_retries | int }}
+        delay={{ librenms_redis_sentinel_consensus_delay | int }}
+        attempt=1
+
+        while [ "${attempt}" -le "${attempts}" ]; do
+          result=$(
+            redis-cli \
+              -h {{ librenms_redis_sentinel_repair_master_addr | quote }} \
+              -p {{ librenms_redis_sentinel_repair_master_port | quote }} \
+        {% if librenms_redis_username | length > 0 %}
+              --user {{ librenms_redis_username | quote }} \
+        {% endif %}
+              SET librenms:sentinel-repair-write-check {{ inventory_hostname | quote }} EX 30 \
+              2>/dev/null || true
+          )
+
+          if [ "${result}" = "OK" ]; then
+            exit 0
+          fi
+
+          if [ "${attempt}" -lt "${attempts}" ]; then
+            sleep "${delay}"
+          fi
+          attempt=$((attempt + 1))
+        done
+
+        exit 1
+      args:
+        executable: /bin/bash
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_password }}"
+      register: librenms_redis_sentinel_repair_write_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set Redis Sentinel consensus repair result
+      set_fact:
+        librenms_redis_sentinel_repair_consensus_ok: >-
+          {{
+            (
+              librenms_redis_sentinel_repair_consensus_queries.results
+              | default([])
+              | selectattr('rc', 'equalto', 0)
+              | list
+              | length
+            ) >= (librenms_redis_quorum | int)
+          }}
+        librenms_redis_sentinel_repair_write_ok: >-
+          {{ (librenms_redis_sentinel_repair_write_check.rc | default(1) | int) == 0 }}
+
+- name: Prefer configured Redis master after successful Sentinel repair
+  set_fact:
+    librenms_redis_sentinel_consensus_master_host: >-
+      {{ librenms_redis_sentinel_repair_master_addr }}
+    librenms_redis_sentinel_consensus_master_port: >-
+      {{ librenms_redis_sentinel_repair_master_port }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - librenms_redis_sentinel_repair_consensus_ok | default(false) | bool
+    - librenms_redis_sentinel_repair_write_ok | default(false) | bool
+
+- name: Fail when Redis Sentinel consensus master cannot accept cache writes
+  fail:
+    msg: |-
+      Redis Sentinels agreed on {{ librenms_redis_sentinel_consensus_master_host }}:{{
+      librenms_redis_sentinel_consensus_master_port }}, but that endpoint did
+      not accept cache writes after {{ librenms_redis_sentinel_consensus_retries }}
+      attempts.
+
+      Automatic configured-master repair attempted:
+      {{ librenms_redis_sentinel_repair_attempted | default(false) }}
+
+      Configured Redis master:
+      {{ librenms_redis_sentinel_repair_expected_master | default('not set') }}
+
+      Reported Sentinel masters:
+      {{ librenms_redis_sentinel_consensus_master_reports | default([]) | join(', ') }}
+
+      Sentinel query failures:
+      {{ librenms_redis_sentinel_consensus_query_failures | default([]) }}
+
+      The playbook stops here because LibreNMS cache writes would be unsafe.
+      After Redis/Sentinel is writable, rerun playbooks/site.yml; the later
+      LibreNMS app role will also re-enable and start librenms-scheduler.timer.
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - >-
+      not (
+        librenms_redis_sentinel_repair_consensus_ok | default(false) | bool
+        and librenms_redis_sentinel_repair_write_ok | default(false) | bool
+      )
+
 - name: Confirm Redis Sentinel consensus writable master
   debug:
     msg: >-
-      All Redis Sentinels agree that {{ librenms_redis_sentinel_service }}
-      writes should go to {{ librenms_redis_sentinel_consensus_master_host }}:{{
+      Redis Sentinel {{ librenms_redis_sentinel_service }} has a writable
+      cache master at {{ librenms_redis_sentinel_consensus_master_host }}:{{
       librenms_redis_sentinel_consensus_master_port }}.
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
+    - >-
+      (librenms_redis_sentinel_consensus_write_check.rc | default(1) | int) == 0
+      or
+      (
+        librenms_redis_sentinel_repair_consensus_ok | default(false) | bool
+        and librenms_redis_sentinel_repair_write_ok | default(false) | bool
+      )
