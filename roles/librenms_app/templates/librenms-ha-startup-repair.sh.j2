@@ -24,6 +24,23 @@ RESTART_PHP_FPM_ON_DB_GONE_AWAY={{ (librenms_startup_repair_restart_php_fpm_on_d
 DB_GONE_AWAY_LOG_LINES={{ librenms_startup_repair_db_gone_away_log_lines | int }}
 DB_GONE_AWAY_MARKER={{ librenms_startup_repair_db_gone_away_marker | quote }}
 DB_GONE_AWAY_DB_CHECK_TIMEOUT={{ librenms_startup_repair_db_gone_away_db_check_timeout | int }}
+DB_MODE={{ librenms_db_mode | quote }}
+DB_PORT={{ librenms_db_port | int }}
+DB_USER={{ librenms_db_user | quote }}
+DB_PASSWORD={{ librenms_db_password | quote }}
+MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
+MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
+GALERA_SELF_HEAL_ENABLED={{ (librenms_galera_self_heal_enabled | bool) | ternary('1', '0') }}
+GALERA_SELF_HEAL_FAILURE_THRESHOLD={{ librenms_galera_self_heal_failure_threshold | int }}
+GALERA_SELF_HEAL_RESTART_COOLDOWN={{ librenms_galera_self_heal_restart_cooldown | int }}
+GALERA_SELF_HEAL_STATE_DIR={{ librenms_galera_self_heal_state_dir | quote }}
+GALERA_SELF_HEAL_MIN_HEALTHY_PEERS={{ ((librenms_active_db_nodes | length) / 2) | round(0, 'ceil') | int }}
+GALERA_SELF_HEAL_LOCAL_MEMBER={{ (inventory_hostname in librenms_active_db_nodes) | ternary('1', '0') }}
+GALERA_PEERS=(
+{% for host in librenms_active_db_nodes | difference([inventory_hostname]) %}
+  {{ hostvars[host].ansible_host | default(host) | quote }}
+{% endfor %}
+)
 SERVICE_RECOVERY_UNITS=(
 {% for unit in librenms_startup_repair_service_recovery_units | default([]) %}
 {% set rendered_unit = unit | trim %}
@@ -189,6 +206,94 @@ librenms_database_ready() {
     "${LIBRENMS_DIR}/lnms" config:get distributed_poller >/dev/null 2>&1
 }
 
+galera_status_is_ready() {
+  printf '%s\n' "$1" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \
+    && printf '%s\n' "$1" | grep -Eq 'wsrep_ready[[:space:]]+ON' \
+    && printf '%s\n' "$1" | grep -Eq 'wsrep_local_state_comment[[:space:]]+Synced'
+}
+
+local_galera_status() {
+  timeout "${DB_GONE_AWAY_DB_CHECK_TIMEOUT}" mysql --protocol=socket \
+    --socket="${MARIADB_SOCKET}" -Nse \
+    "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" \
+    2>/dev/null || true
+}
+
+peer_galera_status() {
+  MYSQL_PWD="${DB_PASSWORD}" timeout "${DB_GONE_AWAY_DB_CHECK_TIMEOUT}" mysql \
+    --protocol=tcp -h "$1" -P "${DB_PORT}" -u "${DB_USER}" \
+    --connect-timeout="${DB_GONE_AWAY_DB_CHECK_TIMEOUT}" -Nse \
+    "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" \
+    2>/dev/null || true
+}
+
+recover_persistently_unready_local_galera() {
+  local local_status
+  local peer
+  local peer_status
+  local healthy_peers=0
+  local failures=0
+  local previous_restart=0
+  local now
+
+  [ "${DB_MODE}" = 'galera' ] || return 0
+  [ "${GALERA_SELF_HEAL_ENABLED}" = '1' ] || return 0
+  [ "${GALERA_SELF_HEAL_LOCAL_MEMBER}" = '1' ] || return 0
+  [ "${GALERA_SELF_HEAL_MIN_HEALTHY_PEERS}" -gt 0 ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+
+  local_status=$(local_galera_status)
+  if galera_status_is_ready "${local_status}"; then
+    rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
+    return 0
+  fi
+
+  for peer in "${GALERA_PEERS[@]}"; do
+    [ -n "${peer}" ] || continue
+    peer_status=$(peer_galera_status "${peer}")
+    if galera_status_is_ready "${peer_status}"; then
+      healthy_peers=$((healthy_peers + 1))
+    fi
+  done
+
+  if [ "${healthy_peers}" -lt "${GALERA_SELF_HEAL_MIN_HEALTHY_PEERS}" ]; then
+    log "local Galera is not ready; refusing automatic restart because only ${healthy_peers} peer(s) are synced"
+    rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
+    return 0
+  fi
+
+  mkdir -p "${GALERA_SELF_HEAL_STATE_DIR}" >/dev/null 2>&1 || return 0
+  failures=$(cat "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count" 2>/dev/null || printf '0')
+  case "${failures}" in
+    *[!0-9]*|'') failures=0 ;;
+  esac
+  failures=$((failures + 1))
+  printf '%s\n' "${failures}" > "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
+
+  if [ "${failures}" -lt "${GALERA_SELF_HEAL_FAILURE_THRESHOLD}" ]; then
+    log "local Galera is not ready with ${healthy_peers} synced peer(s); retry ${failures}/${GALERA_SELF_HEAL_FAILURE_THRESHOLD}"
+    return 0
+  fi
+
+  previous_restart=$(cat "${GALERA_SELF_HEAL_STATE_DIR}/galera-restarted-at" 2>/dev/null || printf '0')
+  case "${previous_restart}" in
+    *[!0-9]*|'') previous_restart=0 ;;
+  esac
+  now=$(date +%s)
+  if [ $((now - previous_restart)) -lt "${GALERA_SELF_HEAL_RESTART_COOLDOWN}" ]; then
+    log "local Galera is not ready; restart cooldown is still active"
+    return 0
+  fi
+
+  log "restarting persistently unready local Galera with ${healthy_peers} synced peer(s)"
+  if systemctl restart "${MARIADB_SERVICE}" >/dev/null 2>&1; then
+    printf '%s\n' "${now}" > "${GALERA_SELF_HEAL_STATE_DIR}/galera-restarted-at"
+    rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
+  else
+    log "failed to restart persistently unready local Galera"
+  fi
+}
+
 recover_php_fpm_after_db_gone_away() {
   local latest_error
   local handled_error
@@ -224,6 +329,7 @@ repair_writable_paths
 repair_git_rrd_placeholder
 ensure_systemd_units
 configure_librenms_runtime || true
+recover_persistently_unready_local_galera || true
 recover_php_fpm_after_db_gone_away || true
 
 exit 0

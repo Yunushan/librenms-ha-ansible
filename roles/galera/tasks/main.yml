@@ -1699,6 +1699,52 @@
     - inventory_hostname == librenms_galera_bootstrap_effective_host
     - librenms_galera_local_service_expected | bool
 
+- name: Deploy Galera readiness agent
+  template:
+    src: librenms-galera-readiness-agent.sh.j2
+    dest: "{{ librenms_galera_readiness_agent_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  notify: Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Deploy Galera readiness agent socket
+  template:
+    src: librenms-galera-readiness-agent.socket.j2
+    dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_socket_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Deploy Galera readiness agent service
+  template:
+    src: librenms-galera-readiness-agent@.service.j2
+    dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_service_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Enable and start Galera readiness agent socket
+  systemd:
+    name: "{{ librenms_galera_readiness_agent_socket_unit }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
 - name: Resume LibreNMS workers after Galera recovery
   shell: |-
     set -o pipefail

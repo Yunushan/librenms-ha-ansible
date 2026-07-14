@@ -1,0 +1,22 @@
+#!/bin/bash
+set -u
+
+MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
+MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
+
+if ! systemctl is-active --quiet "${MARIADB_SERVICE}"; then
+  printf 'down\n'
+  exit 0
+fi
+
+status=$(timeout 2 mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+  "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" \
+  2>/dev/null || true)
+
+if printf '%s\n' "${status}" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \
+  && printf '%s\n' "${status}" | grep -Eq 'wsrep_ready[[:space:]]+ON' \
+  && printf '%s\n' "${status}" | grep -Eq 'wsrep_local_state_comment[[:space:]]+Synced'; then
+  printf 'up\n'
+else
+  printf 'down\n'
+fi

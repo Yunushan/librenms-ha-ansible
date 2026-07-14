@@ -1,0 +1,10 @@
+[Unit]
+Description=LibreNMS Galera readiness agent socket
+
+[Socket]
+ListenStream={{ ansible_host | default(ansible_default_ipv4.address | default('127.0.0.1')) }}:{{ librenms_galera_readiness_agent_port }}
+Accept=yes
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

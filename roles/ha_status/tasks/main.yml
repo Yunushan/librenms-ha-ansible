@@ -134,6 +134,15 @@
             else []
           )
           + (
+            [librenms_galera_readiness_agent_socket_unit]
+            if (
+              librenms_db_mode == 'galera'
+              and librenms_galera_readiness_agent_enabled | bool
+              and inventory_hostname in librenms_status_active_db_nodes
+            )
+            else []
+          )
+          + (
             [librenms_redis_service_name]
             if (
               librenms_redis_mode == 'sentinel'

@@ -1437,6 +1437,18 @@ closes client sessions when a checked DB backend is marked down. This prevents
 long-lived LibreNMS PHP workers from continuing to use a dead MySQL connection
 after Galera or HAProxy failover.
 
+HAProxy also queries a local readiness agent on every Galera member. A database
+backend is eligible for LibreNMS traffic only while it reports `Primary`,
+`wsrep_ready=ON`, and `Synced`; accepting a MySQL TCP connection alone is not
+enough. The 30-second startup-repair timer can restart one persistently unready
+member after four failed checks, but only when enough peer members are already
+synced to retain quorum. It never bootstraps a cluster without a Primary
+component.
+
+The readiness agent listens on `tcp/9201` only on each Galera node's configured
+Ansible address. Allow that port from `lb_nodes` to `librenms_db` when those are
+separate hosts; no browser or monitored-device access is required.
+
 ### Redis failover tuning
 
 ```yaml

@@ -1,0 +1,10 @@
+[Unit]
+Description=LibreNMS Galera readiness agent connection
+After={{ librenms_mariadb_service_name }}.service
+
+[Service]
+Type=oneshot
+ExecStart={{ librenms_galera_readiness_agent_path }}
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal

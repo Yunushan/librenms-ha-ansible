@@ -391,6 +391,16 @@ librenms_haproxy_db_timeout_client: 8h
 librenms_haproxy_db_timeout_server: 8h
 librenms_haproxy_db_tcp_keepalive: true
 librenms_haproxy_db_shutdown_sessions_on_backend_down: true
+librenms_galera_readiness_agent_enabled: "{{ librenms_db_mode == 'galera' }}"
+librenms_galera_readiness_agent_path: /usr/local/sbin/librenms-galera-readiness-agent
+librenms_galera_readiness_agent_socket_unit: librenms-galera-readiness-agent.socket
+librenms_galera_readiness_agent_service_unit: librenms-galera-readiness-agent@.service
+librenms_galera_readiness_agent_port: 9201
+librenms_galera_readiness_agent_interval: 3s
+librenms_galera_self_heal_enabled: "{{ librenms_db_mode == 'galera' }}"
+librenms_galera_self_heal_failure_threshold: 4
+librenms_galera_self_heal_restart_cooldown: 600
+librenms_galera_self_heal_state_dir: /run/librenms-ha-startup-repair
 librenms_haproxy_web_check_interval: 1s
 librenms_haproxy_web_check_fall: 2
 librenms_haproxy_web_check_rise: 1

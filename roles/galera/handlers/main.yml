@@ -1,0 +1,9 @@
+---
+- name: Restart Galera readiness agent socket
+  systemd:
+    name: "{{ librenms_galera_readiness_agent_socket_unit }}"
+    state: restarted
+    daemon_reload: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool

@@ -444,6 +444,54 @@
     - librenms_db_mode == 'galera'
     - (librenms_haproxy_unavailable_galera_backends_after_recovery | length) > 0
 
+- name: Verify Galera readiness agents respond before HAProxy reload
+  shell: |-
+    set -o pipefail
+    timeout "{{ librenms_haproxy_timeout_check }}" bash -c '
+      exec 3<>/dev/tcp/"$1"/"$2"
+      IFS= read -r response <&3
+      [ "${response}" = "up" ]
+    ' _ "{{ hostvars[item].ansible_host | default(item) }}" "{{ librenms_galera_readiness_agent_port }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ librenms_active_db_nodes }}"
+  register: librenms_haproxy_galera_readiness_agent_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Initialize ready Galera readiness agent list
+  set_fact:
+    librenms_haproxy_ready_galera_agents: []
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Record ready Galera readiness agents
+  set_fact:
+    librenms_haproxy_ready_galera_agents: >-
+      {{ librenms_haproxy_ready_galera_agents + [item.item] }}
+  loop: "{{ librenms_haproxy_galera_readiness_agent_probe.results | default([]) }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+    - (item.rc | default(1) | int) == 0
+
+- name: Fail when no Galera readiness agent reports a synced backend
+  fail:
+    msg: |-
+      HAProxy configuration was not changed because no Galera readiness agent
+      reported an eligible Primary/Synced backend.
+
+      Agent probes:
+      {{ librenms_haproxy_galera_readiness_agent_probe.results | default([]) }}
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+    - (librenms_haproxy_ready_galera_agents | length) == 0
+
 - name: Deploy HAProxy config
   template:
     src: haproxy.cfg.j2

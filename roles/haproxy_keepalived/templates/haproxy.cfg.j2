@@ -51,7 +51,17 @@
   ~ ' rise ' ~ librenms_haproxy_db_check_rise
 %}
 {% set librenms_haproxy_db_server_options =
-  'check' ~ (
+  'check'
+  ~ (
+    ' agent-check agent-port ' ~ (librenms_galera_readiness_agent_port | string)
+    ~ ' agent-inter ' ~ librenms_galera_readiness_agent_interval
+    if (
+      librenms_db_mode == 'galera'
+      and librenms_galera_readiness_agent_enabled | bool
+    )
+    else ''
+  )
+  ~ (
     ' on-marked-down shutdown-sessions'
     if librenms_haproxy_db_shutdown_sessions_on_backend_down | bool
     else ''
