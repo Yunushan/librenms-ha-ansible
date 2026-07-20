@@ -106,6 +106,8 @@ frontend librenms_web_http
     http-request redirect scheme https code 301
 {% else %}
     http-request set-header X-Forwarded-Proto http
+    acl librenms_rrdcheck_validation path_reg -i ^/(?:index\.php/)?validate/results/rrdcheck/?$
+    use_backend librenms_web_validation_nodes if librenms_rrdcheck_validation
     default_backend librenms_web_nodes
 {% endif %}
 
@@ -121,12 +123,28 @@ frontend librenms_web_https
 {% endif %}
     http-request set-header X-Forwarded-Proto https
     http-request set-header X-Forwarded-Ssl on
+    acl librenms_rrdcheck_validation path_reg -i ^/(?:index\.php/)?validate/results/rrdcheck/?$
+    use_backend librenms_web_validation_nodes if librenms_rrdcheck_validation
     default_backend librenms_web_nodes
 {% endif %}
 
 backend librenms_web_nodes
     mode http
     balance roundrobin
+{% if librenms_bootstrap_completed_effective | bool %}
+    default-server {{ librenms_haproxy_web_default_server }}
+    option httpchk
+    http-check send meth GET uri {{ librenms_hc_uri }} ver HTTP/1.1 hdr Host {{ librenms_hc_host }} hdr Connection close
+    http-check expect rstatus ^(2|3)[0-9][0-9]$
+{% endif %}
+{% for host in librenms_haproxy_web_backend_nodes %}
+    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check
+{% endfor %}
+
+backend librenms_web_validation_nodes
+    mode http
+    balance roundrobin
+    timeout server {{ librenms_web_validation_rrd_check_timeout }}
 {% if librenms_bootstrap_completed_effective | bool %}
     default-server {{ librenms_haproxy_web_default_server }}
     option httpchk

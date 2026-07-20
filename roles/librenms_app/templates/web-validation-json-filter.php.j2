@@ -79,34 +79,18 @@ function librenms_ha_validation_remove_rrd_lock_errors(array &$value, bool &$cha
 
 function librenms_ha_validation_mark_group_skipped(array &$group): void
 {
-    foreach (['status', 'state', 'result'] as $key) {
-        if (! array_key_exists($key, $group)) {
-            continue;
-        }
-
-        if (is_string($group[$key])) {
-            $group[$key] = 'skipped';
-        } elseif (is_int($group[$key])) {
-            $group[$key] = 2;
-        } elseif (is_bool($group[$key])) {
-            $group[$key] = true;
-        }
-    }
-
-    foreach (['statusText', 'status_text', 'message'] as $key) {
-        if (array_key_exists($key, $group) && is_string($group[$key])) {
-            $group[$key] = 'Skipped transient RRD lock checks in HA mode';
-        }
-    }
-
-    foreach (['validations', 'items', 'checks', 'results'] as $key) {
-        if (array_key_exists($key, $group) && is_array($group[$key]) && count($group[$key]) === 0) {
-            $group[$key] = [[
-                'status' => 'skipped',
-                'message' => 'Skipped transient RRD lock checks in HA mode',
-            ]];
-        }
-    }
+    $message = 'Skipped transient RRD lock checks in HA mode';
+    $group['status'] = 3;
+    $group['statusText'] = 'Info';
+    $group['results'] = [[
+        'status' => 3,
+        'statusText' => 'INFO',
+        'message' => $message,
+        'fix' => [],
+        'fixer' => null,
+        'listDescription' => '',
+        'list' => [],
+    ]];
 }
 
 function librenms_ha_validation_has_result_items(array $group): bool
@@ -121,12 +105,18 @@ function librenms_ha_validation_has_result_items(array $group): bool
 }
 
 ob_start(static function (string $buffer): string {
-    $jsonStart = strpos($buffer, '[{"group"');
+    $matched = preg_match(
+        '/\[\s*\{\s*"group"\s*:/',
+        $buffer,
+        $jsonMatch,
+        PREG_OFFSET_CAPTURE
+    );
 
-    if ($jsonStart === false) {
+    if ($matched !== 1) {
         return $buffer;
     }
 
+    $jsonStart = $jsonMatch[0][1];
     $payload = substr($buffer, $jsonStart);
 
     if (! $GLOBALS['suppressTransientRrdLockErrors']) {

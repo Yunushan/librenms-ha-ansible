@@ -133,6 +133,7 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_daily_self_heal_clear_healthy_update_failure_notification: true
 # librenms_daily_self_heal_notification_cleanup_days: 30
 # librenms_startup_repair_restart_php_fpm_on_db_gone_away: true
+# librenms_web_validation_rrd_check_timeout: 900s
 # librenms_haproxy_db_tcp_keepalive: true
 # librenms_haproxy_db_shutdown_sessions_on_backend_down: true
 # librenms_galera_readiness_agent_enabled: true

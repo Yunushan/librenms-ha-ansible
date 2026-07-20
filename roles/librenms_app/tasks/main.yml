@@ -1149,6 +1149,17 @@
     - librenms_manage_web_validation_json_filter | bool
   notify: Restart PHP-FPM
 
+- name: Validate LibreNMS web validation JSON output filter syntax
+  command:
+    argv:
+      - php
+      - -l
+      - "{{ librenms_web_validation_json_filter_path }}"
+  changed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+    - librenms_manage_web_validation_json_filter | bool
+
 - name: Deploy LibreNMS PHP-FPM pool
   template:
     src: php-fpm-librenms.conf.j2

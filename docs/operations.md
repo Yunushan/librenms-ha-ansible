@@ -330,7 +330,11 @@ In Gluster-backed HA mode, the LibreNMS web validation page can sample an RRD
 while `rrdcached` is actively writing it and report `RRD ERROR: could not lock
 RRD`. The web validation JSON filter suppresses only that transient lock class
 by default so the UI does not flap red during normal polling. Other RRD parse
-errors remain visible.
+errors remain visible. The full RRD Check is optional and recursively inspects
+every RRD file. Its web request uses a separate 15-minute HAProxy/nginx timeout
+so a large Gluster volume does not return a generic backend-fetch error at the
+normal 180-second application timeout. Adjust
+`librenms_web_validation_rrd_check_timeout` if the dataset needs longer.
 
 Disable automatic code updates while keeping daily maintenance tasks with:
 

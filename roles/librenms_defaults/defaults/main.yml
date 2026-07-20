@@ -179,6 +179,8 @@ librenms_schema_galera_backend_wait_timeout: 30
 librenms_manage_web_validation_json_filter: true
 librenms_web_validation_json_filter_path: /etc/librenms/web-validation-json-filter.php
 librenms_web_validation_filter_transient_rrd_lock_errors: "{{ librenms_rrd_mode == 'glusterfs' }}"
+librenms_web_validation_rrd_check_timeout: 900s
+librenms_php_fpm_web_validation_max_execution_time: 900
 librenms_manage_bash_completion: true
 librenms_manage_logrotate: true
 librenms_bash_completion_dir: /etc/bash_completion.d
