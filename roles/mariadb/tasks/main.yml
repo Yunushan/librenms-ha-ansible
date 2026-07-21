@@ -1,4 +1,133 @@
 ---
+- name: Validate MariaDB repository selection
+  assert:
+    that:
+      - librenms_mariadb_repository_mode in ['distro', 'upstream']
+      - librenms_mariadb_repository_mode != 'upstream' or ansible_os_family == 'Debian'
+      - librenms_mariadb_repository_mode != 'upstream' or librenms_mariadb_upstream_series in librenms_mariadb_upstream_supported_series
+      - >-
+        librenms_mariadb_repository_mode != 'upstream'
+        or librenms_mariadb_upstream_repo_setup_checksum is match('^sha256:[A-Fa-f0-9]{64}$')
+      - librenms_mariadb_upstream_series != '12.3' or librenms_mariadb_allow_experimental_series | bool
+      - librenms_mariadb_upstream_series != '12.3' or librenms_db_mode != 'galera'
+    fail_msg: >-
+      MariaDB upstream repository mode is supported only on Debian-family hosts.
+      Choose 11.4 or 11.8 for a Galera cluster.  MariaDB 12.3 is experimental
+      and cannot be selected for Galera. Set an immutable sha256 checksum for
+      librenms_mariadb_upstream_repo_setup_checksum before enabling upstream mode.
+  when: librenms_db_mode in ['local', 'galera']
+
+- name: Check installed MariaDB server series
+  command:
+    argv:
+      - mariadb
+      - --version
+  register: librenms_mariadb_version_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+
+- name: Determine installed MariaDB server series
+  set_fact:
+    librenms_mariadb_installed_series: >-
+      {{
+        librenms_mariadb_version_probe.stdout
+        | default('')
+        | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
+        | first
+        | default('')
+      }}
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+
+- name: Refuse MariaDB major-series changes during normal convergence
+  assert:
+    that:
+      - librenms_mariadb_installed_series == librenms_mariadb_upstream_series
+    fail_msg: >-
+      Refusing to switch an installed MariaDB {{ librenms_mariadb_installed_series }}
+      server to {{ librenms_mariadb_upstream_series }} during site.yml convergence.
+      A Galera major upgrade needs an explicit maintenance, off-cluster backup,
+      node-by-node upgrade, and rollback workflow. Configure the target series
+      only for a fresh install, or use the dedicated upgrade runbook.
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_installed_series | default('') | length > 0
+    - librenms_mariadb_installed_series != librenms_mariadb_upstream_series
+
+- name: Ensure MariaDB upstream repository state directory exists
+  file:
+    path: "{{ librenms_mariadb_upstream_state_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+
+- name: Read configured MariaDB upstream series
+  slurp:
+    src: "{{ librenms_mariadb_upstream_state_path }}"
+  register: librenms_mariadb_upstream_state
+  failed_when: false
+  changed_when: false
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+
+- name: Determine whether MariaDB upstream repository needs configuration
+  set_fact:
+    librenms_mariadb_upstream_repository_needs_update: >-
+      {{
+        (librenms_mariadb_upstream_state.content | default('') | b64decode | trim)
+        != librenms_mariadb_upstream_series
+      }}
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+
+- name: Download MariaDB upstream repository setup script
+  get_url:
+    url: "{{ librenms_mariadb_upstream_repo_setup_url }}"
+    dest: "{{ librenms_mariadb_upstream_repo_setup_path }}"
+    checksum: "{{ librenms_mariadb_upstream_repo_setup_checksum }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_upstream_repository_needs_update | bool
+
+- name: Configure MariaDB upstream repository
+  command:
+    argv:
+      - "{{ librenms_mariadb_upstream_repo_setup_path }}"
+      - "--mariadb-server-version=mariadb-{{ librenms_mariadb_upstream_series }}"
+      - --skip-maxscale
+      - --skip-tools
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_upstream_repository_needs_update | bool
+
+- name: Record configured MariaDB upstream series
+  copy:
+    content: "{{ librenms_mariadb_upstream_series }}\n"
+    dest: "{{ librenms_mariadb_upstream_state_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_upstream_repository_needs_update | bool
+
 - name: Install MariaDB packages
   package:
     name: "{{ librenms_db_packages }}"
@@ -29,7 +158,7 @@
   when: librenms_db_mode == 'local'
 
 - name: Create LibreNMS database in local mode
-  community.mysql.mysql_db:
+  ansible.mysql.mysql_db:
     name: "{{ librenms_db_name }}"
     state: present
     encoding: utf8mb4
@@ -41,7 +170,7 @@
     - inventory_hostname == (groups.get('librenms_db', [inventory_hostname]) | first)
 
 - name: Create LibreNMS database user in local mode
-  community.mysql.mysql_user:
+  ansible.mysql.mysql_user:
     name: "{{ librenms_db_user }}"
     password: "{{ librenms_db_password }}"
     host: "{{ librenms_db_user_host if librenms_mode != 'standalone' else 'localhost' }}"

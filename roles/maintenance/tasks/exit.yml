@@ -141,7 +141,7 @@
   run_once: true
 
 - name: Wait for target dispatcher database registration
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_maintenance_db_probe_host }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"

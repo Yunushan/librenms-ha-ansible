@@ -21,6 +21,20 @@
   failed validation, failover, maintenance, and post-reboot investigations.
 - Added restore-readiness checks through `playbooks/restore-test.yml` so backup
   archives can be verified before relying on them.
+- Added disposable database-import verification to restore tests and an
+  opt-in AWX weekly restore-test schedule that selects the newest managed daily
+  backup instead of relying on a hard-coded timestamp.
+- Added SHA-256 artifact checksums to managed and manual backup manifests,
+  checksum verification before restore imports, and post-copy checksum
+  comparison for offsite rsync backups.
+- Added an opt-in AWX monthly failover-drill schedule with explicit service-stop
+  confirmation and a restricted set of supported test cases.
+- Added a disposable five-container Redis Sentinel integration test that proves
+  master election and a post-failover cache write in GitHub Actions.
+- Added a disposable HAProxy web integration test that proves requests continue
+  through the remaining backend after one web service stops.
+- Added a Galera readiness-agent decision test that rejects `Non-Primary`,
+  non-ready, donor, and inactive MariaDB nodes before HAProxy can route to them.
 - Added live network route and TCP matrix checks to `playbooks/doctor.yml` for
   HA ports used by web, Galera, Redis/Sentinel, and GlusterFS.
 - Added additional HA failover drill cases for HAProxy service loss, dispatcher
@@ -57,6 +71,9 @@
 
 ### Changed
 
+- Changed HA daily maintenance so only the node holding the shared maintenance
+  lock enters HAProxy drain mode; competing timer runs no longer drain all web
+  backends before they discover the lock is busy.
 - Expanded `Makefile` with operator targets for pre-maintenance, post-change,
   post-restart, failover drill, diagnostics, status, maintenance, Galera
   recovery, restore testing, and Docker equivalents.

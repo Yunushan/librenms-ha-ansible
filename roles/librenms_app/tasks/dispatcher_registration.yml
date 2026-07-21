@@ -68,7 +68,7 @@
       {{ librenms_dispatcher_registration_node_ids_sql_entries | join(', ') }}
 
 - name: Prune unmanaged LibreNMS dispatcher stats rows
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -88,7 +88,7 @@
   when: librenms_dispatcher_prune_unmanaged_nodes | bool
 
 - name: Prune unmanaged LibreNMS dispatcher rows
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -103,7 +103,7 @@
   when: librenms_dispatcher_prune_unmanaged_nodes | bool
 
 - name: Refresh LibreNMS dispatcher poller registrations
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -130,7 +130,7 @@
   loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
 
 - name: Verify LibreNMS dispatcher poller registrations are active
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -164,7 +164,7 @@
   loop: "{{ librenms_dispatcher_registration_nodes_effective }}"
 
 - name: Verify no inactive LibreNMS dispatcher rows remain
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"

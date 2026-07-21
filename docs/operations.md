@@ -83,6 +83,37 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
   -e librenms_restore_test_backup_dir=/var/backups/librenms-ha/<timestamp>
 ```
 
+For an unattended controller job, explicitly enable managed latest-backup
+selection instead of hard-coding a timestamp. It only selects direct child
+directories from the configured backup category:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
+  --ask-become-pass \
+  -e librenms_restore_test_select_latest=true \
+  -e librenms_restore_test_backup_category=daily
+```
+
+The optional AWX schedule described in
+[awx-controller.md](awx-controller.md#managed-restore-test-schedule) uses this
+same guarded mode and is disabled by default.
+
+For a recurring, approved maintenance window, AWX can also create a disabled-by-
+default monthly [failover-drill schedule](awx-controller.md#managed-failover-drill-schedule).
+It explicitly confirms the disruptive role, so enable it only after choosing
+the test cases, maintenance budget, and an operator responsible for reviewing
+the result.
+
+8. Run the production gate after the offsite backup target is configured. It
+performs one additional daily-category backup to prove the remote copy, checks
+manifest SHA-256 values and archives, imports the database dump into a
+disposable database, and removes that database afterward:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml \
+  playbooks/production-readiness.yml --ask-become-pass
+```
+
 ### Existing cluster before planned maintenance
 
 Run this sequence before a node shutdown, package work, network changes, or a
@@ -180,6 +211,14 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/ha-failover-test.yml \
   -e librenms_failover_test_confirm=true \
   -e '{"librenms_failover_test_cases":["redis_master","galera_node"]}'
 ```
+
+The Redis case only passes after every configured Sentinel reports the same
+new master and that master accepts a write. The Galera case first requires all
+members to be `Primary/Synced`, verifies the survivors remain synced at the
+reduced cluster size, then requires the restored node to rejoin
+`Primary/Synced` at the full size and proves a fresh SQL request through the
+HAProxy database VIP. A timeout is a failed recovery proof, not a successful
+drill with a slow backend.
 
 Use `librenms_failover_test_haproxy_host`,
 `librenms_failover_test_dispatcher_host`,
@@ -283,11 +322,29 @@ librenms_backup_pre_upgrade_required: true
 ```
 
 The timer starts at 03:00 local time with up to 30 minutes of jitter by default.
-This avoids all HA nodes running update, git, and Composer work at the exact
-same second. Daily maintenance is executed through a self-heal wrapper that
-runs LibreNMS as the `librenms` user, checks PHP autoload health afterward, and
-repairs incomplete `vendor/` installs by rerunning LibreNMS' Composer wrapper,
-clearing Laravel caches, and restarting PHP-FPM.
+In HA mode, every run first takes a shared GlusterFS `flock` before performing
+any Git repair, backup, update, schema work, or cache refresh. This is
+deliberately not implemented with only MariaDB `GET_LOCK()`: named locks are
+local to one Galera member and therefore are not a cluster-wide mutex behind a
+round-robin database proxy. Only one node can maintain code, dependencies,
+schema, and generated caches at a time. A node that cannot acquire the lock
+before
+`librenms_daily_global_lock_timeout` skips that trigger without creating a false
+daily-update failure. Daily maintenance is executed through a self-heal wrapper
+that runs LibreNMS as the `librenms` user, checks PHP autoload health afterward,
+and repairs incomplete `vendor/` installs by rerunning LibreNMS' Composer
+wrapper, clearing Laravel caches, and restarting PHP-FPM.
+
+While a node holds the HA maintenance lock, the outer maintenance wrapper
+creates a short-lived local drain marker. Nginx returns `503` for that node's
+HAProxy health-check path, so HAProxy removes only the updating backend before
+its Git repair, pre-upgrade backup, code update, cache refresh, PHP-FPM restart,
+or Composer self-heal. The wrapper removes the marker only from its final exit
+trap, allowing the node to rejoin after the full transaction has completed. The
+systemd unit also removes the marker in `ExecStopPost`, so a forced stop or
+timeout cannot leave the node drained. Set
+`librenms_daily_ha_drain_enabled: false` only for a
+deliberate non-HA maintenance workflow.
 
 The wrapper also serializes local runs with a `flock` lock. Before `daily.sh`
 starts, it skips cleanly if another `librenms`-owned Git, Composer, or daily
@@ -313,6 +370,16 @@ daily run also clears a matching stale notification from a previous run. The
 default cleanup window is 30 days and is controlled by
 `librenms_daily_self_heal_notification_cleanup_days`.
 
+`playbooks/production-readiness.yml` verifies that the maintenance-lock path is
+mounted from GlusterFS and launches a short simultaneous lock probe from every
+active web node. Exactly one node must acquire the lock. A failure here blocks a
+production declaration because automatic updates could otherwise overlap.
+
+The backup wrapper serializes scheduled and pre-upgrade backups on their
+coordinator host. A pre-upgrade backup waits for an existing local backup up to
+`librenms_backup_lock_timeout` instead of failing immediately and producing a
+false daily-update alert.
+
 Before the wrapper runs `daily.sh`, it creates a local pre-upgrade DB/config
 backup with `librenms-ha-backup pre-upgrade`. The update stops if that backup
 fails while `librenms_backup_pre_upgrade_required` is true. This protects the
@@ -320,6 +387,54 @@ automatic update path from continuing into code or schema changes without a
 fresh rollback artifact. Routine scheduled backups are also managed by
 `site.yml`: daily backups at 02:30 and weekly backups on Sunday at 02:00 on
 `librenms_backup_scheduled_host`.
+
+For production, copy every backup to storage outside the LibreNMS cluster. The
+built-in rsync transport is opt-in and can make a failed remote copy stop both
+scheduled and pre-upgrade backup workflows:
+
+```yaml
+librenms_backup_offsite_enabled: true
+librenms_backup_offsite_required: true
+librenms_backup_offsite_rsync_target: backup@backup.example:/srv/backups/librenms
+librenms_backup_offsite_rsync_options:
+  - "-e"
+  - "ssh -i /root/.ssh/librenms_backup -o BatchMode=yes"
+```
+
+The target is the backup root, not an individual run directory. Create and
+protect its `daily`, `weekly`, and `pre-upgrade` directories on the backup
+system before enabling required offsite copies. The backup wrapper writes each
+run below the matching category, for example
+`/srv/backups/librenms/daily/2026-07-21T030000Z/`.
+
+The target must be an independently managed backup host or storage gateway with
+the destination base directory already created. Test restoration with
+`playbooks/restore-test.yml`; a successful copy is not a restore verification.
+After every rsync copy, the wrapper reads the remote backup manifest and runs
+a checksum comparison between local and offsite artifacts. A required offsite
+backup fails when either immediate verification fails.
+
+Before a production go-live, run the explicit configuration gate:
+
+```bash
+make production-readiness PLAYBOOK_FLAGS=--ask-become-pass
+```
+
+It requires non-placeholder secrets, a pinned MariaDB repository script when
+upstream packages are selected, the shared HA daily maintenance lock, an off-cluster
+backup target, non-wildcard MariaDB binding, the minimum HA node counts, and
+active runtime services. It then runs live checks for a fully synced Galera
+component, every HAProxy Galera readiness agent, repeated fresh database
+connections through the database VIP from every LibreNMS node, Redis Sentinel
+quorum plus a short-lived cache write, `validate.php` on every LibreNMS node,
+one clean matching LibreNMS Git revision on every application node, PHP-FPM and
+the LibreNMS application through the VIP,
+and the full TCP network matrix. In HA mode it also creates one normal `daily`
+backup on the scheduled backup host, so the required offsite rsync transfer is
+proven before go-live. It verifies database/config SHA-256 checksums and
+archives, then imports the database dump into a disposable database that is
+removed after the check. That
+run applies the configured daily retention policy.
 
 HAProxy also checks the LibreNMS `/about` route for each web backend by default.
 If an update leaves one node with broken Composer dependencies or a Laravel boot
@@ -500,11 +615,13 @@ by default, which helps clean full-cluster restarts re-form without an operator
 bootstrap when Galera has valid saved state. It does not force an unsafe Galera
 bootstrap; if no `Primary` component forms, use `galera-recover.yml`.
 
-The same startup repair timer also watches recent `librenms.log` output for a
-fresh `MySQL server has gone away` / SQLSTATE `2006` error. If the LibreNMS DB
-probe is healthy again, it restarts PHP-FPM once for that new error so web
-workers do not keep serving stale database connections after a transient Galera
-or HAProxy event.
+The startup repair timer also watches recent `librenms.log` output for a fresh
+`MySQL server has gone away` / SQLSTATE `2006` error. PHP-FPM recovery is
+disabled by default because PHP workers reconnect per request and repeatedly
+restarting FPM can create its own HTTP errors. For a deliberately enabled
+emergency response, the timer uses a graceful reload only after the DB probe is
+healthy and applies `librenms_startup_repair_db_gone_away_php_fpm_cooldown`
+between reloads.
 
 After all nodes return, check the self-healing units before rerunning Ansible:
 
@@ -682,13 +799,25 @@ ansible librenms_nodes -i inventories/ha/hosts.yml -b -m shell -a \
   "/usr/local/sbin/librenms-ha-backup pre-upgrade"
 ```
 
-Validate a backup without restoring it:
+Validate a backup by checking its manifest SHA-256 values and archives before
+importing its database dump into a disposable database. The disposable
+database is removed after the test; the
+live LibreNMS database is not modified:
 
 ```bash
 ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
   --ask-become-pass \
   -e librenms_restore_test_backup_dir=/var/backups/librenms-ha/<timestamp>
 ```
+
+For an external database, store
+`librenms_restore_test_external_database_login_user` and
+`librenms_restore_test_external_database_login_password` in Ansible Vault. The
+account must be able to create, import, and drop the disposable database.
+
+Restore tests require checksum manifests by default. Make a fresh backup if a
+legacy manifest has no digests; use `librenms_restore_test_require_checksums=false`
+only for a deliberate one-time legacy check.
 
 Restore should be treated as a maintenance event:
 
@@ -700,3 +829,33 @@ Restore should be treated as a maintenance event:
 
 Do not restore one Galera member with old data while the rest of the cluster is
 running with newer writes.
+
+## MariaDB Series Selection
+
+The default `librenms_mariadb_repository_mode: distro` uses the operating
+system's MariaDB packages. On Ubuntu 24.04 this is the MariaDB 10.11 series.
+LibreNMS automatic updates never change MariaDB packages or database series.
+
+For a fresh deployment, the project can configure the official MariaDB Community
+repository for an explicit series on Debian-family hosts. Pin the exact setup
+script hash obtained from the approved MariaDB release source:
+
+```yaml
+librenms_mariadb_repository_mode: upstream
+librenms_mariadb_upstream_series: "11.8" # 11.4 or 11.8 for Galera
+librenms_mariadb_upstream_repo_setup_checksum: sha256:REPLACE_WITH_64_HEX_CHARACTERS
+```
+
+`site.yml` refuses an installed major-series change. A production Galera upgrade
+must use a separate reviewed procedure with a tested off-cluster restore,
+maintenance window, node-by-node package upgrade, and `Primary/Synced` health
+gate after every node. Do not select `12.3` for Galera. The project exposes it
+only as an experimental local-server option and requires:
+
+```yaml
+librenms_mariadb_upstream_series: "12.3"
+librenms_mariadb_allow_experimental_series: true
+```
+
+That explicit acknowledgement is required because MariaDB 12.3 upstream
+packaging currently does not provide a safe Galera path for this project.

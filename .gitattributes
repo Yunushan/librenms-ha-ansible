@@ -1,0 +1,8 @@
+# Keep executable, template, and automation sources portable across Windows
+# workstations and Linux hosts/CI.
+*.yml text eol=lf
+*.yaml text eol=lf
+*.j2 text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+/.yamllint text eol=lf

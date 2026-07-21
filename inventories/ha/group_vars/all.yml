@@ -13,7 +13,22 @@ librenms_db_user: librenms
 librenms_db_password: CHANGE_ME_DB_PASSWORD
 librenms_db_bootstrap_host: lnms1
 
+# MariaDB uses the Ubuntu 24.04 packages (10.11) by default. To use MariaDB
+# Community Server for a fresh install instead, select one explicit series and
+# pin the approved MariaDB repository setup script checksum.
+# librenms_mariadb_repository_mode: upstream
+# librenms_mariadb_upstream_series: "11.8" # supported: 11.4, 11.8, 12.3
+# librenms_mariadb_upstream_repo_setup_checksum: sha256:REPLACE_WITH_64_HEX_CHARACTERS
+# MariaDB 12.3 is experimental, is not supported with Galera, and also needs:
+# librenms_mariadb_allow_experimental_series: true
+
 librenms_galera_cluster_name: librenms_cluster
+
+# HA daily maintenance takes its cluster-wide flock on the GlusterFS RRD mount.
+# Do not move this lock to a local filesystem or replace it with a MariaDB named
+# lock, because MariaDB GET_LOCK() is not replicated between Galera members.
+# librenms_daily_global_lock_backend: shared_file
+# librenms_daily_global_lock_shared_file: /opt/librenms/rrd/.librenms-daily-maintenance.lock
 
 librenms_redis_mode: sentinel
 librenms_redis_master_host: lnms1
@@ -132,6 +147,9 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_daily_self_heal_treat_healthy_update_failure_as_success: true
 # librenms_daily_self_heal_clear_healthy_update_failure_notification: true
 # librenms_daily_self_heal_notification_cleanup_days: 30
+# librenms_daily_ha_drain_enabled: true
+# librenms_daily_ha_drain_delay: 15
+# librenms_production_readiness_verify_database_restore: true
 # librenms_startup_repair_restart_php_fpm_on_db_gone_away: true
 # librenms_web_validation_rrd_check_timeout: 900s
 # librenms_haproxy_db_tcp_keepalive: true

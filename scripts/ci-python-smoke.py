@@ -42,6 +42,10 @@ def main() -> int:
             [python, "scripts/ci-check-markdown-links.py"],
         ),
         (
+            "Check production safety invariants",
+            [python, "scripts/ci-production-safety-check.py"],
+        ),
+        (
             "Validate HA sample inventory",
             [
                 python,
@@ -74,6 +78,7 @@ def main() -> int:
                 "scripts/ci-ansible-syntax-check.py",
                 "scripts/ci-check-markdown-links.py",
                 "scripts/ci-parse-yaml.py",
+                "scripts/ci-production-safety-check.py",
                 "scripts/ci-python-smoke.py",
                 "scripts/validate-inventory.py",
             ],

@@ -18,10 +18,20 @@ CLEAR_CACHE_AFTER_DAILY="{{ librenms_daily_self_heal_clear_laravel_cache_after_d
 HEALTHY_UPDATE_FAILURE_IS_SUCCESS="{{ librenms_daily_self_heal_treat_healthy_update_failure_as_success | bool | ternary('true', 'false') }}"
 CLEAR_HEALTHY_UPDATE_FAILURE_NOTIFICATION="{{ clear_healthy_update_failure_notification | ternary('true', 'false') }}"
 HEALTHY_FAILURE_NOTIFICATION_CLEANUP_DAYS="{{ librenms_daily_self_heal_notification_cleanup_days | int }}"
+GLOBAL_LOCK_ENABLED="{{ librenms_daily_global_lock_enabled | bool | ternary('true', 'false') }}"
+GLOBAL_LOCK_HELPER="{{ librenms_daily_global_lock_path }}"
+GLOBAL_LOCK_NAME="{{ librenms_daily_global_lock_name }}"
+GLOBAL_LOCK_TIMEOUT="{{ librenms_daily_global_lock_timeout | int }}"
+GLOBAL_LOCK_BACKEND="{{ librenms_daily_global_lock_backend }}"
+GLOBAL_LOCK_SHARED_FILE="{{ librenms_daily_global_lock_shared_file }}"
 BACKUP_WRAPPER="{{ librenms_backup_wrapper_path }}"
 PRE_UPGRADE_BACKUP_ENABLED="{{ pre_upgrade_backup_enabled | ternary('true', 'false') }}"
 PRE_UPGRADE_BACKUP_REQUIRED="{{ librenms_backup_pre_upgrade_required | bool | ternary('true', 'false') }}"
+HA_DRAIN_ENABLED="{{ librenms_daily_ha_drain_enabled | bool | ternary('true', 'false') }}"
+HA_DRAIN_PATH="{{ librenms_daily_ha_drain_path }}"
+HA_DRAIN_DELAY="{{ librenms_daily_ha_drain_delay | int }}"
 DAILY_OUTPUT_LOG=""
+DRAIN_MARKER_CREATED=false
 
 export HOME="${LIBRENMS_DIR}"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -34,10 +44,88 @@ run_as_librenms() {
     runuser -u "${LIBRENMS_USER}" -- "$@"
 }
 
+acquire_cluster_maintenance_lock() {
+    local lock_rc
+
+    [ "${GLOBAL_LOCK_ENABLED}" = "true" ] || return 0
+
+    case "${GLOBAL_LOCK_BACKEND}" in
+        shared_file)
+            if ! command -v flock >/dev/null 2>&1; then
+                log "shared maintenance lock requires flock"
+                return 1
+            fi
+
+            if [ -z "${GLOBAL_LOCK_SHARED_FILE}" ] || [ ! -d "$(dirname "${GLOBAL_LOCK_SHARED_FILE}")" ]; then
+                log "shared maintenance lock directory is unavailable"
+                return 1
+            fi
+
+            exec 9>"${GLOBAL_LOCK_SHARED_FILE}"
+            flock -w "${GLOBAL_LOCK_TIMEOUT}" -E 75 9
+            lock_rc=$?
+            if [ "${lock_rc}" -eq 75 ]; then
+                log "another node is maintaining LibreNMS; skipping this trigger"
+                return 2
+            fi
+            if [ "${lock_rc}" -ne 0 ]; then
+                log "failed to acquire shared maintenance lock"
+                return "${lock_rc}"
+            fi
+
+            log "acquired shared maintenance lock"
+            ;;
+        database)
+            log "using database-only maintenance lock"
+            ;;
+        *)
+            log "unsupported maintenance lock backend: ${GLOBAL_LOCK_BACKEND}"
+            return 1
+            ;;
+    esac
+}
+
+activate_ha_drain() {
+    [ "${HA_DRAIN_ENABLED}" = "true" ] || return 0
+
+    if [ -z "${HA_DRAIN_PATH}" ] || [ ! -d "$(dirname "${HA_DRAIN_PATH}")" ]; then
+        log "HA drain marker directory is unavailable"
+        return 1
+    fi
+
+    if ! printf 'daily maintenance\n' > "${HA_DRAIN_PATH}"; then
+        log "failed to create HA drain marker"
+        return 1
+    fi
+
+    chmod 0644 "${HA_DRAIN_PATH}" || return 1
+    DRAIN_MARKER_CREATED=true
+    log "draining this web node before maintenance"
+    sleep "${HA_DRAIN_DELAY}"
+}
+
 cleanup_temp() {
     if [ -n "${DAILY_OUTPUT_LOG}" ] && [ -f "${DAILY_OUTPUT_LOG}" ]; then
         rm -f "${DAILY_OUTPUT_LOG}"
     fi
+}
+
+cleanup_ha_drain() {
+    if [ "${DRAIN_MARKER_CREATED}" = "true" ] && [ -e "${HA_DRAIN_PATH}" ]; then
+        if rm -f -- "${HA_DRAIN_PATH}"; then
+            log "rejoined this web node after maintenance"
+        else
+            log "failed to remove HA drain marker"
+        fi
+    fi
+}
+
+cleanup_on_exit() {
+    local status=$?
+
+    cleanup_temp
+    cleanup_ha_drain
+    return "${status}"
 }
 
 git_process_active() {
@@ -86,8 +174,30 @@ repair_git_metadata() {
 run_daily() {
     cd "${LIBRENMS_DIR}" || return 1
     : > "${DAILY_OUTPUT_LOG}"
-    run_as_librenms /bin/bash "${LIBRENMS_DIR}/daily.sh" 2>&1 |
-        tee "${DAILY_OUTPUT_LOG}"
+
+    if [ "${GLOBAL_LOCK_ENABLED}" = "true" ]; then
+        if [ ! -r "${GLOBAL_LOCK_HELPER}" ]; then
+            log "daily maintenance cluster lock helper is unavailable at ${GLOBAL_LOCK_HELPER}"
+            return 1
+        fi
+
+        env \
+            LIBRENMS_DAILY_GLOBAL_LOCK_NAME="${GLOBAL_LOCK_NAME}" \
+            LIBRENMS_DAILY_GLOBAL_LOCK_TIMEOUT="${GLOBAL_LOCK_TIMEOUT}" \
+            LIBRENMS_DAILY_PRE_UPGRADE_BACKUP_ENABLED="${PRE_UPGRADE_BACKUP_ENABLED}" \
+            LIBRENMS_DAILY_PRE_UPGRADE_BACKUP_REQUIRED="${PRE_UPGRADE_BACKUP_REQUIRED}" \
+            LIBRENMS_DAILY_BACKUP_WRAPPER="${BACKUP_WRAPPER}" \
+            LIBRENMS_DAILY_HA_DRAIN_ENABLED="${HA_DRAIN_ENABLED}" \
+            LIBRENMS_DAILY_HA_DRAIN_PATH="${HA_DRAIN_PATH}" \
+            LIBRENMS_DAILY_HA_DRAIN_DELAY="${HA_DRAIN_DELAY}" \
+            php "${GLOBAL_LOCK_HELPER}" \
+            runuser -u "${LIBRENMS_USER}" -- /bin/bash "${LIBRENMS_DIR}/daily.sh" 2>&1 |
+            tee "${DAILY_OUTPUT_LOG}"
+    else
+        run_as_librenms /bin/bash "${LIBRENMS_DIR}/daily.sh" 2>&1 |
+            tee "${DAILY_OUTPUT_LOG}"
+    fi
+
     return "${PIPESTATUS[0]}"
 }
 
@@ -204,7 +314,7 @@ clear_daily_update_failure_notification() {
     '
 }
 
-trap cleanup_temp EXIT
+trap cleanup_on_exit EXIT
 
 exec 8>"${WRAPPER_LOCK_PATH}"
 if ! flock -n 8; then
@@ -221,6 +331,23 @@ if git_process_active; then
     exit 0
 fi
 
+acquire_cluster_maintenance_lock
+cluster_lock_rc=$?
+if [ "${cluster_lock_rc}" -eq 2 ]; then
+    exit 0
+elif [ "${cluster_lock_rc}" -ne 0 ]; then
+    exit "${cluster_lock_rc}"
+fi
+
+if git_process_active; then
+    log "a LibreNMS git/composer/daily process became active while acquiring the cluster lock; skipping this trigger"
+    exit 0
+fi
+
+if [ "${GLOBAL_LOCK_ENABLED}" != "true" ]; then
+    activate_ha_drain || exit $?
+fi
+
 cleanup_stale_git_locks || cleanup_rc=$?
 if [ "${cleanup_rc}" -eq 1 ]; then
     exit 0
@@ -229,7 +356,9 @@ elif [ "${cleanup_rc}" -ne 0 ]; then
 fi
 
 repair_git_metadata || log "git metadata preflight failed; continuing with daily.sh"
-run_pre_upgrade_backup || exit $?
+if [ "${GLOBAL_LOCK_ENABLED}" != "true" ]; then
+    run_pre_upgrade_backup || exit $?
+fi
 run_daily || daily_rc=$?
 
 if [ "${GIT_RETRY_AFTER_REPAIR}" = "true" ] && daily_output_has_repairable_update_failure; then

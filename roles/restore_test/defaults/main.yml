@@ -2,6 +2,23 @@
 librenms_restore_test_backup_dir: ""
 librenms_restore_test_host: ""
 librenms_restore_test_manifest_filename: manifest.yml
+# Scheduled jobs can opt into selecting the newest completed backup from one
+# managed category. Manual runs remain explicit by default.
+librenms_restore_test_select_latest: false
+librenms_restore_test_backup_root: "{{ librenms_backup_root }}"
+librenms_restore_test_backup_category: daily
 librenms_restore_test_require_database: true
 librenms_restore_test_require_config: true
 librenms_restore_test_require_rrd: false
+# New managed backups include SHA-256 artifact digests. Keep this strict by
+# default; only disable it temporarily when validating a legacy backup made
+# before checksum manifests were introduced.
+librenms_restore_test_require_checksums: true
+# A restore test is only meaningful when the database dump can actually be
+# imported. The target is a new disposable database and is removed afterwards.
+librenms_restore_test_verify_database_import: true
+librenms_restore_test_database_name_prefix: librenms_restore_verify
+# External database deployments need credentials that can create, import, and
+# remove the disposable test database. Keep these in an encrypted vars file.
+librenms_restore_test_external_database_login_user: ""
+librenms_restore_test_external_database_login_password: ""

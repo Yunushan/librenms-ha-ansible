@@ -145,9 +145,26 @@
     - (librenms_ubuntu_sources_universe.rc | default(1)) == 0
     - librenms_ubuntu_legacy_universe_source.stat.exists | default(false)
 
+- name: Install deb822 repository management dependency
+  apt:
+    name: python3-debian
+    state: present
+    update_cache: false
+  when:
+    - ansible_os_family == 'Debian'
+    - ansible_distribution == 'Ubuntu'
+    - librenms_enable_extra_repos | bool
+    - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
+
 - name: Configure Ubuntu universe repository
-  apt_repository:
-    repo: "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
+  deb822_repository:
+    name: librenms-ubuntu-universe
+    types:
+      - deb
+    uris: http://archive.ubuntu.com/ubuntu
+    suites: "{{ ansible_distribution_release }}"
+    components:
+      - universe
     state: present
   when:
     - ansible_os_family == 'Debian'

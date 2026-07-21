@@ -1,6 +1,6 @@
 ---
 - name: Read LibreNMS network map topology summary
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -159,7 +159,7 @@
     - librenms_network_map_needs_repair | default(false) | bool
 
 - name: Re-read LibreNMS network map topology summary after auto-repair
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -230,7 +230,7 @@
     - librenms_network_map_needs_repair | default(false) | bool
 
 - name: Read unmatched LibreNMS network map neighbors
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -266,7 +266,7 @@
     - librenms_network_map_unmatched_neighbors_query.query_result is defined
 
 - name: Read LibreNMS network map link details for diagnostics
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"

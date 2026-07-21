@@ -1,0 +1,16 @@
+---
+# This gate deliberately runs live, non-destructive checks after site.yml.
+# The backup check creates one normal scheduled-category backup to prove that
+# the remote copy works before a production declaration.
+librenms_production_readiness_network_tcp_checks_enabled: true
+librenms_production_readiness_verify_offsite_backup: "{{ librenms_mode == 'ha' }}"
+librenms_production_readiness_verify_database_restore: "{{ librenms_mode == 'ha' }}"
+librenms_production_readiness_backup_category: daily
+librenms_production_readiness_vip_probe_retries: 6
+librenms_production_readiness_vip_probe_delay: 5
+librenms_production_readiness_verify_vip_tls: "{{ librenms_haproxy_tls_enabled | bool }}"
+librenms_production_readiness_db_proxy_probe_count: 6
+librenms_production_readiness_verify_shared_lock: "{{ librenms_mode == 'ha' }}"
+librenms_production_readiness_shared_lock_probe_hold: 8
+librenms_production_readiness_shared_lock_probe_start_delay: 10
+librenms_production_readiness_shared_lock_probe_timeout: 30

@@ -91,6 +91,7 @@
     body_format: json
     body: "{{ awx_bootstrap_job_template_body }}"
     status_code: 201
+  register: awx_bootstrap_job_template_create
   changed_when: true
   when: awx_bootstrap_job_template_matches | length == 0
 
@@ -109,3 +110,20 @@
     status_code: 200
   changed_when: true
   when: awx_bootstrap_job_template_matches | length > 0
+
+- name: Record AWX job template id
+  ansible.builtin.set_fact:
+    awx_bootstrap_job_template_ids: >-
+      {{
+        awx_bootstrap_job_template_ids
+        | combine(
+            {
+              awx_bootstrap_job_template_effective.name:
+                (
+                  awx_bootstrap_job_template_create.json.id
+                  if awx_bootstrap_job_template_matches | length == 0
+                  else awx_bootstrap_job_template_matches[0].id
+                ) | int
+            }
+          )
+      }}

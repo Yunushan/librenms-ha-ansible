@@ -23,8 +23,9 @@ triage, use [failure-scenarios.md](failure-scenarios.md).
 | Controlled failover drill | `playbooks/ha-failover-test.yml` | `make failover-drill` | Pre-flight checks and backup are clean | Running data-layer cases without a maintenance window |
 | Failed validation or unstable behavior | `playbooks/diagnostics.yml` | `make diagnostics` | Before restarting services again or rerunning broad recovery | Losing evidence by repeated service restarts |
 | No Galera `Primary` component | `playbooks/galera-recover.yml` | `make galera-recover` | Galera cannot form a primary component after outage | Random bootstrap, `safe_to_bootstrap` edits without recovered-position evidence |
-| Backup verification | `playbooks/restore-test.yml` | `make restore-test RESTORE_TEST_BACKUP_DIR=/path` | Before relying on a backup for upgrade or recovery | Assuming backup archives are valid without read testing |
+| Backup verification | `playbooks/restore-test.yml` | `make restore-test RESTORE_TEST_BACKUP_DIR=/path` | Before relying on a backup for upgrade or recovery | Assuming an archive is restorable without a disposable database import |
 | Live firewall/listener checks | `playbooks/doctor.yml -e librenms_doctor_network_tcp_checks_enabled=true` | `make doctor-live` | Services are installed and you need real TCP reachability checks | Running before services exist and treating listener failures as firewall failures |
+| Production configuration gate | `playbooks/production-readiness.yml` | `make production-readiness PLAYBOOK_FLAGS=--ask-become-pass` | Before go-live or after a major infrastructure change | Treating a successful playbook deployment as proof of off-cluster backup, secret, and HA safety |
 | AWX baseline setup | `playbooks/awx-bootstrap.yml` | `make awx-bootstrap` | AWX is reachable and you want baseline project, inventory, and templates | Treating AWX as required for CLI operation |
 | Python-only local smoke check | `scripts/ci-python-smoke.py` | `make python-smoke` | You need docs, YAML, inventory, and helper-script checks without Ansible installed | Treating it as a replacement for `ansible-playbook --syntax-check` |
 

@@ -6,10 +6,11 @@ Use this page as the first stop for operator and maintainer documentation.
 
 1. [Architecture and Operating Model](architecture.md) - cluster roles, traffic flow, HA boundaries, and why the automation is conservative around stateful services.
 2. [Support Matrix and Production Readiness](support-matrix.md) - supported distro tiers, production gates, known limits, and expected behavior during node loss.
-3. [LibreNMS HA Operations Runbook](operations.md) - first deployment, convergence, validation, backups, maintenance, full restart, failover drills, and OS upgrades.
-4. [LibreNMS HA Command Map](command-map.md) - which playbook or Make target to run for common tasks and symptoms.
-5. [LibreNMS HA Operator Checklists](operator-checklists.md) - copyable checklists for maintenance, hard power-off testing, restart validation, and incident triage.
-6. [Failure Scenario Runbook](failure-scenarios.md) - targeted troubleshooting for VIP, Galera, Redis Sentinel, GlusterFS, LibreNMS dispatcher, and validation failures.
+3. [Repository Production-Readiness Assessment](production-readiness-assessment.md) - source-level score, evidence, and the remaining live certification work.
+4. [LibreNMS HA Operations Runbook](operations.md) - first deployment, convergence, validation, backups, maintenance, full restart, failover drills, and OS upgrades.
+5. [LibreNMS HA Command Map](command-map.md) - which playbook or Make target to run for common tasks and symptoms.
+6. [LibreNMS HA Operator Checklists](operator-checklists.md) - copyable checklists for maintenance, hard power-off testing, restart validation, and incident triage.
+7. [Failure Scenario Runbook](failure-scenarios.md) - targeted troubleshooting for VIP, Galera, Redis Sentinel, GlusterFS, LibreNMS dispatcher, and validation failures.
 
 ## Task Map
 

@@ -21,7 +21,7 @@ It is intentionally kept separate from the existing Ansible roles:
 - VIP ownership and failover strategy
 - TLS termination
 - backup and restore workflows
-- image version pinning for production
+- an approved, immutable Galera image digest for each node
 
 ## Suggested Topology
 
@@ -44,11 +44,12 @@ Each subdirectory contains a `compose.yml` and an `.env.example` or config templ
 ## Boot Order
 
 1. Prepare shared storage for LibreNMS data and RRDs.
-2. Bootstrap the first Galera node once with `--wsrep-new-cluster`, then bring up the remaining Galera nodes from the normal `compose.yml`.
-3. Bring up the Redis Sentinel stack on all Redis nodes.
-4. Bring up LibreNMS containers on each application node.
-5. Bring up HAProxy in front of the LibreNMS web nodes.
-6. Complete the first LibreNMS web bootstrap, then pin image tags and back up the data volumes.
+2. Copy each `.env.example` to `.env`, replace every password placeholder, and set `MARIADB_GALERA_IMAGE` to an approved immutable digest.
+3. Bootstrap the first Galera node once with `--wsrep-new-cluster`, then bring up the remaining Galera nodes from the normal `compose.yml`.
+4. Bring up the Redis Sentinel stack on all Redis nodes.
+5. Bring up LibreNMS containers on each application node.
+6. Bring up HAProxy in front of the LibreNMS web nodes.
+7. Complete the first LibreNMS web bootstrap and back up the data volumes.
 
 ## Per-Node Notes
 
@@ -56,6 +57,7 @@ Each subdirectory contains a `compose.yml` and an `.env.example` or config templ
 - Each Galera node needs its own `WSREP_NODE_NAME` and `WSREP_NODE_ADDRESS`.
 - On the Redis master node, keep `REDIS_REPLICATION_ARGS=` empty.
 - On Redis replicas, set `REDIS_REPLICATION_ARGS=--replicaof <master-ip> 6379`.
+- `MARIADB_GALERA_IMAGE` is required; the Compose file intentionally has no mutable default. Use an image digest from your approved registry and test it with your MariaDB/Galera configuration before deployment.
 - On the first Galera bootstrap node, start once with `docker compose run --rm mariadb-galera --wsrep-new-cluster`, then return to the normal compose definition.
 - In the LibreNMS app env file, point `DB_HOST` at a database VIP, proxy, or a chosen Galera node.
 - The HAProxy example assumes LibreNMS web containers listen on `tcp/8000`, which matches the official LibreNMS container defaults.

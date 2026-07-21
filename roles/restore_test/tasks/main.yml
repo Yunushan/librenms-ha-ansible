@@ -30,19 +30,110 @@
 - name: Validate restore test inputs
   assert:
     that:
-      - librenms_restore_test_backup_dir | length > 0
       - librenms_restore_test_host_effective | length > 0
+      - >-
+        librenms_restore_test_backup_dir | length > 0
+        or librenms_restore_test_select_latest | bool
     fail_msg: >-
       Set librenms_restore_test_backup_dir to a backup directory created by
-      playbooks/backup.yml. Optionally set librenms_restore_test_host when the
-      manifest is not on the default DB host.
+      playbooks/backup.yml, or explicitly enable
+      librenms_restore_test_select_latest for a managed scheduled job. Optionally
+      set librenms_restore_test_host when the manifest is not on the default DB
+      host.
+  run_once: true
+
+- name: Validate managed latest-backup selection inputs
+  assert:
+    that:
+      - librenms_restore_test_backup_root | length > 0
+      - librenms_restore_test_backup_category is match('^[A-Za-z0-9_-]+$')
+    fail_msg: >-
+      Latest-backup selection requires a non-empty backup root and a category
+      containing only letters, numbers, underscores, or hyphens.
+  when:
+    - librenms_restore_test_backup_dir | length == 0
+    - librenms_restore_test_select_latest | bool
+  run_once: true
+
+- name: Check managed latest-backup category directory
+  stat:
+    path: >-
+      {{ librenms_restore_test_backup_root }}/{{ librenms_restore_test_backup_category }}
+  delegate_to: "{{ librenms_restore_test_host_effective }}"
+  register: librenms_restore_test_backup_category_stat
+  when:
+    - librenms_restore_test_backup_dir | length == 0
+    - librenms_restore_test_select_latest | bool
+  run_once: true
+
+- name: Require managed latest-backup category directory
+  assert:
+    that:
+      - librenms_restore_test_backup_category_stat.stat.isdir | default(false)
+    fail_msg: >-
+      Managed backup category {{ librenms_restore_test_backup_category }} was
+      not found under {{ librenms_restore_test_backup_root }} on
+      {{ librenms_restore_test_host_effective }}.
+  when:
+    - librenms_restore_test_backup_dir | length == 0
+    - librenms_restore_test_select_latest | bool
+  run_once: true
+
+- name: Find managed latest-backup candidates
+  command:
+    argv:
+      - find
+      - >-
+        {{ librenms_restore_test_backup_root }}/{{ librenms_restore_test_backup_category }}
+      - -mindepth
+      - "1"
+      - -maxdepth
+      - "1"
+      - -type
+      - d
+      - -printf
+      - "%T@ %p\\n"
+  delegate_to: "{{ librenms_restore_test_host_effective }}"
+  register: librenms_restore_test_backup_candidates
+  changed_when: false
+  when:
+    - librenms_restore_test_backup_dir | length == 0
+    - librenms_restore_test_select_latest | bool
+  run_once: true
+
+- name: Require a managed latest-backup candidate
+  assert:
+    that:
+      - librenms_restore_test_backup_candidates.stdout_lines | default([]) | length > 0
+    fail_msg: >-
+      No completed backup directories were found under
+      {{ librenms_restore_test_backup_root }}/{{ librenms_restore_test_backup_category }}
+      on {{ librenms_restore_test_host_effective }}.
+  when:
+    - librenms_restore_test_backup_dir | length == 0
+    - librenms_restore_test_select_latest | bool
+  run_once: true
+
+- name: Determine effective backup directory for restore test
+  set_fact:
+    librenms_restore_test_backup_dir_effective: >-
+      {{
+        librenms_restore_test_backup_dir
+        if librenms_restore_test_backup_dir | length > 0
+        else (
+          librenms_restore_test_backup_candidates.stdout_lines
+          | sort
+          | last
+          | regex_replace('^[0-9.]+ ', '')
+        )
+      }}
   run_once: true
 
 - name: Check backup manifest exists
   stat:
     path: >-
       {{
-        librenms_restore_test_backup_dir ~ '/'
+        librenms_restore_test_backup_dir_effective ~ '/'
         ~ librenms_restore_test_manifest_filename
       }}
   delegate_to: "{{ librenms_restore_test_host_effective }}"
@@ -55,14 +146,14 @@
       - librenms_restore_test_manifest_stat.stat.exists | default(false)
     fail_msg: >-
       Backup manifest was not found on {{ librenms_restore_test_host_effective }}
-      under {{ librenms_restore_test_backup_dir }}.
+      under {{ librenms_restore_test_backup_dir_effective }}.
   run_once: true
 
 - name: Read backup manifest
   slurp:
     src: >-
       {{
-        librenms_restore_test_backup_dir ~ '/'
+        librenms_restore_test_backup_dir_effective ~ '/'
         ~ librenms_restore_test_manifest_filename
       }}
   delegate_to: "{{ librenms_restore_test_host_effective }}"
@@ -88,7 +179,7 @@
       }}
     librenms_restore_test_database_path: >-
       {{
-        librenms_restore_test_backup_dir ~ '/'
+        librenms_restore_test_backup_dir_effective ~ '/'
         ~ (librenms_restore_test_manifest.database.file | default(''))
       }}
     librenms_restore_test_config_host: >-
@@ -98,7 +189,7 @@
       }}
     librenms_restore_test_config_path: >-
       {{
-        librenms_restore_test_backup_dir ~ '/'
+        librenms_restore_test_backup_dir_effective ~ '/'
         ~ (librenms_restore_test_manifest.config.file | default(''))
       }}
     librenms_restore_test_rrd_host: >-
@@ -108,14 +199,35 @@
       }}
     librenms_restore_test_rrd_path: >-
       {{
-        librenms_restore_test_backup_dir ~ '/'
+        librenms_restore_test_backup_dir_effective ~ '/'
         ~ (librenms_restore_test_manifest.rrd.file | default(''))
       }}
+  run_once: true
+
+- name: Require safe artifact filenames in backup manifest
+  assert:
+    that:
+      - >-
+        not (librenms_restore_test_manifest.database.included | default(false) | bool)
+        or (librenms_restore_test_manifest.database.file | default(''))
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - >-
+        not (librenms_restore_test_manifest.config.included | default(false) | bool)
+        or (librenms_restore_test_manifest.config.file | default(''))
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - >-
+        not (librenms_restore_test_manifest.rrd.included | default(false) | bool)
+        or (librenms_restore_test_manifest.rrd.file | default(''))
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+    fail_msg: >-
+      Backup manifest artifact filenames must be plain filenames. Refusing a
+      path containing directory traversal or shell-special components.
   run_once: true
 
 - name: Check database dump exists
   stat:
     path: "{{ librenms_restore_test_database_path }}"
+    checksum_algorithm: sha256
   delegate_to: "{{ librenms_restore_test_database_host }}"
   register: librenms_restore_test_database_stat
   when:
@@ -142,6 +254,7 @@
 - name: Check config archive exists
   stat:
     path: "{{ librenms_restore_test_config_path }}"
+    checksum_algorithm: sha256
   delegate_to: "{{ librenms_restore_test_config_host }}"
   register: librenms_restore_test_config_stat
   when:
@@ -167,6 +280,7 @@
 - name: Check RRD archive exists
   stat:
     path: "{{ librenms_restore_test_rrd_path }}"
+    checksum_algorithm: sha256
   delegate_to: "{{ librenms_restore_test_rrd_host }}"
   register: librenms_restore_test_rrd_stat
   when:
@@ -212,13 +326,205 @@
         )
     fail_msg: >-
       One or more required backup artifacts are missing or were not included in
-      the manifest. Check backup directory {{ librenms_restore_test_backup_dir }}.
+      the manifest. Check backup directory
+      {{ librenms_restore_test_backup_dir_effective }}.
   run_once: true
+
+- name: Require matching SHA-256 checksums for required backup artifacts
+  assert:
+    that:
+      - >-
+        (not librenms_restore_test_require_database | bool)
+        or (
+          (librenms_restore_test_manifest.database.checksum_sha256 | default(''))
+          is match('^[A-Fa-f0-9]{64}$')
+          and librenms_restore_test_database_stat.stat.checksum | default('')
+          == librenms_restore_test_manifest.database.checksum_sha256
+        )
+      - >-
+        (not librenms_restore_test_require_config | bool)
+        or (
+          (librenms_restore_test_manifest.config.checksum_sha256 | default(''))
+          is match('^[A-Fa-f0-9]{64}$')
+          and librenms_restore_test_config_stat.stat.checksum | default('')
+          == librenms_restore_test_manifest.config.checksum_sha256
+        )
+      - >-
+        (not librenms_restore_test_require_rrd | bool)
+        or (
+          (librenms_restore_test_manifest.rrd.checksum_sha256 | default(''))
+          is match('^[A-Fa-f0-9]{64}$')
+          and librenms_restore_test_rrd_stat.stat.checksum | default('')
+          == librenms_restore_test_manifest.rrd.checksum_sha256
+        )
+    fail_msg: >-
+      A required backup artifact is missing a valid SHA-256 manifest checksum
+      or no longer matches it. Create a new backup before testing the restore.
+  when: librenms_restore_test_require_checksums | bool
+  run_once: true
+
+- name: Define disposable database restore target
+  set_fact:
+    librenms_restore_test_database_target: >-
+      {{ librenms_restore_test_database_name_prefix }}_{{ ansible_date_time.epoch }}
+  when:
+    - librenms_restore_test_verify_database_import | bool
+    - librenms_restore_test_require_database | bool
+    - librenms_restore_test_manifest.database.included | default(false) | bool
+  run_once: true
+
+- name: Validate disposable database restore target
+  assert:
+    that:
+      - librenms_restore_test_database_name_prefix is match('^[A-Za-z0-9_]+$')
+      - librenms_restore_test_database_target != librenms_db_name
+    fail_msg: >-
+      librenms_restore_test_database_name_prefix must contain only letters,
+      numbers, and underscores and must not produce the live LibreNMS database
+      name.
+  when:
+    - librenms_restore_test_verify_database_import | bool
+    - librenms_restore_test_require_database | bool
+    - librenms_restore_test_manifest.database.included | default(false) | bool
+  run_once: true
+
+- name: Require external database restore credentials
+  assert:
+    that:
+      - librenms_restore_test_external_database_login_user | length > 0
+      - librenms_restore_test_external_database_login_password | length > 0
+    fail_msg: >-
+      External database restore testing needs credentials with permission to
+      create, import, and drop the disposable database target. Set
+      librenms_restore_test_external_database_login_user and
+      librenms_restore_test_external_database_login_password through Ansible
+      Vault or another encrypted variable source.
+  no_log: true
+  when:
+    - librenms_restore_test_verify_database_import | bool
+    - librenms_restore_test_require_database | bool
+    - librenms_restore_test_manifest.database.included | default(false) | bool
+    - librenms_db_mode not in ['local', 'galera']
+  run_once: true
+
+- name: Import database backup into disposable restore target
+  no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
+  when:
+    - librenms_restore_test_verify_database_import | bool
+    - librenms_restore_test_require_database | bool
+    - librenms_restore_test_manifest.database.included | default(false) | bool
+  run_once: true
+  block:
+    - name: Create disposable database restore target
+      ansible.mysql.mysql_db:
+        name: "{{ librenms_restore_test_database_target }}"
+        state: present
+        encoding: utf8mb4
+        collation: utf8mb4_unicode_ci
+        login_unix_socket: >-
+          {{
+            hostvars[librenms_restore_test_database_host].librenms_mariadb_socket
+            | default(librenms_mariadb_socket)
+            if librenms_db_mode in ['local', 'galera']
+            else omit
+          }}
+        login_host: >-
+          {{ librenms_db_host if librenms_db_mode not in ['local', 'galera'] else omit }}
+        login_port: >-
+          {{ librenms_db_port | int if librenms_db_mode not in ['local', 'galera'] else omit }}
+        login_user: >-
+          {{
+            librenms_restore_test_external_database_login_user
+            if librenms_db_mode not in ['local', 'galera']
+            else omit
+          }}
+        login_password: >-
+          {{
+            librenms_restore_test_external_database_login_password
+            if librenms_db_mode not in ['local', 'galera']
+            else omit
+          }}
+        check_implicit_admin: >-
+          {{ true if librenms_db_mode in ['local', 'galera'] else omit }}
+      delegate_to: "{{ librenms_restore_test_database_host }}"
+
+    - name: Import backup into disposable restore target
+      ansible.mysql.mysql_db:
+        name: "{{ librenms_restore_test_database_target }}"
+        state: import
+        target: "{{ librenms_restore_test_database_path }}"
+        login_unix_socket: >-
+          {{
+            hostvars[librenms_restore_test_database_host].librenms_mariadb_socket
+            | default(librenms_mariadb_socket)
+            if librenms_db_mode in ['local', 'galera']
+            else omit
+          }}
+        login_host: >-
+          {{ librenms_db_host if librenms_db_mode not in ['local', 'galera'] else omit }}
+        login_port: >-
+          {{ librenms_db_port | int if librenms_db_mode not in ['local', 'galera'] else omit }}
+        login_user: >-
+          {{
+            librenms_restore_test_external_database_login_user
+            if librenms_db_mode not in ['local', 'galera']
+            else omit
+          }}
+        login_password: >-
+          {{
+            librenms_restore_test_external_database_login_password
+            if librenms_db_mode not in ['local', 'galera']
+            else omit
+          }}
+        check_implicit_admin: >-
+          {{ true if librenms_db_mode in ['local', 'galera'] else omit }}
+      delegate_to: "{{ librenms_restore_test_database_host }}"
+  always:
+    - name: Remove disposable database restore target
+      ansible.mysql.mysql_db:
+        name: "{{ librenms_restore_test_database_target }}"
+        state: absent
+        login_unix_socket: >-
+          {{
+            hostvars[librenms_restore_test_database_host].librenms_mariadb_socket
+            | default(librenms_mariadb_socket)
+            if librenms_db_mode in ['local', 'galera']
+            else omit
+          }}
+        login_host: >-
+          {{ librenms_db_host if librenms_db_mode not in ['local', 'galera'] else omit }}
+        login_port: >-
+          {{ librenms_db_port | int if librenms_db_mode not in ['local', 'galera'] else omit }}
+        login_user: >-
+          {{
+            librenms_restore_test_external_database_login_user
+            if librenms_db_mode not in ['local', 'galera']
+            else omit
+          }}
+        login_password: >-
+          {{
+            librenms_restore_test_external_database_login_password
+            if librenms_db_mode not in ['local', 'galera']
+            else omit
+          }}
+        check_implicit_admin: >-
+          {{ true if librenms_db_mode in ['local', 'galera'] else omit }}
+      delegate_to: "{{ librenms_restore_test_database_host }}"
+      when: librenms_restore_test_database_target | default('') | length > 0
 
 - name: Report restore test summary
   debug:
     msg: >-
-      Restore test passed for {{ librenms_restore_test_backup_dir }}.
+      Restore test passed for {{ librenms_restore_test_backup_dir_effective }}.
+      {{
+        'The database backup was imported into and removed from a disposable target.'
+        if (
+          librenms_restore_test_verify_database_import | bool
+          and librenms_restore_test_require_database | bool
+          and librenms_restore_test_manifest.database.included | default(false) | bool
+        )
+        else 'Disposable database import verification was not requested.'
+      }}
       Database host={{ librenms_restore_test_database_host }},
       config host={{ librenms_restore_test_config_host }},
       rrd host={{ librenms_restore_test_rrd_host }}.

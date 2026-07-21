@@ -1,0 +1,112 @@
+<?php
+
+declare(strict_types=1);
+
+$init_modules = [];
+$installDir = {{ librenms_install_dir | to_json }};
+$lockName = getenv('LIBRENMS_DAILY_GLOBAL_LOCK_NAME') ?: 'librenms_daily_maintenance';
+$lockTimeout = max(0, (int) (getenv('LIBRENMS_DAILY_GLOBAL_LOCK_TIMEOUT') ?: 7200));
+$backupEnabled = (getenv('LIBRENMS_DAILY_PRE_UPGRADE_BACKUP_ENABLED') ?: 'false') === 'true';
+$backupRequired = (getenv('LIBRENMS_DAILY_PRE_UPGRADE_BACKUP_REQUIRED') ?: 'false') === 'true';
+$backupWrapper = getenv('LIBRENMS_DAILY_BACKUP_WRAPPER') ?: '';
+$drainEnabled = (getenv('LIBRENMS_DAILY_HA_DRAIN_ENABLED') ?: 'false') === 'true';
+$drainPath = getenv('LIBRENMS_DAILY_HA_DRAIN_PATH') ?: '';
+$drainDelay = max(0, (int) (getenv('LIBRENMS_DAILY_HA_DRAIN_DELAY') ?: 15));
+$command = array_slice($argv, 1);
+
+if ($command === []) {
+    fwrite(STDERR, "librenms-daily-global-lock: missing command\n");
+    exit(64);
+}
+
+chdir($installDir);
+require $installDir . '/includes/init.php';
+
+function runProcess(array $command, string $workingDirectory): int
+{
+    $process = proc_open(
+        $command,
+        [
+            0 => ['file', '/dev/null', 'r'],
+            1 => STDOUT,
+            2 => STDERR,
+        ],
+        $pipes,
+        $workingDirectory,
+        [
+            'HOME' => $workingDirectory,
+            'PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        ]
+    );
+
+    if (!is_resource($process)) {
+        throw new RuntimeException('could not start child process');
+    }
+
+    return proc_close($process);
+}
+
+$acquired = 0;
+$status = 1;
+$drainCreated = false;
+
+try {
+    $result = \Illuminate\Support\Facades\DB::selectOne(
+        'SELECT GET_LOCK(?, ?) AS acquired',
+        [$lockName, $lockTimeout]
+    );
+    $acquired = (int) ($result->acquired ?? 0);
+
+    if ($acquired !== 1) {
+        fwrite(STDOUT, "librenms-daily-global-lock: another node is maintaining LibreNMS; skipping this trigger\n");
+        $status = 0;
+    } else {
+        fwrite(STDOUT, "librenms-daily-global-lock: acquired cluster lock {$lockName}\n");
+        if ($drainEnabled) {
+            if ($drainPath === '' || file_put_contents($drainPath, "daily maintenance\n") === false) {
+                throw new RuntimeException('could not create HA drain marker');
+            }
+
+            chmod($drainPath, 0644);
+            $drainCreated = true;
+            fwrite(STDOUT, "librenms-daily-global-lock: draining this web node before maintenance\n");
+            sleep($drainDelay);
+        }
+
+        if ($backupEnabled) {
+            if ($backupWrapper === '' || !is_executable($backupWrapper)) {
+                fwrite(STDERR, "librenms-daily-global-lock: pre-upgrade backup wrapper is unavailable\n");
+                if ($backupRequired) {
+                    throw new RuntimeException('required pre-upgrade backup wrapper is unavailable');
+                }
+            } else {
+                fwrite(STDOUT, "librenms-daily-global-lock: running pre-upgrade backup\n");
+                $backupStatus = runProcess([$backupWrapper, 'pre-upgrade'], $installDir);
+                if ($backupStatus !== 0 && $backupRequired) {
+                    throw new RuntimeException('required pre-upgrade backup failed');
+                }
+            }
+        }
+
+        $status = runProcess($command, $installDir);
+    }
+} catch (Throwable $exception) {
+    fwrite(STDERR, 'librenms-daily-global-lock: ' . $exception->getMessage() . "\n");
+    $status = 1;
+} finally {
+    if ($drainCreated && is_file($drainPath) && !unlink($drainPath)) {
+        fwrite(STDERR, "librenms-daily-global-lock: failed to remove HA drain marker\n");
+        $status = 1;
+    }
+
+    if ($acquired === 1) {
+        try {
+            \Illuminate\Support\Facades\DB::selectOne('SELECT RELEASE_LOCK(?)', [$lockName]);
+        } catch (Throwable $exception) {
+            fwrite(STDERR, 'librenms-daily-global-lock: failed to release cluster lock: ' . $exception->getMessage() . "\n");
+            $status = 1;
+        }
+    }
+}
+
+exit($status);

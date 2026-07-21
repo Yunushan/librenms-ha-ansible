@@ -21,17 +21,22 @@ DB_HOST={{ librenms_db_host | quote }}
 DB_PORT={{ librenms_db_port | int }}
 DB_NAME={{ librenms_db_name | quote }}
 DB_USER={{ librenms_db_user | quote }}
-{% if librenms_db_mode in ['local', 'galera'] %}
-DB_PASSWORD=""
-{% else %}
 DB_PASSWORD={{ librenms_db_password | quote }}
-{% endif %}
 MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
 DUMP_EXTRA_ARGS={{ librenms_backup_database_dump_extra_args | quote }}
 
 DAILY_RETENTION={{ librenms_backup_daily_retention | int }}
 WEEKLY_RETENTION={{ librenms_backup_weekly_retention | int }}
 PRE_UPGRADE_RETENTION={{ librenms_backup_pre_upgrade_retention | int }}
+BACKUP_LOCK_TIMEOUT={{ librenms_backup_lock_timeout | int }}
+OFFSITE_ENABLED="{{ librenms_backup_offsite_enabled | bool | ternary('true', 'false') }}"
+OFFSITE_REQUIRED="{{ librenms_backup_offsite_required | bool | ternary('true', 'false') }}"
+OFFSITE_RSYNC_TARGET={{ librenms_backup_offsite_rsync_target | quote }}
+OFFSITE_RSYNC_OPTIONS=(
+{% for option in librenms_backup_offsite_rsync_options %}
+  {{ option | quote }}
+{% endfor %}
+)
 
 CONFIG_PATHS=(
 {% for path in librenms_backup_config_paths %}
@@ -125,7 +130,7 @@ dump_database() {
     dump_args=(${DUMP_EXTRA_ARGS})
 
     log "dumping database ${DB_NAME} to ${target}"
-    if [ "${DB_MODE}" = "local" ] || [ "${DB_MODE}" = "galera" ]; then
+    if [ "${DB_MODE}" = "local" ] || { [ "${DB_MODE}" = "galera" ] && [ -S "${MARIADB_SOCKET}" ]; }; then
         mysqldump \
             --protocol=socket \
             --socket="${MARIADB_SOCKET}" \
@@ -208,8 +213,24 @@ archive_rrd() {
     chmod 0640 "${target}"
 }
 
+artifact_sha256() {
+    local artifact="$1"
+
+    if [ ! -f "${artifact}" ]; then
+        printf '%s' ''
+        return 0
+    fi
+
+    sha256sum -- "${artifact}" | awk '{print $1}'
+}
+
 write_manifest() {
     local target="${BACKUP_DIR}/${MANIFEST_FILENAME}"
+    local database_checksum config_checksum rrd_checksum
+
+    database_checksum="$(artifact_sha256 "${BACKUP_DIR}/${DATABASE_FILENAME}")"
+    config_checksum="$(artifact_sha256 "${BACKUP_DIR}/${CONFIG_FILENAME}")"
+    rrd_checksum="$(artifact_sha256 "${BACKUP_DIR}/${RRD_FILENAME}")"
 
     cat > "${target}" <<MANIFEST
 backup_run_id: "${RUN_ID}"
@@ -221,11 +242,13 @@ backup_coordinator: "${BACKUP_COORDINATOR}"
 database:
   included: ${INCLUDE_DATABASE}
   file: "${DATABASE_FILENAME}"
+  checksum_sha256: "${database_checksum}"
   mode: "${DB_MODE}"
   name: "${DB_NAME}"
 config:
   included: ${INCLUDE_CONFIG}
   file: "${CONFIG_FILENAME}"
+  checksum_sha256: "${config_checksum}"
   paths:
 MANIFEST
 
@@ -240,6 +263,7 @@ rrd:
   included: ${INCLUDE_RRD}
   path: "${RRD_PATH}"
   file: "${RRD_FILENAME}"
+  checksum_sha256: "${rrd_checksum}"
 MANIFEST
 
     chmod 0640 "${target}"
@@ -276,6 +300,52 @@ prune_retention() {
     done < <(find "${CATEGORY_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r)
 }
 
+copy_offsite() {
+    [ "${OFFSITE_ENABLED}" = "true" ] || return 0
+
+    if [ -z "${OFFSITE_RSYNC_TARGET}" ]; then
+        log "offsite backup is enabled but librenms_backup_offsite_rsync_target is empty"
+        [ "${OFFSITE_REQUIRED}" != "true" ]
+        return $?
+    fi
+
+    if ! command -v rsync >/dev/null 2>&1; then
+        log "offsite backup is enabled but rsync is not installed"
+        [ "${OFFSITE_REQUIRED}" != "true" ]
+        return $?
+    fi
+
+    local target="${OFFSITE_RSYNC_TARGET%/}/${CATEGORY}/${RUN_ID}/"
+    local verification_output
+    log "copying ${CATEGORY} backup to offsite target"
+    if rsync -a --partial --protect-args "${OFFSITE_RSYNC_OPTIONS[@]}" -- "${BACKUP_DIR}/" "${target}"; then
+        if rsync -a --list-only --protect-args "${OFFSITE_RSYNC_OPTIONS[@]}" -- \
+            "${target}${MANIFEST_FILENAME}" >/dev/null; then
+            if ! verification_output="$(rsync -a --checksum --dry-run --out-format='%i %n%L' --protect-args \
+                "${OFFSITE_RSYNC_OPTIONS[@]}" -- "${BACKUP_DIR}/" "${target}")"; then
+                log "offsite backup checksum verification failed"
+                [ "${OFFSITE_REQUIRED}" != "true" ]
+                return $?
+            fi
+
+            if [ -z "${verification_output}" ]; then
+                return 0
+            fi
+
+            log "offsite backup checksum verification reported differences"
+            [ "${OFFSITE_REQUIRED}" != "true" ]
+            return $?
+        fi
+
+        log "offsite backup manifest could not be read after copy"
+        [ "${OFFSITE_REQUIRED}" != "true" ]
+        return $?
+    fi
+
+    log "offsite backup copy failed"
+    [ "${OFFSITE_REQUIRED}" != "true" ]
+}
+
 main() {
     local retain
 
@@ -286,9 +356,14 @@ main() {
     fi
 
     exec 9>/run/librenms-ha-backup.lock
-    if ! flock -n 9; then
-        log "another backup is already running"
+    flock -w "${BACKUP_LOCK_TIMEOUT}" -E 75 9
+    lock_rc=$?
+    if [ "${lock_rc}" -eq 75 ]; then
+        log "timed out waiting for another backup to finish"
         return 1
+    elif [ "${lock_rc}" -ne 0 ]; then
+        log "failed to acquire the local backup lock"
+        return "${lock_rc}"
     fi
 
     prepare_paths
@@ -296,6 +371,7 @@ main() {
     archive_config
     archive_rrd
     write_manifest
+    copy_offsite
     prune_retention "${retain}"
     log "${CATEGORY} backup completed at ${BACKUP_DIR}"
 }

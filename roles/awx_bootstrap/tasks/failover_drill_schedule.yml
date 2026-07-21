@@ -1,0 +1,76 @@
+---
+- name: Build AWX failover-drill schedule payload
+  ansible.builtin.set_fact:
+    awx_bootstrap_failover_drill_schedule_body:
+      name: "{{ awx_bootstrap_failover_drill_schedule_name }}"
+      unified_job_template: >-
+        {{ awx_bootstrap_job_template_ids[awx_bootstrap_failover_drill_job_template_name] | int }}
+      rrule: "{{ awx_bootstrap_failover_drill_schedule_rrule }}"
+      enabled: true
+      extra_data:
+        librenms_failover_test_confirm: true
+        librenms_failover_test_cases: "{{ awx_bootstrap_failover_drill_cases }}"
+
+- name: Query AWX failover-drill schedule
+  ansible.builtin.uri:
+    url: >-
+      {{ awx_bootstrap_api_base }}/schedules/?name={{
+      awx_bootstrap_failover_drill_schedule_name | urlencode }}
+    method: GET
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    status_code: 200
+  register: awx_bootstrap_failover_drill_schedule_query
+  changed_when: false
+
+- name: Record matching AWX failover-drill schedules
+  ansible.builtin.set_fact:
+    awx_bootstrap_failover_drill_schedule_matches: >-
+      {{
+        awx_bootstrap_failover_drill_schedule_query.json.results
+        | selectattr('name', 'equalto', awx_bootstrap_failover_drill_schedule_name)
+        | selectattr(
+            'unified_job_template',
+            'equalto',
+            awx_bootstrap_job_template_ids[awx_bootstrap_failover_drill_job_template_name] | int
+          )
+        | list
+      }}
+
+- name: Create AWX failover-drill schedule
+  ansible.builtin.uri:
+    url: "{{ awx_bootstrap_api_base }}/schedules/"
+    method: POST
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_failover_drill_schedule_body }}"
+    status_code: 201
+  changed_when: true
+  when: awx_bootstrap_failover_drill_schedule_matches | length == 0
+
+- name: Update AWX failover-drill schedule
+  ansible.builtin.uri:
+    url: >-
+      {{ awx_bootstrap_api_base }}/schedules/{{
+      awx_bootstrap_failover_drill_schedule_matches[0].id }}/
+    method: PATCH
+    headers: "{{ awx_bootstrap_api_headers }}"
+    url_username: "{{ awx_bootstrap_username if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    url_password: "{{ awx_bootstrap_password if awx_bootstrap_oauth_token | length == 0 else omit }}"
+    force_basic_auth: "{{ awx_bootstrap_oauth_token | length == 0 }}"
+    validate_certs: "{{ awx_bootstrap_validate_certs }}"
+    timeout: "{{ awx_bootstrap_request_timeout }}"
+    body_format: json
+    body: "{{ awx_bootstrap_failover_drill_schedule_body }}"
+    status_code: 200
+  changed_when: true
+  when: awx_bootstrap_failover_drill_schedule_matches | length > 0

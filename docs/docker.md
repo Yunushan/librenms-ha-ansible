@@ -82,4 +82,4 @@ That bundle includes Compose examples for:
 - Redis Sentinel containers
 - HAProxy
 
-It is intentionally documented as **experimental** and **operator-driven**. Shared RRD storage, VIP failover, TLS termination, and production image pinning still need deliberate infrastructure choices.
+It is intentionally documented as **experimental** and **operator-driven**. Shared RRD storage, VIP failover, and TLS termination still need deliberate infrastructure choices. The Galera Compose example fails closed until `MARIADB_GALERA_IMAGE` is set to an approved immutable image digest.

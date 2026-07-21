@@ -24,6 +24,10 @@ Quick Start • Topology Modes • Example HA Architecture • Support Matrix �
 See [CHANGELOG.md](CHANGELOG.md) for operator-facing release notes before
 applying a newer revision to an existing cluster.
 
+For a transparent source-level readiness score and the live evidence still
+required before go-live, see
+[docs/production-readiness-assessment.md](docs/production-readiness-assessment.md).
+
 ---
 
 ## Why This Exists
@@ -254,6 +258,12 @@ librenms_vip_enabled: true
 librenms_vip_ip: 10.10.10.10
 librenms_fqdn: librenms.example.com
 ```
+
+MariaDB defaults to the operating-system package series. Optional MariaDB
+Community repository support is available for explicit `11.4`, `11.8`, and
+experimental non-Galera `12.3` selection. See
+[MariaDB Series Selection](docs/operations.md#mariadb-series-selection) before
+changing a database series.
 
 ---
 
@@ -839,6 +849,17 @@ The gates cover:
 - sample HA and standalone inventory validation
 - `ansible-playbook --syntax-check` for every playbook
 
+GitHub Actions runs on the pinned `ubuntu-24.04` image with pinned core lint
+tool versions in `requirements-ci.txt`. This prevents CI behavior changing
+merely because a runner image or one of the primary lint tools released a new
+version. Local development can use newer compatible tooling, but run the pinned
+set before changing CI-sensitive files:
+
+```bash
+python3 -m pip install --requirement requirements-ci.txt
+make ci
+```
+
 `make syntax-check` requires Ansible to be installed on the controller. If you
 are working from a Windows workstation without Ansible, run the checks from WSL,
 a Linux control node, or the project Docker image.
@@ -1115,7 +1136,8 @@ source hosts and backs up:
 
 - the LibreNMS database as `librenms.sql.gz`
 - core LibreNMS and service configuration as `librenms-config.tar.gz`
-- a `manifest.yml` describing the backup source hosts and files
+- a `manifest.yml` describing the backup source hosts, files, and their
+  SHA-256 checksums
 
 `site.yml` also deploys automated backup guardrails for HA deployments:
 
@@ -1173,6 +1195,19 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
   -e librenms_restore_test_backup_dir=/var/backups/librenms-ha/<timestamp>
 ```
 
+The restore test validates manifest SHA-256 checksums before opening archives
+or importing the database dump into a new disposable database, which it drops
+afterwards. It never modifies the live `librenms` database. For an external
+database, provide restore-test credentials
+with permission to create, import, and drop the disposable database through
+`librenms_restore_test_external_database_login_user` and
+`librenms_restore_test_external_database_login_password` in Ansible Vault.
+
+Backups created before checksum manifests were introduced are considered legacy.
+Create a fresh backup before relying on it. A one-time legacy validation can use
+`-e librenms_restore_test_require_checksums=false`; do not use that override
+for scheduled production restore tests.
+
 For scheduled backups, include the category in the path, for example:
 
 ```bash
@@ -1181,8 +1216,19 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
   -e librenms_restore_test_backup_dir=/var/backups/librenms-ha/daily/<timestamp>
 ```
 
-This does not restore data. It checks the manifest and verifies the database,
-config, and optional RRD archives can be read.
+An unattended controller job can instead explicitly select the newest managed
+daily backup. This is opt-in, so manual runs keep requiring a reviewed backup
+path:
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/restore-test.yml \
+  --ask-become-pass \
+  -e librenms_restore_test_select_latest=true \
+  -e librenms_restore_test_backup_category=daily
+```
+
+This does not restore data. It verifies manifest SHA-256 values before
+checking that database, config, and optional RRD archives can be read.
 
 ---
 
@@ -1260,7 +1306,7 @@ If a host has multiple roles, it needs the union of the rows that apply to those
   default. On an installed cluster, add
   `-e librenms_doctor_network_tcp_checks_enabled=true` to verify that the TCP
   ports in the table are reachable from the expected source nodes.
-- `librenms_db_bind_address` defaults to `0.0.0.0`, so restrict `3306/tcp` with host or network firewalls if you do not want broad exposure.
+- `librenms_db_bind_address` defaults to the managed node address. Set it to `0.0.0.0` only when a deliberately managed firewall or network policy restricts `3306/tcp`.
 - Keep Galera, Redis, GlusterFS, and VRRP limited to the cluster management subnet. None of those services should be exposed to general client networks.
 - Keepalived VRRP usually requires the `lb_nodes` to be on the same L2 segment or VLAN, with firewalls allowing protocol `112` and multicast to `224.0.0.18`.
 - This repo listens on `80/tcp` for the Web UI by default. Set `librenms_haproxy_tls_enabled: true` to terminate HTTPS on HAProxy at the VIP. In HA mode, expose node-local `80/tcp` only to the load-balancer or management subnet unless you intentionally allow direct node UI access.
@@ -1318,10 +1364,10 @@ pin this to an explicit released tag instead of tracking `master`.
 
 The role also sets LibreNMS' own `update_channel` to `release` and keeps
 `daily.sh` running with a systemd timer. This preserves LibreNMS' normal daily
-cleanup and update bookkeeping without tracking the development branch. By
-default, `daily.sh` starts at 03:00 in each host's local timezone with up to
-30 minutes of systemd jitter so HA nodes do not all run Composer/git work at the
-same second. LibreNMS code updates are enabled on the release channel. Set
+cleanup and update bookkeeping without tracking the development branch. In HA
+mode, every node waits on a database-backed cluster lock before daily maintenance
+starts, so Composer, migrations, and cache refreshes cannot run concurrently.
+LibreNMS code updates are enabled on the release channel. Set
 `librenms_update_enabled: false` to keep code updates controlled only by
 Ansible, or pin `librenms_version` to an explicit released tag for repeatable
 production rebuilds.
@@ -1574,25 +1620,34 @@ librenms_app_probe_path: /
 librenms_app_probe_retries: 3
 librenms_app_probe_delay: 3
 librenms_app_probe_timeout: 3
-librenms_app_probe_fail_deployment: false
+librenms_app_probe_fail_deployment: true
 librenms_vip_app_probe_enabled: true
 librenms_vip_app_probe_fail_deployment: true
+librenms_production_readiness_verify_vip_tls: true
 ```
 
 The load balancer uses the LibreNMS `/about` route for backend health checks by
 default. This exercises PHP autoloading, Laravel boot, and the LibreNMS app
 enough to catch broken post-update dependencies before users are sent to that
 node. The PHP-FPM-backed nginx ping endpoint remains available as a lightweight
-node-local diagnostic. The full LibreNMS page probe is non-blocking by default
-because it can depend on DB, Redis, VIP, or browser-facing routing that may still
-be converging. Set `librenms_app_probe_fail_deployment: true` only when you want
-the playbook to fail if the node-local full page does not return HTTP 2xx/3xx.
+node-local diagnostic. The full LibreNMS page probe is strict by default: it
+retries, restarts PHP-FPM and nginx once when needed, then fails the playbook if
+the node-local page does not return HTTP 2xx/3xx. Set
+`librenms_app_probe_fail_deployment: false` only when you deliberately want to
+collect a warning and continue.
 
 For HA deployments, the load-balancer role also probes the full application
 through the VIP after HAProxy and Keepalived are running. That VIP probe is
 strict by default so a deployment does not finish green while browsers receive
 `504 Gateway Time-out`. Set `librenms_vip_app_probe_fail_deployment: false` only
 if you want to collect the warning and continue.
+
+The routine VIP health requests connect directly to the VIP IP and therefore do
+not perform certificate hostname validation. When HAProxy TLS is enabled, the
+production-readiness playbook separately verifies the VIP certificate using the
+configured SNI hostname and the system trust store. Keep
+`librenms_production_readiness_verify_vip_tls: true` in production; set it to
+`false` only for a deliberately untrusted lab certificate.
 
 In HA mode, use the VIP or a DNS name pointing at the VIP as the normal Web UI
 entrypoint. Direct node-IP access is useful for backend health checks and
@@ -1786,7 +1841,7 @@ It runs a practical set of checks against:
 Lint locally:
 
 ```bash
-pip install ansible-core ansible-lint yamllint
+python3 -m pip install --requirement requirements-ci.txt
 ansible-galaxy collection install -r requirements.yml
 yamllint .
 ansible-lint

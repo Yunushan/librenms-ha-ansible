@@ -1,0 +1,918 @@
+---
+- name: Load OS-specific service variables
+  include_vars:
+    file: "{{ lookup('first_found', librenms_production_readiness_vars_lookup) }}"
+  vars:
+    librenms_production_readiness_vars_lookup:
+      files:
+        - "{{ ansible_distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Build production readiness host lists
+  set_fact:
+    librenms_production_active_db_nodes: >-
+      {{ groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes) }}
+    librenms_production_active_redis_nodes: >-
+      {{ groups.get('librenms_redis', []) | difference(librenms_inactive_inventory_nodes) }}
+    librenms_production_active_lb_nodes: >-
+      {{ groups.get('lb_nodes', []) | difference(librenms_inactive_inventory_nodes) }}
+    librenms_production_active_web_nodes: >-
+      {{ groups.get('librenms_web', groups.get('librenms_nodes', [])) | difference(librenms_inactive_inventory_nodes) }}
+
+- name: Determine effective HAProxy web health-check host for production probes
+  set_fact:
+    librenms_production_haproxy_web_check_host: >-
+      {{
+        librenms_haproxy_web_check_host
+        if librenms_haproxy_web_check_host | length > 0
+        else (
+          librenms_fqdn
+          if librenms_fqdn | length > 0
+          and librenms_fqdn != librenms_default_fqdn_placeholder
+          else (
+            librenms_vip_ip
+            if librenms_vip_enabled | bool and librenms_vip_ip | length > 0
+            else inventory_hostname
+          )
+        )
+      }}
+- name: Require production-safe HA configuration
+  assert:
+    that:
+      - librenms_app_key | length > 20
+      - not (librenms_app_key is search('CHANGE_ME'))
+      - librenms_db_password | length > 20
+      - not (librenms_db_password is search('CHANGE_ME'))
+      - librenms_mariadb_repository_mode == 'distro' or librenms_mariadb_upstream_repo_setup_checksum is match('^sha256:[A-Fa-f0-9]{64}$')
+      - not (librenms_mode == 'ha') or librenms_daily_global_lock_enabled | bool
+      - not (librenms_mode == 'ha') or librenms_daily_global_lock_backend == 'shared_file'
+      - not (librenms_mode == 'ha') or librenms_daily_global_lock_shared_file | length > 0
+      - not (librenms_mode == 'ha') or librenms_backup_offsite_enabled | bool
+      - not (librenms_mode == 'ha') or librenms_backup_offsite_required | bool
+      - not (librenms_mode == 'ha') or librenms_backup_offsite_rsync_target | length > 0
+      - not (librenms_mode == 'ha') or librenms_backup_include_database | bool
+      - not (librenms_mode == 'ha') or librenms_backup_include_config | bool
+      - not (librenms_mode == 'ha') or (librenms_backup_lock_timeout | int) > 0
+      - >-
+        not (librenms_mode == 'ha')
+        or librenms_backup_scheduled_host in librenms_production_active_db_nodes
+      - librenms_db_bind_address not in ['0.0.0.0', '::', '']
+      - not (librenms_mode == 'ha') or (librenms_production_active_db_nodes | length) >= 3
+      - >-
+        not (librenms_mode == 'ha' and librenms_redis_mode == 'sentinel')
+        or (librenms_production_active_redis_nodes | length) >= 3
+      - not (librenms_mode == 'ha') or (librenms_production_active_lb_nodes | length) >= 2
+      - not (librenms_mode == 'ha') or (librenms_production_active_web_nodes | length) >= 2
+    fail_msg: >-
+      Production readiness configuration is incomplete. Use vault-encrypted values
+      for all secrets, require an off-cluster DB/config backup target, retain
+      the HA daily database lock, bind MariaDB to a managed address, and provide
+      at least two web/LB nodes plus three Galera nodes for HA mode.
+  no_log: true
+  run_once: true
+
+- name: Verify HA maintenance lock uses the shared GlusterFS mount
+  command:
+    argv:
+      - findmnt
+      - -n
+      - -o
+      - FSTYPE
+      - --target
+      - "{{ librenms_daily_global_lock_shared_file }}"
+  register: librenms_production_shared_lock_filesystem
+  changed_when: false
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_daily_global_lock_backend == 'shared_file'
+
+- name: Require a GlusterFS-backed HA maintenance lock
+  assert:
+    that:
+      - librenms_production_shared_lock_filesystem.stdout | trim == 'fuse.glusterfs'
+    fail_msg: >-
+      The HA maintenance lock must live on the shared GlusterFS mount. It is
+      currently on {{ librenms_production_shared_lock_filesystem.stdout | trim
+      | default('an unavailable filesystem', true) }}.
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_daily_global_lock_backend == 'shared_file'
+
+- name: Verify each HA web node has a GlusterFS-backed RRD directory
+  command:
+    argv:
+      - findmnt
+      - -n
+      - -o
+      - FSTYPE
+      - --target
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_production_rrd_filesystem
+  changed_when: false
+  when:
+    - librenms_mode == 'ha'
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_production_active_web_nodes
+
+- name: Require a GlusterFS-backed RRD directory on every HA web node
+  assert:
+    that:
+      - librenms_production_rrd_filesystem.stdout | trim == 'fuse.glusterfs'
+    fail_msg: >-
+      The LibreNMS RRD directory on {{ inventory_hostname }} must be mounted
+      from GlusterFS. {{ librenms_gluster_mountpoint }} currently reports
+      {{ librenms_production_rrd_filesystem.stdout | trim
+      | default('an unavailable filesystem', true) }}.
+  when:
+    - librenms_mode == 'ha'
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_production_active_web_nodes
+
+- name: Schedule a simultaneous shared maintenance lock probe
+  set_fact:
+    librenms_production_shared_lock_probe_epoch: >-
+      {{
+        ansible_date_time.epoch | int
+        + librenms_production_readiness_shared_lock_probe_start_delay | int
+      }}
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_shared_lock | bool
+    - librenms_daily_global_lock_backend == 'shared_file'
+
+- name: Launch shared maintenance lock probes on every web node
+  command:
+    argv:
+      - /bin/sh
+      - -c
+      - >-
+        while [ "$(date +%s)" -lt "$1" ]; do sleep 1; done;
+        flock -n "$2" /bin/sh -c 'sleep "$1"; printf acquired' -- "$3"
+      - --
+      - "{{ librenms_production_shared_lock_probe_epoch }}"
+      - "{{ librenms_daily_global_lock_shared_file }}"
+      - "{{ librenms_production_readiness_shared_lock_probe_hold | int }}"
+  async: "{{ librenms_production_readiness_shared_lock_probe_timeout | int }}"
+  poll: 0
+  loop: "{{ librenms_production_active_web_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_production_shared_lock_jobs
+  changed_when: false
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_shared_lock | bool
+    - librenms_daily_global_lock_backend == 'shared_file'
+
+- name: Collect shared maintenance lock probe results
+  async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop: "{{ librenms_production_shared_lock_jobs.results | default([]) }}"
+  delegate_to: "{{ item.item }}"
+  register: librenms_production_shared_lock_probe_results
+  until: librenms_production_shared_lock_probe_results.finished | default(false)
+  retries: "{{ librenms_production_readiness_shared_lock_probe_timeout | int }}"
+  delay: 1
+  changed_when: false
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_shared_lock | bool
+    - librenms_daily_global_lock_backend == 'shared_file'
+
+- name: Require exactly one shared maintenance lock probe winner
+  assert:
+    that:
+      - >-
+        (
+          librenms_production_shared_lock_probe_results.results
+          | selectattr('rc', 'equalto', 0)
+          | list
+          | length
+        ) == 1
+      - >-
+        (
+          librenms_production_shared_lock_probe_results.results
+          | selectattr('stdout', 'equalto', 'acquired')
+          | list
+          | length
+        ) == 1
+    fail_msg: >-
+      The shared HA maintenance lock did not exclude every other web node.
+      Check GlusterFS locking before allowing automatic LibreNMS updates.
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_shared_lock | bool
+    - librenms_daily_global_lock_backend == 'shared_file'
+
+- name: Gather production readiness service facts
+  service_facts:
+
+- name: Require active LibreNMS runtime services
+  assert:
+    that:
+      - ansible_facts.services['librenms-scheduler.timer'].state == 'running'
+      - ansible_facts.services['librenms-daily.timer'].state == 'running'
+    fail_msg: >-
+      LibreNMS scheduler or daily maintenance timer is not active on
+      {{ inventory_hostname }}.
+  when:
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Require active HA database service
+  assert:
+    that:
+      - ansible_facts.services[librenms_mariadb_service_name + '.service'].state == 'running'
+    fail_msg: "MariaDB is not active on {{ inventory_hostname }}."
+  when:
+    - librenms_mode == 'ha'
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Query Galera health on every active database node
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status', 'wsrep_ready', 'wsrep_local_state_comment',
+        'wsrep_cluster_size');
+  register: librenms_production_galera_status
+  changed_when: false
+  when:
+    - librenms_mode == 'ha'
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Require every Galera node to be in the primary synced component
+  assert:
+    that:
+      - librenms_production_galera_status.rc == 0
+      - librenms_production_galera_status.stdout is search('wsrep_cluster_status[ \\t]+Primary')
+      - librenms_production_galera_status.stdout is search('wsrep_ready[ \\t]+ON')
+      - librenms_production_galera_status.stdout is search('wsrep_local_state_comment[ \\t]+Synced')
+      - >-
+        librenms_production_galera_status.stdout is search(
+        'wsrep_cluster_size[ \\t]+' ~
+        ((groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes) | length) | string)
+        )
+    fail_msg: >-
+      Galera is not fully ready on {{ inventory_hostname }}. Every production
+      database node must be Primary, wsrep_ready, Synced, and report the
+      expected active cluster size.
+  when:
+    - librenms_mode == 'ha'
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Require active Galera HAProxy readiness agent sockets
+  assert:
+    that:
+      - ansible_facts.services[librenms_galera_readiness_agent_socket_unit].state == 'running'
+    fail_msg: >-
+      The Galera readiness agent socket is not active on {{ inventory_hostname }}.
+      HAProxy must use the agent so a MariaDB listener that is not Primary/Synced
+      cannot receive LibreNMS database traffic.
+  when:
+    - librenms_mode == 'ha'
+    - librenms_galera_readiness_agent_enabled | bool
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Query the local Galera HAProxy readiness agent
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_haproxy_timeout_check }}"
+      - /bin/bash
+      - -c
+      - >-
+        exec 3<>/dev/tcp/"$1"/"$2";
+        IFS= read -r response <&3;
+        test "${response}" = 'up'
+      - --
+      - "{{ ansible_host | default(ansible_default_ipv4.address) }}"
+      - "{{ librenms_galera_readiness_agent_port }}"
+  register: librenms_production_galera_readiness_agent
+  changed_when: false
+  when:
+    - librenms_mode == 'ha'
+    - librenms_galera_readiness_agent_enabled | bool
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Require every Galera readiness agent to report an eligible backend
+  assert:
+    that:
+      - librenms_production_galera_readiness_agent.rc == 0
+    fail_msg: >-
+      The Galera readiness agent on {{ inventory_hostname }} did not return up.
+      HAProxy must not route database connections to this node until it reports
+      Primary/Synced readiness.
+  when:
+    - librenms_mode == 'ha'
+    - librenms_galera_readiness_agent_enabled | bool
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Require HAProxy database backends to use Galera readiness agent checks
+  command:
+    argv:
+      - grep
+      - -Fq
+      - "agent-check agent-port {{ librenms_galera_readiness_agent_port }}"
+      - /etc/haproxy/haproxy.cfg
+  changed_when: false
+  when:
+    - librenms_mode == 'ha'
+    - librenms_galera_readiness_agent_enabled | bool
+    - inventory_hostname in (groups.get('lb_nodes', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Prove fresh LibreNMS database connections through the HAProxy VIP
+  shell: |-
+    set -o pipefail
+    for attempt in $(seq 1 {{ librenms_production_readiness_db_proxy_probe_count | int }}); do
+      mysql --protocol=TCP --connect-timeout=5 \
+        --host="{{ librenms_vip_ip }}" \
+        --port="{{ librenms_haproxy_db_port }}" \
+        --user="{{ librenms_db_user }}" \
+        --batch --skip-column-names --execute='SELECT 1' | grep -qx '1'
+    done
+  args:
+    executable: /bin/bash
+  environment:
+    MYSQL_PWD: "{{ librenms_db_password }}"
+  no_log: true
+  changed_when: false
+  when:
+    - librenms_mode == 'ha'
+    - librenms_vip_enabled | bool
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Require active HA cache services
+  assert:
+    that:
+      - ansible_facts.services[librenms_redis_service_name + '.service'].state == 'running'
+      - ansible_facts.services[librenms_redis_sentinel_service_name_effective + '.service'].state == 'running'
+    fail_msg: >-
+      Redis or Redis Sentinel is not active on {{ inventory_hostname }}.
+  when:
+    - librenms_mode == 'ha'
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname in (groups.get('librenms_redis', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Query every Redis Sentinel for its master endpoint
+  no_log: true
+  command: >-
+    redis-cli -h 127.0.0.1 -p 26379
+    {% if librenms_redis_sentinel_username | length > 0 %}
+    --user {{ librenms_redis_sentinel_username | quote }}
+    {% endif %}
+    SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }}
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+  loop: "{{ librenms_production_active_redis_nodes }}"
+  delegate_to: "{{ item }}"
+  ignore_unreachable: true
+  register: librenms_production_redis_sentinel_queries
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_mode == 'ha'
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_production_active_redis_nodes | last)
+
+- name: Initialize Redis Sentinel production readiness reports
+  set_fact:
+    librenms_production_redis_master_reports: []
+  no_log: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_production_active_redis_nodes | last)
+
+- name: Record reachable Redis Sentinel master reports
+  set_fact:
+    librenms_production_redis_master_reports: >-
+      {{
+        librenms_production_redis_master_reports
+        + [item.stdout_lines[0] ~ ':' ~ item.stdout_lines[1]]
+      }}
+  no_log: true
+  loop: "{{ librenms_production_redis_sentinel_queries.results | default([]) }}"
+  when:
+    - librenms_mode == 'ha'
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_production_active_redis_nodes | last)
+    - item.rc == 0
+    - (item.stdout_lines | default([]) | length) >= 2
+
+- name: Require Redis Sentinel quorum agreement
+  assert:
+    that:
+      - >-
+        (librenms_production_redis_master_reports | length)
+        >= (librenms_redis_quorum | int)
+      - (librenms_production_redis_master_reports | unique | list | length) == 1
+      - >-
+        (librenms_production_redis_master_reports | first | default(''))
+        is match('^[^:]+:[0-9]+$')
+    fail_msg: >-
+      Redis Sentinel does not have quorum agreement on one usable master
+      endpoint. Run playbooks/site.yml to repair the cache cluster, then rerun
+      this production gate.
+  no_log: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_production_active_redis_nodes | last)
+
+- name: Set Redis Sentinel consensus endpoint for readiness write check
+  set_fact:
+    librenms_production_redis_master_host: >-
+      {{ (librenms_production_redis_master_reports | first).split(':')[0] }}
+    librenms_production_redis_master_port: >-
+      {{ (librenms_production_redis_master_reports | first).split(':')[1] }}
+  no_log: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_production_active_redis_nodes | last)
+
+- name: Require Redis Sentinel consensus master to accept a cache write
+  no_log: true
+  command: >-
+    redis-cli -h {{ librenms_production_redis_master_host | quote }}
+    -p {{ librenms_production_redis_master_port | quote }}
+    {% if librenms_redis_username | length > 0 %}
+    --user {{ librenms_redis_username | quote }}
+    {% endif %}
+    SET librenms:production-readiness {{ inventory_hostname | quote }} EX 30
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_production_redis_write_check
+  changed_when: false
+  until: >-
+    (librenms_production_redis_write_check.stdout | default('') | trim) == 'OK'
+  retries: "{{ librenms_redis_sentinel_consensus_retries | int }}"
+  delay: "{{ librenms_redis_sentinel_consensus_delay | int }}"
+  when:
+    - librenms_mode == 'ha'
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_production_active_redis_nodes | last)
+
+- name: Run LibreNMS validation on each application node
+  command:
+    argv:
+      - runuser
+      - -u
+      - librenms
+      - --
+      - "{{ librenms_install_dir }}/validate.php"
+  register: librenms_production_validate
+  changed_when: false
+  failed_when: "'[FAIL]' in librenms_production_validate.stdout"
+  when:
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Require LibreNMS application validation dependencies
+  assert:
+    that:
+      - "'[OK]    Database Connected' in librenms_production_validate.stdout"
+      - "'[OK]    Redis is functional' in librenms_production_validate.stdout"
+      - "'[OK]    Dispatcher Service is enabled' in librenms_production_validate.stdout"
+      - "'[OK]    Connected to rrdcached' in librenms_production_validate.stdout"
+    fail_msg: >-
+      LibreNMS validation did not confirm database, Redis, dispatcher, and RRD
+      dependencies on {{ inventory_hostname }}. Inspect validate.php output and
+      rerun playbooks/site.yml before declaring production readiness.
+  when:
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+
+- name: Query LibreNMS revision on every application node
+  command:
+    argv:
+      - runuser
+      - -u
+      - librenms
+      - --
+      - git
+      - -C
+      - "{{ librenms_install_dir }}"
+      - rev-parse
+      - HEAD
+  loop: "{{ groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_production_git_revisions
+  changed_when: false
+  run_once: true
+
+- name: Require one LibreNMS revision across every application node
+  assert:
+    that:
+      - >-
+        (
+          librenms_production_git_revisions.results
+          | map(attribute='stdout')
+          | map('trim')
+          | unique
+          | list
+          | length
+        ) == 1
+    fail_msg: >-
+      LibreNMS application nodes are running different Git revisions. Finish a
+      controlled cluster update and rerun the gate before accepting browser
+      traffic from every backend.
+  run_once: true
+
+- name: Query LibreNMS working-tree state on every application node
+  command:
+    argv:
+      - runuser
+      - -u
+      - librenms
+      - --
+      - git
+      - -C
+      - "{{ librenms_install_dir }}"
+      - status
+      - --porcelain
+  loop: "{{ groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes) }}"
+  delegate_to: "{{ item }}"
+  register: librenms_production_git_worktrees
+  changed_when: false
+  run_once: true
+
+- name: Require clean LibreNMS working trees on every application node
+  assert:
+    that:
+      - >-
+        (
+          librenms_production_git_worktrees.results
+          | map(attribute='stdout')
+          | map('trim')
+          | select
+          | list
+          | length
+        ) == 0
+    fail_msg: >-
+      One or more LibreNMS working trees contain uncommitted changes. Keep
+      local application changes in a reviewed deployment branch or revert them
+      before enabling unattended updates.
+  run_once: true
+
+- name: Verify VIP TLS certificate with its configured SNI hostname
+  command:
+    argv:
+      - python3
+      - -c
+      - >-
+        import os, socket, ssl; raw = socket.create_connection(
+        (os.environ['LIBRENMS_TLS_VIP'], int(os.environ['LIBRENMS_TLS_PORT'])),
+        timeout=10); tls = ssl.create_default_context().wrap_socket(
+        raw, server_hostname=os.environ['LIBRENMS_TLS_SERVER_NAME']);
+        print(tls.version()); tls.close()
+  environment:
+    LIBRENMS_TLS_VIP: "{{ librenms_vip_ip }}"
+    LIBRENMS_TLS_PORT: "{{ librenms_haproxy_https_port | string }}"
+    LIBRENMS_TLS_SERVER_NAME: "{{ librenms_production_haproxy_web_check_host }}"
+  register: librenms_production_vip_tls_verify
+  changed_when: false
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_vip_enabled | bool
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_production_readiness_verify_vip_tls | bool
+
+- name: Require a trusted VIP TLS certificate
+  assert:
+    that:
+      - librenms_production_vip_tls_verify.rc == 0
+    fail_msg: >-
+      TLS certificate verification failed for the LibreNMS VIP using SNI host
+      {{ librenms_production_haproxy_web_check_host }}. Install a trusted
+      certificate whose DNS names include this host, then rerun the production
+      readiness gate.
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_vip_enabled | bool
+    - librenms_haproxy_tls_enabled | bool
+    - librenms_production_readiness_verify_vip_tls | bool
+
+- name: Verify VIP PHP-FPM health endpoint
+  uri:
+    url: >-
+      {{ 'https' if librenms_haproxy_tls_enabled | bool else 'http' }}://{{ librenms_vip_ip }}{{
+      ':' ~ librenms_haproxy_https_port
+      if librenms_haproxy_tls_enabled | bool and librenms_haproxy_https_port | int != 443
+      else (
+        ':' ~ librenms_haproxy_web_port
+        if not librenms_haproxy_tls_enabled | bool and librenms_haproxy_web_port | int != 80
+        else ''
+      )
+      }}{{ librenms_php_fpm_ping_path }}
+    headers:
+      Host: "{{ librenms_production_haproxy_web_check_host }}"
+    method: GET
+    return_content: true
+    status_code: 200
+    timeout: 10
+    validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
+  register: librenms_production_vip_php_fpm_ping
+  changed_when: false
+  retries: "{{ librenms_production_readiness_vip_probe_retries | int }}"
+  delay: "{{ librenms_production_readiness_vip_probe_delay | int }}"
+  until:
+    - librenms_production_vip_php_fpm_ping.status | default(0) == 200
+    - "'pong' in (librenms_production_vip_php_fpm_ping.content | default(''))"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_vip_enabled | bool
+
+- name: Verify LibreNMS application response through the VIP
+  uri:
+    url: >-
+      {{ 'https' if librenms_haproxy_tls_enabled | bool else 'http' }}://{{ librenms_vip_ip }}{{
+      ':' ~ librenms_haproxy_https_port
+      if librenms_haproxy_tls_enabled | bool and librenms_haproxy_https_port | int != 443
+      else (
+        ':' ~ librenms_haproxy_web_port
+        if not librenms_haproxy_tls_enabled | bool and librenms_haproxy_web_port | int != 80
+        else ''
+      )
+      }}{{ librenms_app_probe_path }}
+    headers:
+      Host: "{{ librenms_production_haproxy_web_check_host }}"
+    method: GET
+    status_code: "{{ librenms_app_probe_success_statuses }}"
+    timeout: "{{ librenms_app_probe_timeout | int }}"
+    follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
+    validate_certs: "{{ librenms_vip_app_probe_validate_certs | bool }}"
+  register: librenms_production_vip_app_probe
+  changed_when: false
+  retries: "{{ librenms_production_readiness_vip_probe_retries | int }}"
+  delay: "{{ librenms_production_readiness_vip_probe_delay | int }}"
+  until:
+    - >-
+      (librenms_production_vip_app_probe.status | default(0) | int)
+      in librenms_app_probe_success_statuses
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_vip_enabled | bool
+
+- name: Prove the scheduled backup also reaches the offsite target
+  command:
+    argv:
+      - "{{ librenms_backup_wrapper_path }}"
+      - "{{ librenms_production_readiness_backup_category }}"
+  register: librenms_production_offsite_backup
+  changed_when: true
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Record the generated production readiness backup directory
+  set_fact:
+    librenms_production_backup_dir: >-
+      {{
+        librenms_production_offsite_backup.stdout
+        | regex_findall('backup completed at (.+)')
+        | last
+        | default('')
+      }}
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Require a generated production readiness backup directory
+  assert:
+    that:
+      - librenms_production_backup_dir | length > 0
+    fail_msg: >-
+      The scheduled backup completed without reporting its backup directory, so
+      its manifest and artifacts cannot be verified.
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Read the production readiness backup manifest
+  slurp:
+    src: "{{ librenms_production_backup_dir }}/{{ librenms_backup_manifest_filename }}"
+  register: librenms_production_backup_manifest_raw
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Parse the production readiness backup manifest
+  set_fact:
+    librenms_production_backup_manifest: >-
+      {{ librenms_production_backup_manifest_raw.content | b64decode | from_yaml }}
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Require database and configuration artifacts in the generated backup
+  assert:
+    that:
+      - librenms_production_backup_manifest.database.included | default(false) | bool
+      - librenms_production_backup_manifest.database.file | default('') | length > 0
+      - librenms_production_backup_manifest.config.included | default(false) | bool
+      - librenms_production_backup_manifest.config.file | default('') | length > 0
+    fail_msg: >-
+      The generated backup manifest does not contain the required database and
+      configuration artifacts.
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Calculate generated database backup SHA-256 checksum
+  stat:
+    path: >-
+      {{ librenms_production_backup_dir }}/{{
+      librenms_production_backup_manifest.database.file }}
+    checksum_algorithm: sha256
+  register: librenms_production_database_backup_stat
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Calculate generated configuration backup SHA-256 checksum
+  stat:
+    path: >-
+      {{ librenms_production_backup_dir }}/{{
+      librenms_production_backup_manifest.config.file }}
+    checksum_algorithm: sha256
+  register: librenms_production_config_backup_stat
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Require generated backup manifest SHA-256 checksums to match
+  assert:
+    that:
+      - >-
+        (librenms_production_backup_manifest.database.checksum_sha256
+        | default('')) is match('^[A-Fa-f0-9]{64}$')
+      - >-
+        librenms_production_database_backup_stat.stat.checksum | default('')
+        == librenms_production_backup_manifest.database.checksum_sha256
+      - >-
+        (librenms_production_backup_manifest.config.checksum_sha256
+        | default('')) is match('^[A-Fa-f0-9]{64}$')
+      - >-
+        librenms_production_config_backup_stat.stat.checksum | default('')
+        == librenms_production_backup_manifest.config.checksum_sha256
+    fail_msg: >-
+      The production backup artifact checksums are missing or do not match the
+      manifest. Do not accept the offsite backup until a new verified backup
+      completes successfully.
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Verify generated database backup gzip integrity
+  command:
+    argv:
+      - gzip
+      - -t
+      - >-
+        {{ librenms_production_backup_dir }}/{{
+        librenms_production_backup_manifest.database.file }}
+  changed_when: false
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Define disposable database restore verification name
+  set_fact:
+    librenms_production_restore_database: >-
+      librenms_restore_verify_{{ ansible_date_time.epoch }}
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_production_readiness_verify_database_restore | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Verify generated database backup can be imported safely
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_production_readiness_verify_database_restore | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+  block:
+    - name: Create disposable database restore target
+      ansible.mysql.mysql_db:
+        name: "{{ librenms_production_restore_database }}"
+        state: present
+        login_unix_socket: >-
+          {{
+            hostvars[librenms_backup_scheduled_host].librenms_mariadb_socket
+            | default(librenms_mariadb_socket)
+          }}
+        check_implicit_admin: true
+      delegate_to: "{{ librenms_backup_scheduled_host }}"
+
+    - name: Import generated database backup into disposable target
+      ansible.mysql.mysql_db:
+        name: "{{ librenms_production_restore_database }}"
+        state: import
+        target: >-
+          {{ librenms_production_backup_dir }}/{{
+          librenms_production_backup_manifest.database.file }}
+        login_unix_socket: >-
+          {{
+            hostvars[librenms_backup_scheduled_host].librenms_mariadb_socket
+            | default(librenms_mariadb_socket)
+          }}
+        check_implicit_admin: true
+      delegate_to: "{{ librenms_backup_scheduled_host }}"
+  always:
+    - name: Remove disposable database restore target
+      ansible.mysql.mysql_db:
+        name: "{{ librenms_production_restore_database }}"
+        state: absent
+        login_unix_socket: >-
+          {{
+            hostvars[librenms_backup_scheduled_host].librenms_mariadb_socket
+            | default(librenms_mariadb_socket)
+          }}
+        check_implicit_admin: true
+      delegate_to: "{{ librenms_backup_scheduled_host }}"
+      when: librenms_production_restore_database | default('') | length > 0
+
+- name: Verify generated configuration backup archive integrity
+  command:
+    argv:
+      - tar
+      - -tzf
+      - >-
+        {{ librenms_production_backup_dir }}/{{
+        librenms_production_backup_manifest.config.file }}
+  changed_when: false
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
+- name: Report successful production readiness verification
+  debug:
+    msg: >-
+      Production readiness checks passed: Galera, Redis Sentinel, LibreNMS
+      validation, VIP routing, network TCP matrix, and required offsite backup
+      with database/config archive integrity plus a disposable database restore.
+  run_once: true

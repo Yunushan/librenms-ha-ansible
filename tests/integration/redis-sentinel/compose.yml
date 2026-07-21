@@ -1,0 +1,80 @@
+---
+name: librenms-redis-sentinel-integration
+
+x-redis-node: &redis-node
+  image: redis:7.4.9-alpine
+
+x-redis-command: &redis-command
+  - redis-server
+  - --appendonly
+  - "no"
+  - --save
+  - ""
+  - --protected-mode
+  - "no"
+  - --bind
+  - 0.0.0.0
+
+x-sentinel: &sentinel
+  image: redis:7.4.9-alpine
+  command:
+    - sh
+    - -ec
+    - |
+      cat >/tmp/sentinel.conf <<'EOF'
+      bind 0.0.0.0
+      port 26379
+      sentinel monitor mymaster redis-1 6379 2
+      sentinel down-after-milliseconds mymaster 1000
+      sentinel failover-timeout mymaster 10000
+      sentinel parallel-syncs mymaster 1
+      sentinel resolve-hostnames mymaster yes
+      sentinel announce-hostnames mymaster yes
+      EOF
+      exec redis-sentinel /tmp/sentinel.conf
+
+services:
+  redis-1:
+    <<: *redis-node
+    command: *redis-command
+
+  redis-2:
+    <<: *redis-node
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+      - --bind
+      - 0.0.0.0
+      - --replicaof
+      - redis-1
+      - "6379"
+
+  redis-3:
+    <<: *redis-node
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+      - --bind
+      - 0.0.0.0
+      - --replicaof
+      - redis-1
+      - "6379"
+
+  sentinel-1:
+    <<: *sentinel
+
+  sentinel-2:
+    <<: *sentinel
+
+  sentinel-3:
+    <<: *sentinel

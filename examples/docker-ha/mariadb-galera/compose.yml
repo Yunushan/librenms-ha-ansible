@@ -1,7 +1,7 @@
 ---
 services:
   mariadb-galera:
-    image: ${MARIADB_GALERA_IMAGE:-wodby/mariadb:galera}
+    image: ${MARIADB_GALERA_IMAGE:?Set MARIADB_GALERA_IMAGE to an approved immutable image digest in .env}
     container_name: mariadb-galera
     network_mode: host
     restart: unless-stopped

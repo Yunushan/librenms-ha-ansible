@@ -16,6 +16,7 @@ Group={{ librenms_group }}
 WorkingDirectory={{ librenms_install_dir }}
 Environment=HOME={{ librenms_install_dir }}
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec={{ librenms_daily_service_timeout }}
 {% if librenms_dispatcher_runtime_wait_enabled | bool %}
 ExecStartPre={{ librenms_dispatcher_runtime_wait_path }}
 {% endif %}
@@ -23,4 +24,7 @@ ExecStartPre={{ librenms_dispatcher_runtime_wait_path }}
 ExecStart={{ librenms_daily_self_heal_path }}
 {% else %}
 ExecStart=/bin/bash {{ librenms_install_dir }}/daily.sh
+{% endif %}
+{% if librenms_daily_ha_drain_enabled | bool %}
+ExecStopPost=/usr/bin/rm -f -- {{ librenms_daily_ha_drain_path }}
 {% endif %}

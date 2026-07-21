@@ -682,6 +682,87 @@
           {{ librenms_failover_test_redis_master_after.stdout_lines[1] }}
       run_once: true
 
+    - name: Query every Redis Sentinel after master failover
+      no_log: true
+      command: >-
+        redis-cli -h 127.0.0.1 -p 26379
+        {% if librenms_redis_sentinel_username | length > 0 %}
+        --user {{ librenms_redis_sentinel_username | quote }}
+        {% endif %}
+        SENTINEL get-master-addr-by-name {{ librenms_redis_sentinel_service | quote }}
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+      delegate_to: "{{ item }}"
+      loop: "{{ librenms_failover_test_active_redis_nodes }}"
+      register: librenms_failover_test_redis_sentinel_reports
+      changed_when: false
+      retries: "{{ librenms_failover_test_redis_failover_retries | int }}"
+      delay: "{{ librenms_failover_test_redis_failover_delay | int }}"
+      until:
+        - librenms_failover_test_redis_sentinel_reports.rc == 0
+        - >-
+          (librenms_failover_test_redis_sentinel_reports.stdout_lines | length)
+          >= 2
+        - >-
+          librenms_failover_test_redis_sentinel_reports.stdout_lines[0]
+          == librenms_failover_test_redis_new_master_host
+        - >-
+          librenms_failover_test_redis_sentinel_reports.stdout_lines[1]
+          == librenms_failover_test_redis_new_master_port
+      run_once: true
+
+    - name: Initialize Redis Sentinel master agreement reports
+      set_fact:
+        librenms_failover_test_redis_master_reports: []
+      no_log: true
+      run_once: true
+
+    - name: Record Redis Sentinel master agreement reports
+      set_fact:
+        librenms_failover_test_redis_master_reports: >-
+          {{
+            librenms_failover_test_redis_master_reports
+            + [item.stdout_lines[0] ~ ':' ~ item.stdout_lines[1]]
+          }}
+      no_log: true
+      loop: "{{ librenms_failover_test_redis_sentinel_reports.results }}"
+      when:
+        - item.rc == 0
+        - (item.stdout_lines | length) >= 2
+      run_once: true
+
+    - name: Require every Redis Sentinel to agree on the new master
+      assert:
+        that:
+          - >-
+            (librenms_failover_test_redis_sentinel_reports.results | length)
+            == (librenms_failover_test_active_redis_nodes | length)
+          - >-
+            (
+              librenms_failover_test_redis_sentinel_reports.results
+              | selectattr('rc', 'equalto', 0)
+              | list
+              | length
+            ) == (librenms_failover_test_active_redis_nodes | length)
+          - >-
+            (librenms_failover_test_redis_master_reports | length)
+            == (librenms_failover_test_active_redis_nodes | length)
+          - >-
+            (librenms_failover_test_redis_master_reports | unique | list | length)
+            == 1
+          - >-
+            (librenms_failover_test_redis_master_reports | first)
+            == (
+              librenms_failover_test_redis_new_master_host
+              ~ ':' ~ librenms_failover_test_redis_new_master_port
+            )
+        fail_msg: >-
+          Redis Sentinels do not all agree on the promoted master after the
+          controlled failover. Do not accept cache traffic until consensus is
+          restored.
+      no_log: true
+      run_once: true
+
     - name: Verify new Redis master accepts writes
       no_log: true
       command: >-
@@ -724,6 +805,30 @@
       when: librenms_failover_test_restore_services | bool
       run_once: true
 
+    - name: Require restored Redis node to accept connections
+      no_log: true
+      command: >-
+        redis-cli -h {{ (hostvars[librenms_failover_test_redis_master_inventory_host].ansible_host
+        | default(librenms_failover_test_redis_master_inventory_host)) | quote }}
+        -p 6379
+        {% if librenms_redis_username | length > 0 %}
+        --user {{ librenms_redis_username | quote }}
+        {% endif %}
+        PING
+      environment:
+        REDISCLI_AUTH: "{{ librenms_redis_password }}"
+      delegate_to: "{{ librenms_failover_test_redis_query_host_effective }}"
+      register: librenms_failover_test_redis_restored_ping
+      changed_when: false
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - (librenms_failover_test_redis_restored_ping.stdout | trim) == 'PONG'
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_failover_test_redis_master_inventory_host | length > 0
+      run_once: true
+
 - name: Determine Galera remaining nodes for failover test
   set_fact:
     librenms_failover_test_galera_remaining_nodes: >-
@@ -733,6 +838,82 @@
       }}
   when: "'galera_node' in librenms_failover_test_cases"
   run_once: true
+
+- name: Require every Galera node to be synced before fault injection
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - >-
+        --socket={{ hostvars[item].librenms_mariadb_socket
+        | default(librenms_mariadb_socket) }}
+      - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment',
+            'wsrep_cluster_size');
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_failover_test_active_db_nodes }}"
+  register: librenms_failover_test_galera_baseline_status
+  changed_when: false
+  run_once: true
+  when: "'galera_node' in librenms_failover_test_cases"
+
+- name: Require a fully synced Galera cluster before fault injection
+  assert:
+    that:
+      - >-
+        (librenms_failover_test_galera_baseline_status.results | length)
+        == (librenms_failover_test_active_db_nodes | length)
+      - >-
+        (
+          librenms_failover_test_galera_baseline_status.results
+          | selectattr('rc', 'equalto', 0)
+          | list
+          | length
+        ) == (librenms_failover_test_active_db_nodes | length)
+      - >-
+        (
+          librenms_failover_test_galera_baseline_status.results
+          | selectattr('stdout', 'search', 'wsrep_cluster_status[ \\t]+Primary')
+          | list
+          | length
+        ) == (librenms_failover_test_active_db_nodes | length)
+      - >-
+        (
+          librenms_failover_test_galera_baseline_status.results
+          | selectattr('stdout', 'search', 'wsrep_ready[ \\t]+ON')
+          | list
+          | length
+        ) == (librenms_failover_test_active_db_nodes | length)
+      - >-
+        (
+          librenms_failover_test_galera_baseline_status.results
+          | selectattr(
+              'stdout',
+              'search',
+              'wsrep_local_state_comment[ \\t]+Synced'
+            )
+          | list
+          | length
+        ) == (librenms_failover_test_active_db_nodes | length)
+      - >-
+        (
+          librenms_failover_test_galera_baseline_status.results
+          | selectattr(
+              'stdout',
+              'search',
+              'wsrep_cluster_size[ \\t]+'
+              ~ (librenms_failover_test_active_db_nodes | length | string)
+            )
+          | list
+          | length
+        ) == (librenms_failover_test_active_db_nodes | length)
+    fail_msg: >-
+      Galera is not fully Primary/Synced at the expected cluster size. Repair
+      the cluster before intentionally stopping a member for this drill.
+  run_once: true
+  when: "'galera_node' in librenms_failover_test_cases"
 
 - name: Test Galera node failover
   when: "'galera_node' in librenms_failover_test_cases"
@@ -764,7 +945,8 @@
           - -Nse
           - >-
             SHOW GLOBAL STATUS WHERE Variable_name IN
-            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment',
+            'wsrep_cluster_size');
       delegate_to: "{{ item }}"
       loop: "{{ librenms_failover_test_galera_remaining_nodes }}"
       register: librenms_failover_test_galera_remaining_status
@@ -777,6 +959,38 @@
         - "'Primary' in librenms_failover_test_galera_remaining_status.stdout"
         - "'wsrep_ready' in librenms_failover_test_galera_remaining_status.stdout"
         - "'ON' in librenms_failover_test_galera_remaining_status.stdout"
+        - "'wsrep_local_state_comment' in librenms_failover_test_galera_remaining_status.stdout"
+        - "'Synced' in librenms_failover_test_galera_remaining_status.stdout"
+        - >-
+          'wsrep_cluster_size'
+          ~ (librenms_failover_test_galera_remaining_nodes | length | string)
+          in librenms_failover_test_galera_remaining_status.stdout
+      run_once: true
+
+    - name: Require every Galera survivor to be synced after node loss
+      assert:
+        that:
+          - >-
+            (
+              librenms_failover_test_galera_remaining_status.results
+              | selectattr('rc', 'equalto', 0)
+              | list
+              | length
+            ) == (librenms_failover_test_galera_remaining_nodes | length)
+          - >-
+            (
+              librenms_failover_test_galera_remaining_status.results
+              | selectattr(
+                  'stdout',
+                  'search',
+                  'wsrep_local_state_comment[ \\t]+Synced'
+                )
+              | list
+              | length
+            ) == (librenms_failover_test_galera_remaining_nodes | length)
+        fail_msg: >-
+          A surviving Galera node was not Synced after the selected member was
+          stopped. Do not continue maintenance until every survivor is synced.
       run_once: true
 
     - name: Verify HAProxy database frontend accepts SQL
@@ -835,7 +1049,8 @@
           - -Nse
           - >-
             SHOW GLOBAL STATUS WHERE Variable_name IN
-            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment',
+            'wsrep_cluster_size');
       delegate_to: "{{ librenms_failover_test_galera_host_effective }}"
       register: librenms_failover_test_galera_restored_status
       changed_when: false
@@ -845,9 +1060,45 @@
         - librenms_failover_test_galera_restored_status.rc == 0
         - "'wsrep_ready' in librenms_failover_test_galera_restored_status.stdout"
         - "'ON' in librenms_failover_test_galera_restored_status.stdout"
+        - "'wsrep_cluster_status' in librenms_failover_test_galera_restored_status.stdout"
+        - "'Primary' in librenms_failover_test_galera_restored_status.stdout"
+        - "'wsrep_local_state_comment' in librenms_failover_test_galera_restored_status.stdout"
+        - "'Synced' in librenms_failover_test_galera_restored_status.stdout"
+        - >-
+          'wsrep_cluster_size'
+          ~ (librenms_failover_test_active_db_nodes | length | string)
+          in librenms_failover_test_galera_restored_status.stdout
       when:
         - librenms_failover_test_restore_services | bool
         - librenms_failover_test_galera_host_effective | length > 0
+      run_once: true
+
+    - name: Verify HAProxy database frontend after Galera restore
+      no_log: true
+      command:
+        argv:
+          - mysql
+          - -h
+          - "{{ librenms_vip_ip }}"
+          - -P
+          - "{{ librenms_haproxy_db_port | string }}"
+          - -u
+          - "{{ librenms_db_user }}"
+          - "{{ librenms_db_name }}"
+          - -Nse
+          - SELECT 1;
+      environment:
+        MYSQL_PWD: "{{ librenms_db_password }}"
+      delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+      register: librenms_failover_test_galera_restored_vip_sql
+      changed_when: false
+      retries: "{{ librenms_failover_test_probe_retries | int }}"
+      delay: "{{ librenms_failover_test_probe_delay | int }}"
+      until:
+        - (librenms_failover_test_galera_restored_vip_sql.stdout | trim) == '1'
+      when:
+        - librenms_failover_test_restore_services | bool
+        - librenms_vip_enabled | bool
       run_once: true
 
 - name: Report HA failover test summary

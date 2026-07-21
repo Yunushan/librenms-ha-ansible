@@ -221,12 +221,12 @@ that should be chosen by operators at runtime.
 | LibreNMS HA - Diagnostics | `playbooks/diagnostics.yml` | Manual or failure workflow | Optional `librenms_diagnostics_log_lines`, `librenms_diagnostics_journal_lines`, `librenms_diagnostics_keep_remote`, `librenms_diagnostics_fetch` | Collect before repeated recovery attempts. Archives are written to `diagnostics/<run-id>/` on the controller unless fetching is disabled. |
 | LibreNMS HA - Validate | `playbooks/validate.yml` | Manual and workflow step | None by default | Application-level validation after changes, maintenance, or reboot convergence. |
 | LibreNMS HA - Backup | `playbooks/backup.yml` | Scheduled and manual | Optional `librenms_backup_include_rrd`, `librenms_backup_host`, `librenms_backup_app_host`, `librenms_backup_rrd_host` | Schedule before maintenance windows. Keep at least one copy outside the HA cluster. |
-| LibreNMS HA - Restore Test | `playbooks/restore-test.yml` | Manual | Required `librenms_restore_test_backup_dir` | Verifies a backup artifact without restoring it. |
+| LibreNMS HA - Restore Test | `playbooks/restore-test.yml` | Manual; optional managed weekly schedule | Manual runs require `librenms_restore_test_backup_dir`. The managed schedule sets `librenms_restore_test_select_latest: true` and a backup category. | Validates archives and imports the database dump into a disposable database, then removes it. |
 | LibreNMS HA - Cluster Converge | `playbooks/cluster.yml` | Manual | None by default | Use after inventory/config changes or package/template drift. Do not schedule. |
 | LibreNMS HA - Post Reboot | `playbooks/post-reboot.yml` | Manual | None by default | Use after full power loss, hypervisor maintenance, or restart of all nodes. |
 | LibreNMS HA - Maintenance Enter | `playbooks/maintenance-enter.yml` | Manual with confirmation | Required `librenms_maintenance_target`; required `librenms_maintenance_confirm: true` | Drains one node before shutdown or OS work. Restrict to senior operators. |
 | LibreNMS HA - Maintenance Exit | `playbooks/maintenance-exit.yml` | Manual with confirmation | Required `librenms_maintenance_target`; required `librenms_maintenance_confirm: true` | Rejoins one node and verifies the remaining HA layer. |
-| LibreNMS HA - Failover Drill | `playbooks/ha-failover-test.yml` | Manual with confirmation | Required `librenms_failover_test_confirm: true`; optional `librenms_failover_test_cases` | Use in a maintenance window. Keep web/VIP cases separate from Redis/Galera cases unless you have a fresh backup. |
+| LibreNMS HA - Failover Drill | `playbooks/ha-failover-test.yml` | Manual with confirmation; optional managed monthly schedule | Required `librenms_failover_test_confirm: true`; optional `librenms_failover_test_cases` | Use in a maintenance window. Keep web/VIP cases separate from Redis/Galera cases unless you have a fresh backup. |
 | LibreNMS HA - Galera Recovery | `playbooks/galera-recover.yml` | Emergency manual with approval | Required `librenms_galera_recover_confirm: true`; usually required `librenms_galera_recover_bootstrap_host` | Use only when Galera has no Primary component. Restrict heavily and require diagnostics first. |
 | LibreNMS HA - Add Node | `playbooks/add-node.yml` | Manual | Node-specific inventory change first | Run only after the host is added to inventory and reviewed. |
 | LibreNMS HA - Remove Node | `playbooks/remove-node.yml` | Manual | Node-specific inventory change first | Run only after the host is marked for removal and reviewed. |
@@ -243,7 +243,7 @@ Recommended survey fields:
 | --- | --- | --- | --- |
 | `librenms_maintenance_target` | Text or multiple choice from inventory hostnames | Yes | Maintenance enter/exit |
 | `librenms_maintenance_confirm` | Boolean | Yes, default `false` | Maintenance enter/exit |
-| `librenms_restore_test_backup_dir` | Text | Yes | Restore test |
+| `librenms_restore_test_backup_dir` | Text | Yes for manual runs | Restore test |
 | `librenms_failover_test_confirm` | Boolean | Yes, default `false` | Failover drill |
 | `librenms_failover_test_cases` | Multiple choice | Optional | Failover drill |
 | `librenms_galera_recover_confirm` | Boolean | Yes, default `false` | Galera recovery |
@@ -267,8 +267,10 @@ Create these AWX Workflow Job Templates for common operations:
 | Node Maintenance Exit Check | Maintenance Exit -> Validate -> Status Strict | Manual after one node returns |
 | Backup Assurance | Backup -> Restore Test | Daily or before maintenance if storage allows |
 
-Do not put `maintenance-enter.yml`, `ha-failover-test.yml`, or
-`galera-recover.yml` on an unattended schedule.
+Do not put `maintenance-enter.yml` or `galera-recover.yml` on an unattended
+schedule. `ha-failover-test.yml` is also manual by default; the opt-in managed
+schedule below is only for a pre-approved recurring maintenance window with an
+accepted outage budget and a named owner for failures.
 
 ## RBAC Model
 
@@ -295,9 +297,56 @@ Reasonable production schedules:
 - `restore-test.yml`: after backup creation, or at least weekly.
 - `diagnostics.yml`: not scheduled by default; run on failure.
 - `validate.yml`: after changes, post-reboot convergence, or maintenance exit.
+- `ha-failover-test.yml`: manual by default; schedule only through the explicit
+  maintenance-window option below.
 
 Avoid running `cluster.yml` on a timer. It is a convergence tool for intentional
 changes, not a monitoring job.
+
+### Managed Restore-Test Schedule
+
+`awx-bootstrap.yml` can create and maintain one weekly restore-test schedule.
+It is disabled by default because it creates a disposable database and imports
+a real backup. When enabled, it selects the newest directory below the managed
+daily-backup category; it never guesses a timestamp embedded in an old AWX
+schedule.
+
+```yaml
+awx_bootstrap_restore_test_schedule_enabled: true
+awx_bootstrap_restore_test_schedule_backup_category: daily
+# Sunday 05:00 UTC. AWX interprets the RRule time zone from the DTSTART suffix.
+awx_bootstrap_restore_test_schedule_rrule: >-
+  DTSTART:20260104T050000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=SU
+```
+
+Run the scheduled test after the daily backup has had time to finish. The
+controller must have credentials that allow the disposable import target to be
+created and removed. Keep the manual job template available for a specifically
+selected backup before upgrades or recovery work.
+
+### Managed Failover-Drill Schedule
+
+`awx-bootstrap.yml` can also create one monthly service failover drill. It is
+disabled by default because it deliberately stops selected services and passes
+the role's confirmation variable automatically. Enable it only after a change
+review has selected the cases, outage budget, maintenance period, and on-call
+owner. The default cases test one web backend and the VIP path; add
+`redis_master` or `galera_node` only with a current, verified backup and a
+separate data-layer approval.
+
+```yaml
+awx_bootstrap_failover_drill_schedule_enabled: true
+awx_bootstrap_failover_drill_cases:
+  - web_backend
+  - keepalived_vip
+# First Sunday of each month at 05:30 UTC.
+awx_bootstrap_failover_drill_schedule_rrule: >-
+  DTSTART:20260104T053000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYDAY=1SU
+```
+
+Keep the schedule disabled while a cluster is degraded, during an upgrade, or
+while a Galera/Redis incident is still being investigated. Disable the variable
+and rerun `awx-bootstrap.yml` before any extended maintenance period.
 
 ## Operational notes
 

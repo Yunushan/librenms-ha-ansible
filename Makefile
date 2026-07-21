@@ -1,4 +1,4 @@
-.PHONY: install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci standalone cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test backup restore-test validate diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
+.PHONY: install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-galera-readiness test-daily-maintenance-guardrails test-docker-ha-galera-config integration-haproxy-web integration-redis-sentinel standalone cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -34,7 +34,22 @@ syntax-check:
 inventory-check:
 	python3 scripts/validate-inventory.py --inventory inventories/ha/hosts.yml --group-vars inventories/ha/group_vars/all.yml
 
-ci: python-smoke lint syntax-check
+ci: python-smoke lint syntax-check test-galera-readiness test-daily-maintenance-guardrails
+
+test-galera-readiness:
+	bash tests/unit/test-galera-readiness-agent.sh
+
+test-daily-maintenance-guardrails:
+	bash tests/unit/test-daily-maintenance-guardrails.sh
+
+test-docker-ha-galera-config:
+	bash tests/unit/test-docker-ha-galera-config.sh
+
+integration-haproxy-web:
+	bash tests/integration/haproxy-web/test.sh
+
+integration-redis-sentinel:
+	bash tests/integration/redis-sentinel/test.sh
 
 standalone:
 	ansible-playbook -i $(STANDALONE_INVENTORY) playbooks/standalone.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
@@ -77,6 +92,9 @@ restore-test:
 
 validate:
 	ansible-playbook -i $(HA_INVENTORY) playbooks/validate.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+production-readiness:
+	ansible-playbook -i $(HA_INVENTORY) playbooks/production-readiness.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 diagnostics:
 	ansible-playbook -i $(HA_INVENTORY) playbooks/diagnostics.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
@@ -166,6 +184,9 @@ docker-restore-test:
 
 docker-validate:
 	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/validate.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+docker-production-readiness:
+	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/production-readiness.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 docker-diagnostics:
 	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/diagnostics.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)

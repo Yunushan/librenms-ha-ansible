@@ -28,6 +28,7 @@
       }}
     awx_bootstrap_credential_ids: []
     awx_bootstrap_execution_environment_id: 0
+    awx_bootstrap_job_template_ids: {}
 
 - name: Verify AWX API authentication
   ansible.builtin.uri:
@@ -437,6 +438,49 @@
   loop_control:
     loop_var: awx_bootstrap_job_template
     label: "{{ awx_bootstrap_job_template.name }}"
+
+- name: Validate optional AWX restore-test schedule settings
+  ansible.builtin.assert:
+    that:
+      - awx_bootstrap_restore_test_schedule_name | length > 0
+      - awx_bootstrap_restore_test_schedule_rrule is match('^DTSTART:.+ RRULE:.+')
+      - awx_bootstrap_restore_test_schedule_backup_category is match('^[A-Za-z0-9_-]+$')
+      - awx_bootstrap_restore_test_job_template_name in awx_bootstrap_job_template_ids
+    fail_msg: >-
+      The optional AWX restore-test schedule requires a valid DTSTART/RRULE
+      expression, a safe backup category, and a managed Restore Test job
+      template. Leave awx_bootstrap_restore_test_schedule_enabled false to
+      manage restore-test scheduling outside this role.
+  when: awx_bootstrap_restore_test_schedule_enabled | bool
+
+- name: Ensure optional AWX restore-test schedule
+  ansible.builtin.include_tasks: restore_test_schedule.yml
+  when: awx_bootstrap_restore_test_schedule_enabled | bool
+
+- name: Validate optional AWX failover-drill schedule settings
+  ansible.builtin.assert:
+    that:
+      - awx_bootstrap_failover_drill_schedule_name | length > 0
+      - awx_bootstrap_failover_drill_schedule_rrule is match('^DTSTART:.+ RRULE:.+')
+      - awx_bootstrap_failover_drill_job_template_name in awx_bootstrap_job_template_ids
+      - awx_bootstrap_failover_drill_cases | length > 0
+      - >-
+        awx_bootstrap_failover_drill_cases
+        | difference([
+          'web_backend', 'haproxy_service', 'dispatcher_service',
+          'keepalived_vip', 'redis_master', 'galera_node'
+        ])
+        | length == 0
+    fail_msg: >-
+      The optional AWX failover-drill schedule requires a valid DTSTART/RRULE,
+      a managed Failover Drill template, and one or more supported failover
+      test cases. Leave awx_bootstrap_failover_drill_schedule_enabled false to
+      manage disruptive drill scheduling outside this role.
+  when: awx_bootstrap_failover_drill_schedule_enabled | bool
+
+- name: Ensure optional AWX failover-drill schedule
+  ansible.builtin.include_tasks: failover_drill_schedule.yml
+  when: awx_bootstrap_failover_drill_schedule_enabled | bool
 
 - name: Show AWX bootstrap summary
   ansible.builtin.debug:

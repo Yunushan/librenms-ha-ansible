@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -16,10 +16,11 @@ RUN apt-get update \
         sshpass \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir ansible-core ansible-lint yamllint
+COPY requirements-ci.txt requirements.yml /tmp/
 
-COPY requirements.yml /tmp/requirements.yml
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir --requirement /tmp/requirements-ci.txt \
+    && python -m pip check
 
 RUN mkdir -p /usr/share/ansible/collections \
     && ansible-galaxy collection install \

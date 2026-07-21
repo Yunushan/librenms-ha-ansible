@@ -113,7 +113,7 @@
   run_once: true
 
 - name: Dump local or Galera LibreNMS database
-  community.mysql.mysql_db:
+  ansible.mysql.mysql_db:
     name: "{{ librenms_db_name }}"
     state: dump
     target: "{{ librenms_backup_dir }}/{{ librenms_backup_database_filename }}"
@@ -131,7 +131,7 @@
   run_once: true
 
 - name: Dump external LibreNMS database
-  community.mysql.mysql_db:
+  ansible.mysql.mysql_db:
     name: "{{ librenms_db_name }}"
     state: dump
     target: "{{ librenms_backup_dir }}/{{ librenms_backup_database_filename }}"
@@ -214,6 +214,33 @@
     - librenms_backup_rrd_path_stat.stat.exists | default(false)
   run_once: true
 
+- name: Calculate database backup SHA-256 checksum
+  stat:
+    path: "{{ librenms_backup_dir }}/{{ librenms_backup_database_filename }}"
+    checksum_algorithm: sha256
+  delegate_to: "{{ librenms_backup_host_effective }}"
+  register: librenms_backup_database_checksum
+  when: librenms_backup_include_database | bool
+  run_once: true
+
+- name: Calculate configuration backup SHA-256 checksum
+  stat:
+    path: "{{ librenms_backup_dir }}/{{ librenms_backup_config_filename }}"
+    checksum_algorithm: sha256
+  delegate_to: "{{ librenms_backup_app_host_effective }}"
+  register: librenms_backup_config_checksum
+  when: librenms_backup_include_config | bool
+  run_once: true
+
+- name: Calculate RRD backup SHA-256 checksum
+  stat:
+    path: "{{ librenms_backup_dir }}/{{ librenms_backup_rrd_filename }}"
+    checksum_algorithm: sha256
+  delegate_to: "{{ librenms_backup_rrd_host_effective }}"
+  register: librenms_backup_rrd_checksum
+  when: librenms_backup_include_rrd | bool
+  run_once: true
+
 - name: Write backup manifest
   copy:
     dest: "{{ librenms_backup_dir }}/{{ librenms_backup_manifest_filename }}"
@@ -228,12 +255,18 @@
         included: {{ librenms_backup_include_database | bool | to_json }}
         host: "{{ librenms_backup_host_effective }}"
         file: "{{ librenms_backup_database_filename }}"
+        checksum_sha256: >-
+          {{ (librenms_backup_database_checksum.stat | default({})).checksum
+          | default('') }}
         mode: "{{ librenms_db_mode }}"
         name: "{{ librenms_db_name }}"
       config:
         included: {{ librenms_backup_include_config | bool | to_json }}
         host: "{{ librenms_backup_app_host_effective }}"
         file: "{{ librenms_backup_config_filename }}"
+        checksum_sha256: >-
+          {{ (librenms_backup_config_checksum.stat | default({})).checksum
+          | default('') }}
         paths:
       {% for path in librenms_backup_existing_config_paths | default([]) %}
           - "{{ path }}"
@@ -243,6 +276,9 @@
         host: "{{ librenms_backup_rrd_host_effective }}"
         path: "{{ librenms_backup_rrd_path }}"
         file: "{{ librenms_backup_rrd_filename }}"
+        checksum_sha256: >-
+          {{ (librenms_backup_rrd_checksum.stat | default({})).checksum
+          | default('') }}
   delegate_to: "{{ librenms_backup_host_effective }}"
   run_once: true
 

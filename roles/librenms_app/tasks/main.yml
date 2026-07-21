@@ -1261,7 +1261,7 @@
       until: librenms_install_db_wait is succeeded
 
     - name: Verify install-time database login
-      community.mysql.mysql_query:
+      ansible.mysql.mysql_query:
         login_host: "{{ librenms_db_host_install_effective }}"
         login_port: "{{ librenms_db_port }}"
         login_user: "{{ librenms_db_user }}"
@@ -1332,7 +1332,7 @@
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Read LibreNMS schema column definitions from database
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1383,7 +1383,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS notifications.datetime schema default
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1400,7 +1400,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS users.created_at schema default
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1417,7 +1417,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Verify LibreNMS validation schema columns after normalization
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1665,7 +1665,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Wait for LibreNMS validation schema on every Galera backend
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ hostvars[item].ansible_host | default(item) }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1866,7 +1866,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Check if the initial LibreNMS admin user already exists
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -2258,6 +2258,7 @@
     owner: root
     group: root
     mode: "0750"
+    validate: "bash -n %s"
   no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
   when:
     - librenms_manage_scheduled_backups | bool
@@ -2318,10 +2319,39 @@
     owner: root
     group: root
     mode: "0755"
+    validate: "bash -n %s"
   notify: Restart LibreNMS daily maintenance timer
   when:
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_self_heal_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Create LibreNMS daily maintenance helper directory
+  file:
+    path: "{{ librenms_daily_global_lock_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - librenms_daily_self_heal_enabled | bool
+    - librenms_daily_global_lock_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Deploy daily maintenance cluster lock helper
+  template:
+    src: librenms-daily-global-lock.php.j2
+    dest: "{{ librenms_daily_global_lock_path }}"
+    owner: root
+    group: "{{ librenms_group }}"
+    mode: "0750"
+    validate: "php -l %s"
+  notify: Restart LibreNMS daily maintenance timer
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - librenms_daily_self_heal_enabled | bool
+    - librenms_daily_global_lock_enabled | bool
     - ansible_service_mgr == 'systemd'
 
 - name: Deploy daily maintenance service file
@@ -3047,7 +3077,7 @@
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Check existing LibreNMS cluster node devices
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -3657,7 +3687,7 @@
           {{ librenms_runtime_db_galera_status.stderr | default('') }}
 
 - name: Verify final LibreNMS runtime database login
-  community.mysql.mysql_query:
+  ansible.mysql.mysql_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -4107,7 +4137,7 @@
       failed_when: false
 
     - name: Capture LibreNMS dispatcher table state
-      community.mysql.mysql_query:
+      ansible.mysql.mysql_query:
         login_host: "{{ librenms_db_host_effective }}"
         login_port: "{{ librenms_db_port }}"
         login_user: "{{ librenms_db_user }}"
@@ -4183,6 +4213,15 @@
       until:
         - librenms_php_fpm_ping.status | default(0) == 200
         - "'pong' in (librenms_php_fpm_ping.content | default(''))"
+
+    - name: Require the PHP-FPM ping endpoint before continuing
+      assert:
+        that:
+          - librenms_php_fpm_ping.status | default(0) == 200
+          - "'pong' in (librenms_php_fpm_ping.content | default(''))"
+        fail_msg: >-
+          The LibreNMS PHP-FPM ping endpoint did not become healthy on
+          {{ inventory_hostname }}. Restart PHP-FPM and nginx before retrying.
   rescue:
     - name: Restart PHP-FPM after failed ping probe
       service:
@@ -4218,7 +4257,15 @@
       until:
         - librenms_php_fpm_ping_retry.status | default(0) == 200
         - "'pong' in (librenms_php_fpm_ping_retry.content | default(''))"
-      ignore_errors: true
+
+    - name: Require the PHP-FPM ping endpoint after service recovery
+      assert:
+        that:
+          - librenms_php_fpm_ping_retry.status | default(0) == 200
+          - "'pong' in (librenms_php_fpm_ping_retry.content | default(''))"
+        fail_msg: >-
+          LibreNMS PHP-FPM did not recover on {{ inventory_hostname }} after
+          restarting PHP-FPM and nginx.
 
 - name: Verify LibreNMS application endpoint responds on each web node
   when:
@@ -4310,7 +4357,9 @@
       register: librenms_php_fpm_probe_status
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Capture PHP-FPM journal after failed LibreNMS web probe
       command:
@@ -4324,7 +4373,9 @@
       register: librenms_php_fpm_probe_journal
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Capture nginx service status after failed LibreNMS web probe
       command:
@@ -4336,7 +4387,9 @@
       register: librenms_nginx_probe_status
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Capture nginx journal after failed LibreNMS web probe
       command:
@@ -4350,7 +4403,9 @@
       register: librenms_nginx_probe_journal
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Capture nginx error log after failed LibreNMS web probe
       command:
@@ -4362,7 +4417,9 @@
       register: librenms_nginx_error_log
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Capture UNIX socket listeners after failed LibreNMS web probe
       command:
@@ -4372,7 +4429,9 @@
       register: librenms_php_fpm_probe_sockets
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Capture LibreNMS PHP-FPM error log after failed LibreNMS web probe
       command:
@@ -4384,7 +4443,9 @@
       register: librenms_php_fpm_error_log
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Capture LibreNMS application log after failed LibreNMS web probe
       command:
@@ -4396,7 +4457,9 @@
       register: librenms_application_log
       changed_when: false
       failed_when: false
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
     - name: Fail with LibreNMS web probe diagnostics
       fail:
@@ -4436,7 +4499,9 @@
 
           librenms application log:
           {{ librenms_application_log.stdout | default('') }}
-      when: (librenms_web_probe_retry.rc | default(1)) != 0
+      when: >-
+        (librenms_web_probe_retry.status | default(0) | int)
+        not in librenms_app_probe_success_statuses
 
 - name: Report non-blocking LibreNMS application endpoint probe result
   debug:

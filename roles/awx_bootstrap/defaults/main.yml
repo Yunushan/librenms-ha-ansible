@@ -36,6 +36,28 @@ awx_bootstrap_fail_on_missing_credentials: true
 awx_bootstrap_execution_environment_name: ""
 awx_bootstrap_fail_on_missing_execution_environment: true
 
+# Disabled by default because this performs a real disposable database import.
+# When enabled, the schedule selects the newest managed daily backup rather
+# than relying on a timestamp that was known when AWX was configured.
+awx_bootstrap_restore_test_schedule_enabled: false
+awx_bootstrap_restore_test_schedule_name: LibreNMS HA - Weekly Restore Test
+awx_bootstrap_restore_test_schedule_rrule: >-
+  DTSTART:20260104T050000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=SU
+awx_bootstrap_restore_test_schedule_backup_category: daily
+awx_bootstrap_restore_test_job_template_name: LibreNMS HA - Restore Test
+
+# Disabled by default because this intentionally stops selected HA services to
+# prove recovery. Enable only for a reviewed maintenance window with an agreed
+# outage budget. The schedule supplies the role's explicit confirmation.
+awx_bootstrap_failover_drill_schedule_enabled: false
+awx_bootstrap_failover_drill_schedule_name: LibreNMS HA - Monthly Failover Drill
+awx_bootstrap_failover_drill_schedule_rrule: >-
+  DTSTART:20260104T053000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYDAY=1SU
+awx_bootstrap_failover_drill_job_template_name: LibreNMS HA - Failover Drill
+awx_bootstrap_failover_drill_cases:
+  - web_backend
+  - keepalived_vip
+
 awx_bootstrap_job_template_defaults:
   job_type: run
   verbosity: 0
@@ -68,7 +90,7 @@ awx_bootstrap_job_templates:
 
   - name: LibreNMS HA - Restore Test
     playbook: playbooks/restore-test.yml
-    description: Verify a backup manifest and archives without restoring data.
+    description: Validate backup archives and import the database dump into a disposable database.
     ask_variables_on_launch: true
 
   - name: LibreNMS HA - Cluster Converge
