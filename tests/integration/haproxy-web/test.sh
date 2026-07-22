@@ -13,7 +13,16 @@ compose() {
 }
 
 cleanup() {
+    local exit_status=$?
+
+    if [ "${exit_status}" -ne 0 ]; then
+        printf 'HAProxy integration test failed; container diagnostics follow.\n' >&2
+        compose ps >&2 || true
+        compose logs --no-color >&2 || true
+    fi
+
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+    return "${exit_status}"
 }
 
 require_docker() {
@@ -34,7 +43,7 @@ require_docker() {
 backend_from_response() {
     curl --fail --silent --show-error --max-time 2 --dump-header - \
         --output /dev/null "${APPLICATION_URL}" |
-        awk 'tolower($1) == "x-backend:" { print $2; exit }' |
+        awk 'tolower($1) == "x-backend:" { backend=$2 } END { print backend }' |
         tr -d '\r'
 }
 
