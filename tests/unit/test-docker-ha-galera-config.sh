@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly SOURCE_DIR="${ROOT_DIR}/examples/docker-ha/mariadb-galera"
+temporary_dir=""
 
 fail() {
     printf 'Docker Galera example configuration test failed: %s\n' "$1" >&2
@@ -14,13 +15,16 @@ require_docker_compose() {
     docker compose version >/dev/null 2>&1 || fail 'Docker Compose v2 is required.'
 }
 
+cleanup() {
+    [ -z "${temporary_dir}" ] || rm -rf "${temporary_dir}"
+}
+
 main() {
-    local temporary_dir
     local error_output
 
     require_docker_compose
     temporary_dir="$(mktemp -d)"
-    trap 'rm -rf "${temporary_dir}"' EXIT
+    trap cleanup EXIT
     cp "${SOURCE_DIR}/compose.yml" "${SOURCE_DIR}/.env.example" "${temporary_dir}/"
     cp "${temporary_dir}/.env.example" "${temporary_dir}/.env"
     sed -i '/^MARIADB_GALERA_IMAGE=/d' "${temporary_dir}/.env"

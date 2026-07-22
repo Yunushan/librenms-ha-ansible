@@ -24,12 +24,10 @@ x-sentinel: &sentinel
       cat >/tmp/sentinel.conf <<'EOF'
       bind 0.0.0.0
       port 26379
-      sentinel monitor mymaster redis-1 6379 2
+      sentinel monitor mymaster 172.30.77.11 6379 2
       sentinel down-after-milliseconds mymaster 1000
       sentinel failover-timeout mymaster 10000
       sentinel parallel-syncs mymaster 1
-      sentinel resolve-hostnames mymaster yes
-      sentinel announce-hostnames mymaster yes
       EOF
       exec redis-sentinel /tmp/sentinel.conf
 
@@ -37,6 +35,9 @@ services:
   redis-1:
     <<: *redis-node
     command: *redis-command
+    networks:
+      sentinel:
+        ipv4_address: 172.30.77.11
 
   redis-2:
     <<: *redis-node
@@ -51,8 +52,11 @@ services:
       - --bind
       - 0.0.0.0
       - --replicaof
-      - redis-1
+      - 172.30.77.11
       - "6379"
+    networks:
+      sentinel:
+        ipv4_address: 172.30.77.12
 
   redis-3:
     <<: *redis-node
@@ -67,14 +71,32 @@ services:
       - --bind
       - 0.0.0.0
       - --replicaof
-      - redis-1
+      - 172.30.77.11
       - "6379"
+    networks:
+      sentinel:
+        ipv4_address: 172.30.77.13
 
   sentinel-1:
     <<: *sentinel
+    networks:
+      sentinel:
+        ipv4_address: 172.30.77.21
 
   sentinel-2:
     <<: *sentinel
+    networks:
+      sentinel:
+        ipv4_address: 172.30.77.22
 
   sentinel-3:
     <<: *sentinel
+    networks:
+      sentinel:
+        ipv4_address: 172.30.77.23
+
+networks:
+  sentinel:
+    ipam:
+      config:
+        - subnet: 172.30.77.0/24

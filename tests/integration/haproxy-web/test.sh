@@ -34,7 +34,7 @@ require_docker() {
 backend_from_response() {
     curl --fail --silent --show-error --max-time 2 --dump-header - \
         --output /dev/null "${APPLICATION_URL}" |
-        awk '/^X-Backend:/ { print $2; exit }' |
+        awk 'tolower($1) == "x-backend:" { print $2; exit }' |
         tr -d '\r'
 }
 

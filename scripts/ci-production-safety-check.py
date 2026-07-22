@@ -767,8 +767,10 @@ def main() -> int:
         failures.append("Docker development image must install the hash-locked CI toolchain")
     if "&& python -m pip check" not in dockerfile:
         failures.append("Docker development image must verify installed Python dependencies")
-    if "FROM python:3.12-slim@sha256:" not in dockerfile:
-        failures.append("Docker development image must pin its Python base image by digest")
+    if not re.search(r"(?m)^FROM python:3\.12-slim@sha256:[0-9a-f]{64}\r?$", dockerfile):
+        failures.append(
+            "Docker development image must use the approved Python 3.12 slim base image with a SHA-256 digest"
+        )
 
     pre_commit_config = read(".pre-commit-config.yaml")
     for package in ("ansible-lint", "yamllint"):

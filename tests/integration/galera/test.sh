@@ -98,15 +98,17 @@ main() {
     wait_for 'initial write replication to Galera followers' row_count_is galera-2 1
     wait_for 'initial write replication to every Galera follower' row_count_is galera-3 1
 
-    compose stop galera-1
-    wait_for 'a two-member synced Galera primary component' all_nodes_are_synced 2 galera-2 galera-3
+    # Do not stop the bootstrap node: restarting it would rerun --wsrep-new-cluster.
+    # A non-bootstrap member exercises the intended rejoin path safely.
+    compose stop galera-3
+    wait_for 'a two-member synced Galera primary component' all_nodes_are_synced 2 galera-1 galera-2
 
-    sql galera-2 "INSERT INTO integration_state.events VALUES (2, 'during-failover');"
-    wait_for 'write replication after Galera primary-node loss' row_count_is galera-3 2
+    sql galera-1 "INSERT INTO integration_state.events VALUES (2, 'during-failover');"
+    wait_for 'write replication after Galera primary-node loss' row_count_is galera-2 2
 
-    compose start galera-1
+    compose start galera-3
     wait_for 'the stopped Galera node to rejoin and synchronize' all_nodes_are_synced 3 "${NODES[@]}"
-    wait_for 'post-failover write replication to the rejoined node' row_count_is galera-1 2
+    wait_for 'post-failover write replication to the rejoined node' row_count_is galera-3 2
 
     printf 'Galera integration test passed: quorum, write continuity, and rejoin replication verified.\n'
 }

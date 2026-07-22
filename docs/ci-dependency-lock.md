@@ -14,7 +14,7 @@ Use a disposable Python 3.12 virtual environment, review the resulting diff,
 then run the full quality gate:
 
 ```bash
-python3 -m venv .venv-lock
+python3.12 -m venv .venv-lock
 . .venv-lock/bin/activate
 python -m pip install --upgrade pip pip-tools
 pip-compile --generate-hashes --resolver=backtracking --strip-extras \
