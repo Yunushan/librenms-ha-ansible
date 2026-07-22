@@ -23,7 +23,7 @@ def require(path: str, needle: str, description: str) -> list[str]:
 
 def pinned_python_requirement(content: str, package: str) -> str | None:
     match = re.search(
-        rf"^{re.escape(package)}==([^\s#]+)$",
+        rf"^{re.escape(package)}==([^\s#]+)(?:\s+\\)?$",
         content,
         flags=re.MULTILINE,
     )
@@ -54,13 +54,13 @@ def main() -> int:
     )
     failures += require(
         "roles/librenms_app/templates/librenms-daily-wrapper.sh.j2",
-        'LIBRENMS_DAILY_HA_DRAIN_ENABLED="${HA_DRAIN_ENABLED}"',
-        "Only the global-lock holder may drain itself for HA maintenance",
+        'LIBRENMS_DAILY_HA_DRAIN_ENABLED="false"',
+        "The outer daily wrapper must retain the HA drain through post-update recovery",
     )
     failures += require(
         "roles/librenms_app/templates/librenms-daily-wrapper.sh.j2",
-        'if [ "${GLOBAL_LOCK_ENABLED}" != "true" ]; then\n    activate_ha_drain',
-        "Global maintenance contenders must not drain before acquiring the lock",
+        'acquire_cluster_maintenance_lock\ncluster_lock_rc=$?',
+        "Daily maintenance must acquire or skip the shared lock before draining a node",
     )
     failures += require(
         "tests/unit/test-daily-maintenance-guardrails.sh",
@@ -187,6 +187,134 @@ def main() -> int:
         "Production readiness must verify Galera membership, not just service state",
     )
     failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_galera_auto_recover_unsafe_bootstrap: false",
+        "Existing Galera clusters must not auto-bootstrap unsafely",
+    )
+    failures += require(
+        "roles/librenms_app/templates/librenms-daily-wrapper.sh.j2",
+        'LIBRENMS_DAILY_HA_DRAIN_ENABLED="false"',
+        "The outer daily wrapper must retain the HA drain through post-update recovery",
+    )
+    failures += require(
+        "roles/librenms_app/templates/librenms-daily-wrapper.sh.j2",
+        "recover_web_health()",
+        "Daily maintenance must verify and recover local web health before rejoining HA traffic",
+    )
+    failures += require(
+        "roles/librenms_app/templates/librenms-runtime-health.php.j2",
+        "SELECT 1 AS ready",
+        "HAProxy runtime health checks must verify a fresh LibreNMS database query",
+    )
+    failures += require(
+        "roles/librenms_app/templates/librenms-runtime-health.php.j2",
+        "http_response_code(503)",
+        "HAProxy runtime health checks must report database failures as unavailable",
+    )
+    failures += require(
+        "roles/librenms_app/templates/nginx-librenms.conf.j2",
+        "librenms_nginx_runtime_health_check_path",
+        "Nginx must route the LibreNMS runtime database health probe",
+    )
+    failures += require(
+        "roles/haproxy_keepalived/templates/haproxy.cfg.j2",
+        "librenms_haproxy_web_runtime_check_enabled",
+        "HAProxy must use the runtime database health probe when managed",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Verify database runtime health on every active LibreNMS web node",
+        "Production readiness must prove database runtime health on every web node",
+    )
+    failures += require(
+        "roles/production_readiness/defaults/main.yml",
+        "librenms_production_readiness_require_recent_failover_evidence",
+        "HA production readiness must require recent failover evidence by default",
+    )
+    failures += require(
+        "roles/production_readiness/defaults/main.yml",
+        "librenms_production_readiness_require_failover_evidence_integrity",
+        "HA production readiness must require failover evidence integrity by default",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require the recent HA failover drill covers essential cases",
+        "Production readiness must reject stale or incomplete failover evidence",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require HA failover drill evidence checksum matches",
+        "Production readiness must verify retained failover evidence integrity",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "librenms_production_latest_failover_evidence.vip",
+        "Production readiness must bind failover evidence to the current VIP",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "librenms_production_latest_failover_evidence.elapsed_seconds",
+        "Production readiness must reject failover evidence without a recovery-time measurement",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require scheduled daily backup health",
+        "Production readiness must verify the continuing daily backup schedule",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require disposable database restore verification within its objective",
+        "Production readiness must enforce a measured database restore objective",
+    )
+    failures += require(
+        "roles/ha_failover_test/tasks/post_recovery.yml",
+        "'mode': librenms_mode",
+        "Failover evidence must identify its HA mode",
+    )
+    failures += require(
+        "roles/ha_failover_test/tasks/post_recovery.yml",
+        "Require HA failover drill recovery within its objective",
+        "Failover drills must enforce a configurable recovery-time objective",
+    )
+    production_readiness_playbook = read("playbooks/production-readiness.yml")
+    if (
+        production_readiness_playbook.index("- role: doctor")
+        > production_readiness_playbook.index("- role: production_readiness")
+    ):
+        failures.append(
+            "Production readiness evidence must run after the live Doctor network checks"
+        )
+    failures += require(
+        "tests/unit/test-runtime-web-health-guardrails.sh",
+        "Runtime web-health guardrail test passed",
+        "CI must test runtime database health routing",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-runtime-web-health-guardrails",
+        "CI must run the runtime web-health guardrail test",
+    )
+    failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_galera_recovery_tie_breaker: manual",
+        "Galera recovery must not choose the first tied member by default",
+    )
+    failures += require(
+        "roles/galera/tasks/main.yml",
+        "Fail closed when existing Galera cluster needs manual recovery",
+        "Existing Galera clusters must require guarded recovery after total outage",
+    )
+    failures += require(
+        "tests/unit/test-galera-bootstrap-guardrails.sh",
+        "Galera bootstrap guardrail test passed",
+        "CI must test Galera bootstrap safety",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-galera-bootstrap-guardrails",
+        "CI must run the Galera bootstrap safety test",
+    )
+    failures += require(
         "roles/production_readiness/tasks/main.yml",
         "Require active Galera HAProxy readiness agent sockets",
         "Production readiness must verify Galera-aware HAProxy backend health",
@@ -205,6 +333,16 @@ def main() -> int:
         "roles/production_readiness/tasks/main.yml",
         "Require a GlusterFS-backed HA maintenance lock",
         "Production readiness must verify the HA maintenance lock is shared",
+    )
+    failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_daily_canary_enabled",
+        "HA daily maintenance must declare deterministic canary protection",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require a GlusterFS-backed daily-update canary state",
+        "Production readiness must verify the canary state is shared",
     )
     failures += require(
         "roles/production_readiness/tasks/main.yml",
@@ -267,6 +405,91 @@ def main() -> int:
         "Production readiness must prove the generated database backup imports",
     )
     failures += require(
+        "roles/production_readiness/defaults/main.yml",
+        "librenms_production_readiness_write_evidence: true",
+        "Production readiness must retain passing evidence by default",
+    )
+    failures += require(
+        "roles/production_readiness/defaults/main.yml",
+        "librenms_production_readiness_evidence_integrity_enabled: true",
+        "Production readiness evidence must be integrity-protected by default",
+    )
+    failures += require(
+        "roles/production_readiness/defaults/main.yml",
+        "librenms_production_readiness_evidence_hmac_enabled",
+        "Production readiness evidence must be authenticated by default",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Write successful production readiness evidence",
+        "Successful readiness runs must retain controller-side evidence",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Write production readiness evidence checksum sidecar",
+        "Successful readiness evidence must include a SHA-256 checksum sidecar",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Verify production readiness evidence checksum sidecar",
+        "Production readiness must verify its generated evidence checksum",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require authenticated production readiness evidence sidecar matches",
+        "Production readiness must verify its generated evidence HMAC",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Recalculate authenticated production readiness evidence digest after write",
+        "Production readiness must recalculate the evidence HMAC after writing it",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "librenms_production_readiness_evidence_hmac_after_write.stdout",
+        "Production readiness must compare its HMAC sidecar with a post-write digest",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Verify generated production readiness evidence with controller verifier",
+        "Production readiness must verify evidence with the durable controller verifier",
+    )
+    failures += require(
+        "roles/production_readiness/files/librenms-production-readiness-evidence-verify.py",
+        "hmac.compare_digest",
+        "Production readiness evidence verifier must use constant-time digest comparison",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Publish production readiness result for controller job records",
+        "Production readiness must publish its result to controller job records",
+    )
+    failures += require(
+        "tests/unit/test-production-readiness-evidence-guardrails.sh",
+        "Production readiness evidence guardrail test passed",
+        "CI must test production readiness evidence guardrails",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-production-readiness-evidence-guardrails",
+        "CI must run the production readiness evidence guardrail test",
+    )
+    failures += require(
+        "roles/awx_bootstrap/defaults/main.yml",
+        "awx_bootstrap_status_schedule_enabled: true",
+        "AWX bootstrap must manage recurring strict status checks by default",
+    )
+    failures += require(
+        "tests/unit/test-awx-status-schedule-guardrails.sh",
+        "AWX strict-status schedule guardrail test passed",
+        "CI must test the managed AWX strict-status schedule",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-awx-status-schedule-guardrails",
+        "CI must run the AWX strict-status schedule guardrail test",
+    )
+    failures += require(
         "roles/restore_test/defaults/main.yml",
         "librenms_restore_test_verify_database_import: true",
         "Restore tests must import database backups by default",
@@ -322,6 +545,51 @@ def main() -> int:
         "Galera fault injection must verify the database VIP after recovery",
     )
     failures += require(
+        "roles/ha_failover_test/tasks/main.yml",
+        "Verify the recovered LibreNMS HA stack",
+        "Failover drills must run a final post-recovery gate",
+    )
+    failures += require(
+        "roles/ha_failover_test/tasks/post_recovery.yml",
+        "Run LibreNMS validation after all recoveries",
+        "Failover drills must validate LibreNMS after restoring services",
+    )
+    failures += require(
+        "roles/ha_failover_test/tasks/post_recovery.yml",
+        "Write successful HA failover drill evidence",
+        "Successful failover drills must retain controller-side evidence",
+    )
+    failures += require(
+        "tests/unit/test-failover-recovery-guardrails.sh",
+        "Failover recovery guardrail test passed",
+        "CI must test failover recovery guardrails",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-failover-recovery-guardrails",
+        "CI must run the failover recovery guardrail test",
+    )
+    failures += require(
+        "playbooks/site.yml",
+        "- name: Configure load balancer and VIP hosts\n  hosts: lb_nodes:!maintenance_nodes\n  become: true\n  gather_facts: true\n  serial: 1",
+        "Site convergence must apply load-balancer changes one node at a time",
+    )
+    failures += require(
+        "playbooks/syslog.yml",
+        "- name: Refresh HAProxy database listener for syslog workers\n  hosts: lb_nodes:!maintenance_nodes\n  become: true\n  gather_facts: true\n  serial: 1",
+        "Syslog deployment must apply load-balancer changes one node at a time",
+    )
+    failures += require(
+        "tests/unit/test-load-balancer-rollout-guardrails.sh",
+        "Load-balancer rollout guardrail test passed",
+        "CI must test load-balancer rollout ordering",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-load-balancer-rollout-guardrails",
+        "CI must run the load-balancer rollout guardrail test",
+    )
+    failures += require(
         "tests/unit/test-galera-readiness-agent.sh",
         "Galera readiness agent decision test passed",
         "CI must test Galera readiness-agent routing decisions",
@@ -333,8 +601,13 @@ def main() -> int:
     )
     failures += require(
         "tests/integration/haproxy-web/compose.yml",
-        "haproxy:3.4.0-alpine3.23",
-        "HAProxy integration must use a fixed official HAProxy image tag",
+        "nginx:1.31.3-alpine3.24@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752",
+        "HAProxy integration web backends must use an immutable Nginx image digest",
+    )
+    failures += require(
+        "tests/integration/haproxy-web/compose.yml",
+        "haproxy:3.4.0-alpine3.23@sha256:5614ec450485ce1f9f8c25d231cf7fbab9326302a395f2355e05cbbc2dd7468b",
+        "HAProxy integration must use an immutable HAProxy image digest",
     )
     failures += require(
         "tests/integration/haproxy-web/test.sh",
@@ -347,9 +620,39 @@ def main() -> int:
         "CI must run the HAProxy web failover integration test",
     )
     failures += require(
+        "tests/integration/galera/compose.yml",
+        "mariadb:11.4@sha256:a794d9eb009e20de605858a11f32f63b4075cbd197c650436f0e3b457e4caed7",
+        "Galera integration must use an immutable official MariaDB 11.4 image digest",
+    )
+    failures += require(
+        "tests/integration/galera/galera.cnf",
+        "wsrep_sst_method=mariabackup",
+        "Galera integration must use the image-provided MariaDB backup SST method",
+    )
+    failures += require(
+        "tests/integration/galera/test.sh",
+        "three synced Galera members",
+        "Galera integration must prove initial three-member quorum",
+    )
+    failures += require(
+        "tests/integration/galera/test.sh",
+        "write replication after Galera primary-node loss",
+        "Galera integration must prove write continuity after a node stops",
+    )
+    failures += require(
+        "tests/integration/galera/test.sh",
+        "post-failover write replication to the rejoined node",
+        "Galera integration must prove rejoin replication",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make integration-galera",
+        "CI must run the Galera quorum and rejoin integration test",
+    )
+    failures += require(
         "tests/integration/redis-sentinel/compose.yml",
-        "redis:7.4.9-alpine",
-        "The Redis Sentinel integration test must use a fixed official image tag",
+        "redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+        "The Redis Sentinel integration test must use an immutable Redis image digest",
     )
     failures += require(
         "tests/integration/redis-sentinel/test.sh",
@@ -439,8 +742,8 @@ def main() -> int:
         failures.append("Lint workflow must pin its runner to ubuntu-24.04")
     if "timeout-minutes: 20" not in lint_workflow:
         failures.append("Lint workflow must bound execution time to 20 minutes")
-    if "python -m pip install --requirement requirements-ci.txt" not in lint_workflow:
-        failures.append("Lint workflow must install the pinned CI toolchain")
+    if "python -m pip install --require-hashes --requirement requirements-ci.txt" not in lint_workflow:
+        failures.append("Lint workflow must install the hash-locked CI toolchain")
     if "python -m pip check" not in lint_workflow:
         failures.append("Lint workflow must verify installed Python dependencies")
     if "controller-image:" not in lint_workflow:
@@ -458,10 +761,10 @@ def main() -> int:
             ci_tool_versions[package] = version
 
     dockerfile = read("Dockerfile")
-    if "COPY requirements-ci.txt requirements.yml /tmp/" not in dockerfile:
-        failures.append("Docker development image must include the pinned CI toolchain")
-    if "--requirement /tmp/requirements-ci.txt" not in dockerfile:
-        failures.append("Docker development image must install the pinned CI toolchain")
+    if "COPY requirements-ci.in requirements-ci.txt requirements.yml /tmp/" not in dockerfile:
+        failures.append("Docker development image must include the CI lock source and lock file")
+    if "--require-hashes --requirement /tmp/requirements-ci.txt" not in dockerfile:
+        failures.append("Docker development image must install the hash-locked CI toolchain")
     if "&& python -m pip check" not in dockerfile:
         failures.append("Docker development image must verify installed Python dependencies")
     if "FROM python:3.12-slim@sha256:" not in dockerfile:
@@ -486,6 +789,73 @@ def main() -> int:
         failures.append("PHP-FPM recovery must explicitly assert its retry result")
     if "ignore_errors: true" in php_fpm_recovery:
         failures.append("PHP-FPM recovery must not suppress an exhausted recovery failure")
+
+    daily_wrapper = read("roles/librenms_app/templates/librenms-daily-wrapper.sh.j2")
+    if "librenms_nginx_runtime_health_check_path if daily_runtime_health_enabled" not in daily_wrapper:
+        failures.append(
+            "Daily maintenance must use the PHP database runtime health probe in HA mode"
+        )
+
+    failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_manage_host_firewall: false",
+        "Host firewall enforcement must stay opt-in until CIDRs are reviewed",
+    )
+    failures += require(
+        "roles/host_firewall/tasks/main.yml",
+        "Allow management SSH before enabling UFW",
+        "Host firewall policy must preserve management SSH before enabling UFW",
+    )
+    failures += require(
+        "roles/host_firewall/tasks/main.yml",
+        "Set UFW default incoming policy to deny",
+        "Host firewall policy must deny unapproved inbound traffic",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require active UFW when the managed host-firewall policy is enabled",
+        "Production readiness must verify an enabled host firewall remains active",
+    )
+    failures += require(
+        "roles/production_readiness/defaults/main.yml",
+        "librenms_production_readiness_require_status_alert_routing",
+        "HA production readiness must require configured status alert routing",
+    )
+    failures += require(
+        "roles/production_readiness/defaults/main.yml",
+        "librenms_production_readiness_require_encrypted_vault",
+        "HA production readiness must require a verified secret source",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require an encrypted Ansible Vault secret file for production",
+        "Production readiness must verify the configured Ansible Vault file",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Verify external production secret provider access",
+        "External secret mode must verify provider access without exposing values",
+    )
+    failures += require(
+        "scripts/ci-python-smoke.py",
+        "scripts/ci-secret-scan.py",
+        "CI must scan source files for obvious committed secrets",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "librenms_status_alert_webhook_url | default('')",
+        "Production readiness must require certificate-validated HTTPS alert routing",
+    )
+    failures += require(
+        "tests/unit/test-host-firewall-guardrails.sh",
+        "Host-firewall guardrail test passed",
+        "CI must test host-firewall safety ordering",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-host-firewall-guardrails",
+        "CI must run host-firewall guardrail tests",
+    )
 
     web_probe_recovery = app_tasks[
         app_tasks.index("- name: Verify LibreNMS application endpoint responds on each web node")

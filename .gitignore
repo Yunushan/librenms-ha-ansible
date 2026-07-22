@@ -29,3 +29,12 @@ tmp/
 
 # Docker / Compose
 .env
+
+# A Python virtual environment was previously created at the repository root.
+# Keep its generated directories out of source control; create future virtual
+# environments under .venv/ or outside the working tree.
+/bin/
+/include/
+/lib/
+/lib64/
+/pyvenv.cfg

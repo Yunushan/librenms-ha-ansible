@@ -22,6 +22,12 @@
   register: librenms_galera_marker
   when: librenms_db_mode == 'galera'
 
+- name: Determine whether Galera requires its initial bootstrap
+  set_fact:
+    librenms_galera_initial_bootstrap_required: >-
+      {{ not (librenms_galera_marker.stat.exists | default(false) | bool) }}
+  when: librenms_db_mode == 'galera'
+
 - name: Probe Galera nodes for an existing primary component
   command:
     argv:
@@ -428,6 +434,28 @@
         or (librenms_galera_recovered_bootstrap_host | default('') | length) == 0
       )
 
+- name: Fail closed when existing Galera cluster needs manual recovery
+  fail:
+    msg: |-
+      No live Galera primary component was found and no node is marked
+      safe_to_bootstrap: 1. This is an existing cluster, so site convergence
+      will not bootstrap the configured host automatically.
+
+      Run playbooks/galera-recover.yml without confirmation to collect
+      grastate.dat evidence. If recovered positions must be collected, rerun
+      with librenms_galera_recover_confirm=true, then explicitly set
+      librenms_galera_recover_bootstrap_host to the selected host.
+
+      Set librenms_galera_auto_recover_unsafe_bootstrap=true only for an
+      operator-reviewed exception. Tied recovered positions still require an
+      explicit recovery tie-break policy.
+  when:
+    - librenms_db_mode == 'galera'
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_safe_bootstrap_hosts | length) == 0
+    - librenms_galera_marker.stat.exists | default(false) | bool
+    - not librenms_galera_auto_recover_unsafe_bootstrap | bool
+
 - name: Determine effective Galera bootstrap host
   set_fact:
     librenms_galera_bootstrap_effective_host: >-
@@ -453,7 +481,12 @@
               and (librenms_galera_recovered_bootstrap_host | default('') | length) > 0
               and (librenms_galera_max_recovered_seqno | default(-1) | int) >= 0
             )
-            else librenms_db_bootstrap_host
+            else
+            (
+              librenms_db_bootstrap_host
+              if librenms_galera_initial_bootstrap_required | bool
+              else ''
+            )
           )
         )
       }}

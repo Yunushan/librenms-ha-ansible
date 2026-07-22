@@ -34,6 +34,14 @@ def main() -> int:
     python = sys.executable
     checks = [
         (
+            "Check hash-locked CI Python dependencies",
+            [python, "scripts/ci-check-ci-lock.py"],
+        ),
+        (
+            "Scan source for obvious secrets",
+            [python, "scripts/ci-secret-scan.py"],
+        ),
+        (
             "Parse YAML files",
             [python, "scripts/ci-parse-yaml.py"],
         ),
@@ -76,10 +84,12 @@ def main() -> int:
                 "-m",
                 "py_compile",
                 "scripts/ci-ansible-syntax-check.py",
+                "scripts/ci-check-ci-lock.py",
                 "scripts/ci-check-markdown-links.py",
                 "scripts/ci-parse-yaml.py",
                 "scripts/ci-production-safety-check.py",
                 "scripts/ci-python-smoke.py",
+                "scripts/ci-secret-scan.py",
                 "scripts/validate-inventory.py",
             ],
         ),

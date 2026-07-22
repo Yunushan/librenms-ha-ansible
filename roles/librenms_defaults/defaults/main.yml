@@ -15,6 +15,11 @@ librenms_daily_self_heal_git_lock_cleanup: true
 librenms_daily_self_heal_git_metadata_repair: true
 librenms_daily_self_heal_git_retry_after_repair: true
 librenms_daily_self_heal_clear_laravel_cache_after_daily: true
+librenms_daily_self_heal_verify_web_health: >-
+  {{ librenms_manage_nginx | bool and librenms_manage_php_fpm | bool }}
+librenms_daily_self_heal_web_health_retries: 6
+librenms_daily_self_heal_web_health_delay: 5
+librenms_daily_self_heal_web_health_timeout: 10
 librenms_daily_self_heal_treat_healthy_update_failure_as_success: true
 librenms_daily_self_heal_clear_healthy_update_failure_notification: true
 librenms_daily_self_heal_notification_cleanup_days: 30
@@ -29,9 +34,33 @@ librenms_daily_global_lock_backend: >-
   {{ 'shared_file' if librenms_mode == 'ha' and librenms_rrd_mode == 'glusterfs' else 'database' }}
 librenms_daily_global_lock_shared_file: >-
   {{ librenms_gluster_mountpoint }}/.librenms-daily-maintenance.lock
+# In HA with shared GlusterFS storage, only the selected canary starts the
+# unattended update. Followers wait for the canary's same-day healthy marker
+# before they contend for the shared maintenance lock.
+librenms_daily_canary_enabled: >-
+  {{ librenms_mode == 'ha' and librenms_daily_global_lock_backend == 'shared_file' }}
+librenms_daily_canary_host: >-
+  {{ (librenms_active_web_nodes | default([]) | first) | default('') }}
+librenms_daily_canary_state_path: >-
+  {{ librenms_gluster_mountpoint }}/.librenms-daily-canary-state
+librenms_daily_canary_stabilization_seconds: 300
+librenms_daily_canary_wait_timeout: 7200
+librenms_daily_canary_wait_delay: 15
 librenms_daily_ha_drain_enabled: "{{ librenms_mode == 'ha' }}"
 librenms_daily_ha_drain_path: /run/librenms-daily-drain
 librenms_daily_ha_drain_delay: 15
+# Host firewall enforcement is intentionally opt-in. Enabling it without the
+# explicit management and trusted-cluster CIDRs below fails before any UFW
+# policy change is made, which prevents accidental SSH lockout.
+librenms_manage_host_firewall: false
+librenms_host_firewall_backend: ufw
+librenms_host_firewall_management_sources: []
+librenms_host_firewall_cluster_sources: []
+librenms_host_firewall_web_sources: "{{ librenms_host_firewall_management_sources }}"
+librenms_host_firewall_syslog_sources: []
+librenms_host_firewall_snmp_sources: []
+librenms_host_firewall_ssh_port: 22
+librenms_host_firewall_logging: low
 # Allow a queued node to wait for the two other HA nodes and still complete its
 # own daily.sh run without systemd terminating it first.
 librenms_daily_service_timeout: 10800
@@ -141,7 +170,8 @@ librenms_syslog_listen_udp: true
 librenms_syslog_listen_tcp: true
 librenms_syslog_udp_port: 514
 librenms_syslog_tcp_port: 514
-librenms_syslog_manage_firewall: true
+librenms_syslog_manage_firewall: >-
+  {{ not (librenms_manage_host_firewall | default(false) | bool) }}
 librenms_syslog_forward_local_logs: "{{ librenms_mode == 'ha' }}"
 librenms_syslog_forward_target: >-
   {{
@@ -248,8 +278,11 @@ librenms_galera_sst_method: rsync
 librenms_galera_pc_recovery: true
 librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapped
 librenms_galera_wait_timeout: 120
-librenms_galera_auto_recover_unsafe_bootstrap: true
-librenms_galera_recovery_tie_breaker: first
+# A lost primary component on an existing cluster must be recovered through
+# galera-recover.yml with explicit operator confirmation. First deployment is
+# still bootstrapped automatically when the bootstrap marker does not exist.
+librenms_galera_auto_recover_unsafe_bootstrap: false
+librenms_galera_recovery_tie_breaker: manual
 librenms_galera_stop_timeout: 60
 librenms_galera_bootstrap_timeout: 180
 librenms_galera_force_kill_stale_mariadb: true
@@ -349,7 +382,8 @@ librenms_glusterd_vol_path: /etc/glusterfs/glusterd.vol
 librenms_gluster_transport_address_family: ""
 librenms_gluster_bind_address: ""
 librenms_manage_gluster_hosts_entries: true
-librenms_gluster_manage_firewall: true
+librenms_gluster_manage_firewall: >-
+  {{ not (librenms_manage_host_firewall | default(false) | bool) }}
 librenms_gluster_firewall_ports:
   - 24007
   - 24008
@@ -412,6 +446,18 @@ librenms_haproxy_web_check_host: ""
 librenms_nginx_health_check_path: /healthz
 librenms_php_fpm_ping_path: /php-fpm-ping
 librenms_haproxy_web_check_path: /about
+librenms_manage_web_runtime_health_probe: >-
+  {{
+    librenms_mode == 'ha'
+    and librenms_manage_nginx | bool
+    and librenms_manage_php_fpm | bool
+  }}
+librenms_web_runtime_health_probe_path: "{{ librenms_install_dir }}/html/librenms-runtime-health.php"
+librenms_nginx_runtime_health_check_path: /librenms-runtime-health
+librenms_haproxy_web_runtime_check_enabled: "{{ librenms_manage_web_runtime_health_probe | bool }}"
+librenms_haproxy_web_runtime_check_interval: 3s
+librenms_haproxy_web_runtime_check_fall: 2
+librenms_haproxy_web_runtime_check_rise: 2
 librenms_nginx_redirect_unmatched_hosts: "{{ librenms_vip_enabled | bool }}"
 librenms_haproxy_db_mysql_check_enabled: true
 librenms_haproxy_db_health_user: haproxy_check

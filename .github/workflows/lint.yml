@@ -25,7 +25,7 @@ jobs:
       - name: Install tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --requirement requirements-ci.txt
+          python -m pip install --require-hashes --requirement requirements-ci.txt
           python -m pip check
 
       - name: Install Ansible collections
@@ -43,8 +43,29 @@ jobs:
       - name: Test Galera readiness decisions
         run: make test-galera-readiness
 
+      - name: Test Galera bootstrap guardrails
+        run: make test-galera-bootstrap-guardrails
+
       - name: Test daily maintenance drain guardrails
         run: make test-daily-maintenance-guardrails
+
+      - name: Test runtime web-health guardrails
+        run: make test-runtime-web-health-guardrails
+
+      - name: Test failover recovery guardrails
+        run: make test-failover-recovery-guardrails
+
+      - name: Test load-balancer rollout guardrails
+        run: make test-load-balancer-rollout-guardrails
+
+      - name: Test production readiness evidence guardrails
+        run: make test-production-readiness-evidence-guardrails
+
+      - name: Test AWX strict-status schedule guardrails
+        run: make test-awx-status-schedule-guardrails
+
+      - name: Test host-firewall guardrails
+        run: make test-host-firewall-guardrails
 
       - name: Run ansible-lint
         run: ansible-lint
@@ -73,6 +94,17 @@ jobs:
 
       - name: Run HAProxy web failover integration test
         run: make integration-haproxy-web
+
+  galera-failover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Run Galera quorum and rejoin integration test
+        run: make integration-galera
 
   docker-ha-galera-config:
     runs-on: ubuntu-24.04

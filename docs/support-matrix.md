@@ -35,7 +35,7 @@ ready.
 | Standalone LibreNMS | Primary | Single-node install with local database, local Redis/cache, and local RRD storage. Backups are still required. |
 | Distributed LibreNMS app/poller nodes with external DB/Redis/storage | Primary | Good fit when database, Redis, or storage are managed outside this repo. |
 | Full three-node HA with HAProxy, Keepalived, Galera, Redis Sentinel, and GlusterFS | Primary on primary distros | The main target of this repository. Requires regular drills and backups. |
-| Dockerized HA example | Lab/example | Useful for learning and CI-style validation. Disposable HAProxy web-backend and Redis Sentinel election tests run in CI; this is not a complete production container platform. |
+| Dockerized HA example | Lab/example | Useful for learning and CI-style validation. Disposable HAProxy web-backend, three-node Galera continuity, and Redis Sentinel election tests run in CI; this is not a complete production container platform. |
 | AWX controller | Optional management plane | Supported as a separate controller-side service. It has its own backup and upgrade lifecycle. |
 
 ## Production Readiness Gates
@@ -52,6 +52,7 @@ Do not call a cluster production-ready until these gates pass.
 | HA status | VIP, HAProxy, Keepalived, Galera, Redis/Sentinel, Gluster, scheduler, dispatcher, and writable paths are healthy. | `playbooks/status.yml -e librenms_status_alert_fail_on_degraded=true` |
 | Application validation | LibreNMS validation is clean. | `playbooks/validate.yml` |
 | Backup and restore-test | A backup exists, its SHA-256 manifest and archives validate, and its database dump imports into a disposable database that is removed afterwards. | `playbooks/backup.yml`, `playbooks/restore-test.yml` |
+| Readiness evidence | A successful full readiness run leaves a secret-free, root-readable JSON record plus verified SHA-256 and HMAC-SHA256 sidecars. The retained record must also pass the root-only controller verifier without exposing the app key. | `playbooks/production-readiness.yml`, `/usr/local/sbin/librenms-production-readiness-evidence-verify --evidence <record>` |
 | Post-reboot convergence | A full cluster restart settles without rerunning `cluster.yml`. | `playbooks/post-reboot.yml` |
 | Planned one-node maintenance | One node can be drained, powered down/rebooted, rejoined, and validated. | `maintenance-enter.yml`, `maintenance-exit.yml`, `validate.yml` |
 | Failover drill | Web/VIP drill passes; data-layer drills pass during a maintenance window. | `playbooks/ha-failover-test.yml` |

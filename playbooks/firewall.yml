@@ -1,0 +1,9 @@
+---
+- name: Enforce explicitly configured host firewall policy
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  roles:
+    - role: host_firewall
+      when: librenms_manage_host_firewall | bool

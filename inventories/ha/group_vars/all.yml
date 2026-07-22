@@ -7,6 +7,15 @@ librenms_timezone: Etc/UTC
 
 librenms_app_key: CHANGE_ME_USE_GENERATE_SECRETS
 
+# Production readiness checks this encrypted vault file by default. For secrets
+# injected by AWX or another external system, set the source to external and
+# document the provider plus credential reference instead.
+# librenms_production_readiness_secret_source: ansible_vault
+# librenms_production_readiness_ansible_vault_file: "{{ inventory_dir }}/group_vars/vault.yml"
+# librenms_production_readiness_secret_source: external
+# librenms_production_readiness_external_secret_provider: AWX credential
+# librenms_production_readiness_external_secret_reference: LibreNMS HA secrets
+
 librenms_db_mode: galera
 librenms_db_name: librenms
 librenms_db_user: librenms
@@ -60,6 +69,21 @@ librenms_vip_interface: ""
 librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
 librenms_keepalived_vrid: 51
 
+# Optional host firewall: keep disabled until the CIDRs are reviewed. The
+# managed UFW policy first permits SSH from management and all trusted HA
+# traffic from the cluster network, then denies other inbound traffic.
+# librenms_manage_host_firewall: true
+# librenms_host_firewall_management_sources:
+#   - 10.4.92.0/24
+# librenms_host_firewall_cluster_sources:
+#   - 10.2.7.0/24
+# librenms_host_firewall_web_sources:
+#   - 10.4.92.0/24
+# librenms_host_firewall_syslog_sources:
+#   - 10.3.24.0/24
+# librenms_host_firewall_snmp_sources:
+#   - 10.2.7.0/24
+
 # Domain/TLS through the HAProxy VIP. Point your DNS A record at
 # librenms_vip_ip, then enable these values when you have certificate files.
 #
@@ -90,9 +114,11 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # AWX schedules, monitoring hooks, and pre-maintenance gates.
 #
 # librenms_status_alert_fail_on_degraded: true
-# librenms_status_alerts_enabled: false
-# librenms_status_alert_webhook_url: ""
-# librenms_status_alert_webhook_headers: {}
+# librenms_status_alerts_enabled: true
+# librenms_status_alert_webhook_url: https://hooks.example.com/librenms-ha
+# librenms_status_alert_webhook_headers:
+#   Authorization: "Bearer CHANGE_ME"
+# librenms_status_alert_webhook_validate_certs: true
 
 # Target optional failover drills. Empty values let the role choose safe
 # defaults from the current inventory.
@@ -107,6 +133,13 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_failover_test_dispatcher_host: lnms2
 # librenms_failover_test_redis_query_host: lnms2
 # librenms_failover_test_galera_host: lnms3
+# librenms_failover_test_post_recovery_validate: true
+# librenms_failover_test_write_evidence: true
+# librenms_failover_test_evidence_dir: /var/lib/librenms-ha/failover-evidence
+# librenms_failover_test_evidence_retention_days: 90
+# librenms_production_readiness_write_evidence: true
+# librenms_production_readiness_evidence_dir: /var/lib/librenms-ha/production-readiness-evidence
+# librenms_production_readiness_evidence_retention_days: 365
 
 # Diagnostics bundle tuning for incident capture. Keep fetch enabled for normal
 # controller-side archives; use keep_remote when controller fetch is unreliable.
@@ -158,6 +191,9 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_galera_self_heal_enabled: true
 # librenms_galera_self_heal_failure_threshold: 4
 # librenms_galera_self_heal_restart_cooldown: 600
+# Existing clusters fail closed for a total Galera outage. Do not enable unsafe
+# recovery without a reviewed recovery policy and current backups.
+# librenms_galera_auto_recover_unsafe_bootstrap: false
 
 # Galera recovery guard. Set both values only when there is no Galera Primary
 # component and galera-recover.yml has reported the selected bootstrap host.

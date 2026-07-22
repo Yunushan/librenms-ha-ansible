@@ -26,3 +26,14 @@ librenms_failover_test_redis_failover_retries: 20
 librenms_failover_test_redis_failover_delay: 3
 librenms_failover_test_galera_recovery_retries: 20
 librenms_failover_test_galera_recovery_delay: 3
+librenms_failover_test_max_recovery_seconds: 900
+
+# A drill only passes after the restored cluster can serve LibreNMS again.
+librenms_failover_test_post_recovery_validate: true
+
+# Store compact, secret-free records of successful drills on the controller.
+# Failed drill details remain in the Ansible or AWX job output.
+librenms_failover_test_write_evidence: true
+librenms_failover_test_evidence_dir: /var/lib/librenms-ha/failover-evidence
+librenms_failover_test_evidence_retention_days: 90
+librenms_failover_test_evidence_integrity_enabled: true

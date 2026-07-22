@@ -439,6 +439,23 @@
     loop_var: awx_bootstrap_job_template
     label: "{{ awx_bootstrap_job_template.name }}"
 
+- name: Validate managed AWX strict-status schedule settings
+  ansible.builtin.assert:
+    that:
+      - awx_bootstrap_status_schedule_name | length > 0
+      - awx_bootstrap_status_schedule_rrule is match('^DTSTART:.+ RRULE:.+')
+      - awx_bootstrap_status_job_template_name in awx_bootstrap_job_template_ids
+    fail_msg: >-
+      The AWX strict-status schedule requires a valid DTSTART/RRULE expression
+      and a managed Status Strict job template. Disable
+      awx_bootstrap_status_schedule_enabled only when status monitoring is
+      scheduled outside AWX.
+  when: awx_bootstrap_status_schedule_enabled | bool
+
+- name: Ensure managed AWX strict-status schedule
+  ansible.builtin.include_tasks: status_schedule.yml
+  when: awx_bootstrap_status_schedule_enabled | bool
+
 - name: Validate optional AWX restore-test schedule settings
   ansible.builtin.assert:
     that:

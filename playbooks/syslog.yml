@@ -3,6 +3,7 @@
   hosts: lb_nodes:!maintenance_nodes
   become: true
   gather_facts: true
+  serial: 1
   roles:
     - role: common
     - role: haproxy_keepalived

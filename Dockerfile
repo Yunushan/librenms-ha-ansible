@@ -16,10 +16,10 @@ RUN apt-get update \
         sshpass \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-ci.txt requirements.yml /tmp/
+COPY requirements-ci.in requirements-ci.txt requirements.yml /tmp/
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir --requirement /tmp/requirements-ci.txt \
+    && python -m pip install --no-cache-dir --require-hashes --requirement /tmp/requirements-ci.txt \
     && python -m pip check
 
 RUN mkdir -p /usr/share/ansible/collections \

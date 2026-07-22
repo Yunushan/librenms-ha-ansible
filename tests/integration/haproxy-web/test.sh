@@ -6,7 +6,7 @@ readonly COMPOSE_FILE="${TEST_DIR}/compose.yml"
 readonly PROJECT_NAME="librenms-haproxy-web-integration"
 readonly TIMEOUT_SECONDS="${HAPROXY_WEB_TEST_TIMEOUT_SECONDS:-60}"
 export HAPROXY_WEB_TEST_PORT="${HAPROXY_WEB_TEST_PORT:-18080}"
-readonly HEALTH_URL="http://127.0.0.1:${HAPROXY_WEB_TEST_PORT}/health"
+readonly APPLICATION_URL="http://127.0.0.1:${HAPROXY_WEB_TEST_PORT}/application"
 
 compose() {
     docker compose --project-name "${PROJECT_NAME}" --file "${COMPOSE_FILE}" "$@"
@@ -33,7 +33,7 @@ require_docker() {
 
 backend_from_response() {
     curl --fail --silent --show-error --max-time 2 --dump-header - \
-        --output /dev/null "${HEALTH_URL}" |
+        --output /dev/null "${APPLICATION_URL}" |
         awk '/^X-Backend:/ { print $2; exit }' |
         tr -d '\r'
 }
@@ -45,7 +45,7 @@ wait_for_backend() {
 
     until backend="$(backend_from_response 2>/dev/null)" && [ "${backend}" = "${expected}" ]; do
         if [ "${SECONDS}" -ge "${deadline}" ]; then
-            printf 'Timed out waiting for HAProxy to serve %s through the remaining backend.\n' \
+            printf 'Timed out waiting for HAProxy to serve %s after runtime health failed.\n' \
                 "${expected}" >&2
             return 1
         fi
@@ -60,7 +60,6 @@ main() {
     compose up --detach --quiet-pull
 
     local initial_backend
-    local stopped_service
     local surviving_backend
     local response_backend
     local deadline=$((SECONDS + TIMEOUT_SECONDS))
@@ -68,20 +67,23 @@ main() {
     until initial_backend="$(backend_from_response 2>/dev/null)" && \
         [[ "${initial_backend}" =~ ^web-[12]$ ]]; do
         if [ "${SECONDS}" -ge "${deadline}" ]; then
-            printf 'Timed out waiting for HAProxy health checks to become ready.\n' >&2
+            printf 'Timed out waiting for HAProxy runtime health checks to become ready.\n' >&2
             return 1
         fi
         sleep 1
     done
 
-    stopped_service="${initial_backend}"
     if [ "${initial_backend}" = "web-1" ]; then
         surviving_backend="web-2"
     else
         surviving_backend="web-1"
     fi
 
-    compose stop "${stopped_service}"
+    compose exec --no-TTY "${initial_backend}" sh -c 'touch /tmp/runtime-unhealthy'
+
+    compose exec --no-TTY "${initial_backend}" sh -c 'wget -qO- http://127.0.0.1/application' |
+        grep -Fx 'application-ok' >/dev/null
+
     wait_for_backend "${surviving_backend}"
 
     for _ in 1 2 3; do
@@ -89,8 +91,8 @@ main() {
         [ "${response_backend}" = "${surviving_backend}" ]
     done
 
-    printf 'HAProxy web failover test passed: %s served after %s stopped.\n' \
-        "${surviving_backend}" "${stopped_service}"
+    printf 'HAProxy web failover test passed: %s served after %s runtime health failed.\n' \
+        "${surviving_backend}" "${initial_backend}"
 }
 
 main "$@"

@@ -10,6 +10,13 @@
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 
+- name: Record HA failover drill start time
+  set_fact:
+    librenms_failover_test_started_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+    librenms_failover_test_started_epoch: "{{ now(utc=true, fmt='%s') | int }}"
+  delegate_to: localhost
+  run_once: true
+
 - name: Build active host lists for HA failover test
   set_fact:
     librenms_failover_test_active_nodes: >-
@@ -1100,6 +1107,11 @@
         - librenms_failover_test_restore_services | bool
         - librenms_vip_enabled | bool
       run_once: true
+
+- name: Verify the recovered LibreNMS HA stack
+  include_tasks: post_recovery.yml
+  when: librenms_failover_test_restore_services | bool
+  run_once: true
 
 - name: Report HA failover test summary
   debug:

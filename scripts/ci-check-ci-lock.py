@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Verify that the CI Python toolchain is fully pinned and hash-locked."""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+INPUT_FILE = ROOT / "requirements-ci.in"
+LOCK_FILE = ROOT / "requirements-ci.txt"
+PIN_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)(?:\s+\\)?$")
+HASH_PATTERN = re.compile(r"^\s+--hash=sha256:[0-9a-f]{64}(?:\s+\\)?$")
+
+
+def fail(message: str) -> int:
+    print(f"FAIL: {message}", file=sys.stderr)
+    return 1
+
+
+def pinned_requirements(path: Path) -> dict[str, str]:
+    requirements: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = PIN_PATTERN.match(line)
+        if match:
+            requirements[match.group(1).lower().replace("_", "-")] = match.group(2)
+    return requirements
+
+
+def check_hashes(lock_lines: list[str]) -> list[str]:
+    failures: list[str] = []
+    current_requirement: str | None = None
+    has_hash = False
+
+    for line in lock_lines:
+        match = PIN_PATTERN.match(line)
+        if match:
+            if current_requirement and not has_hash:
+                failures.append(f"{current_requirement} is missing a SHA-256 hash")
+            current_requirement = match.group(1)
+            has_hash = False
+            continue
+
+        if current_requirement and HASH_PATTERN.match(line):
+            has_hash = True
+
+    if current_requirement and not has_hash:
+        failures.append(f"{current_requirement} is missing a SHA-256 hash")
+
+    return failures
+
+
+def main() -> int:
+    if not INPUT_FILE.is_file():
+        return fail(f"missing direct dependency source: {INPUT_FILE.name}")
+    if not LOCK_FILE.is_file():
+        return fail(f"missing generated dependency lock: {LOCK_FILE.name}")
+
+    lock_text = LOCK_FILE.read_text(encoding="utf-8")
+    if "pip-compile --generate-hashes" not in lock_text:
+        return fail("requirements-ci.txt must be generated with pip-compile --generate-hashes")
+    if "requirements-ci.in" not in lock_text:
+        return fail("requirements-ci.txt must record requirements-ci.in as its source")
+
+    direct_requirements = pinned_requirements(INPUT_FILE)
+    locked_requirements = pinned_requirements(LOCK_FILE)
+    if not direct_requirements:
+        return fail("requirements-ci.in must contain exact direct dependency pins")
+
+    failures = check_hashes(lock_text.splitlines())
+    for package, version in direct_requirements.items():
+        locked_version = locked_requirements.get(package)
+        if locked_version is None:
+            failures.append(f"{package} from requirements-ci.in is absent from the lock")
+        elif locked_version != version:
+            failures.append(
+                f"{package} version mismatch: input requires {version}, lock contains {locked_version}"
+            )
+
+    if failures:
+        for message in failures:
+            print(f"FAIL: {message}", file=sys.stderr)
+        return 1
+
+    print("CI dependency lock check passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

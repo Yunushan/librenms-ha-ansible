@@ -6,7 +6,13 @@
     else librenms_active_web_nodes
   )
 %}
-{% set librenms_hc_uri = librenms_haproxy_web_check_path %}
+{% set librenms_hc_uri =
+  (
+    librenms_nginx_runtime_health_check_path
+    if librenms_haproxy_web_runtime_check_enabled | bool
+    else librenms_haproxy_web_check_path
+  )
+%}
 {% set librenms_hc_host = librenms_haproxy_web_check_host_effective %}
 {% set librenms_haproxy_bind_address =
   (librenms_vip_ip if librenms_vip_enabled and librenms_vip_ip | length > 0 else '0.0.0.0')
@@ -41,9 +47,21 @@
   ~ librenms_haproxy_canonical_port
 %}
 {% set librenms_haproxy_web_default_server =
-  'inter ' ~ librenms_haproxy_web_check_interval
-  ~ ' fall ' ~ librenms_haproxy_web_check_fall
-  ~ ' rise ' ~ librenms_haproxy_web_check_rise
+  'inter ' ~ (
+    librenms_haproxy_web_runtime_check_interval
+    if librenms_haproxy_web_runtime_check_enabled | bool
+    else librenms_haproxy_web_check_interval
+  )
+  ~ ' fall ' ~ (
+    librenms_haproxy_web_runtime_check_fall
+    if librenms_haproxy_web_runtime_check_enabled | bool
+    else librenms_haproxy_web_check_fall
+  )
+  ~ ' rise ' ~ (
+    librenms_haproxy_web_runtime_check_rise
+    if librenms_haproxy_web_runtime_check_enabled | bool
+    else librenms_haproxy_web_check_rise
+  )
 %}
 {% set librenms_haproxy_db_default_server =
   'inter ' ~ librenms_haproxy_db_check_interval

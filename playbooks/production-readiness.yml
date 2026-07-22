@@ -4,8 +4,8 @@
   become: true
   gather_facts: true
   roles:
-    - role: production_readiness
     - role: doctor
       vars:
         librenms_doctor_network_tcp_checks_enabled: >-
           {{ librenms_production_readiness_network_tcp_checks_enabled }}
+    - role: production_readiness

@@ -849,16 +849,29 @@ The gates cover:
 - sample HA and standalone inventory validation
 - `ansible-playbook --syntax-check` for every playbook
 
-GitHub Actions runs on the pinned `ubuntu-24.04` image with pinned core lint
-tool versions in `requirements-ci.txt`. This prevents CI behavior changing
-merely because a runner image or one of the primary lint tools released a new
-version. Local development can use newer compatible tooling, but run the pinned
-set before changing CI-sensitive files:
+GitHub Actions runs on the pinned `ubuntu-24.04` image with a fully
+hash-locked core lint toolchain in `requirements-ci.txt`. This prevents CI
+behavior changing merely because a runner image, package release, or package
+artifact changed. Local development can use newer compatible tooling, but run
+the locked set before changing CI-sensitive files:
 
 ```bash
-python3 -m pip install --requirement requirements-ci.txt
+python3 -m pip install --require-hashes --requirement requirements-ci.txt
 make ci
 ```
+
+Docker-capable controllers can also run the destructive integration checks
+directly. They use isolated, digest-pinned images and clean themselves up:
+
+```bash
+make integration-haproxy-web
+make integration-galera
+make integration-redis-sentinel
+```
+
+The Galera test requires three members to synchronize, stops the bootstrap
+member, proves the surviving primary component can replicate a new write, then
+proves the rejoined member receives that write.
 
 `make syntax-check` requires Ansible to be installed on the controller. If you
 are working from a Windows workstation without Ansible, run the checks from WSL,
@@ -1082,6 +1095,13 @@ Additional opt-in cases are available for harder service-loss drills:
   different writable master
 - `galera_node` stops MariaDB on one Galera member and verifies the remaining
   database nodes stay `Primary` and reachable through the VIP
+
+After services are restored, every drill probes the VIP again and, by default,
+runs `validate.php` on a surviving LibreNMS node. A successful drill writes a
+secret-free JSON record on the Ansible controller under
+`/var/lib/librenms-ha/failover-evidence/`; it retains 90 days by default. Set
+`librenms_failover_test_write_evidence: false` to disable controller-side
+records, or adjust its directory and retention variables for local policy.
 
 Run it only after `doctor.yml`, `cluster.yml`, and `validate.yml` are clean:
 
@@ -1841,7 +1861,7 @@ It runs a practical set of checks against:
 Lint locally:
 
 ```bash
-python3 -m pip install --requirement requirements-ci.txt
+python3 -m pip install --require-hashes --requirement requirements-ci.txt
 ansible-galaxy collection install -r requirements.yml
 yamllint .
 ansible-lint

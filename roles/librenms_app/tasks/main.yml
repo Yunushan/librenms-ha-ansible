@@ -1160,6 +1160,28 @@
     - librenms_manage_php_fpm | bool
     - librenms_manage_web_validation_json_filter | bool
 
+- name: Deploy LibreNMS database runtime health probe
+  template:
+    src: librenms-runtime-health.php.j2
+    dest: "{{ librenms_web_runtime_health_probe_path }}"
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0640"
+  when:
+    - librenms_manage_php_fpm | bool
+    - librenms_manage_web_runtime_health_probe | bool
+
+- name: Validate LibreNMS database runtime health probe syntax
+  command:
+    argv:
+      - php
+      - -l
+      - "{{ librenms_web_runtime_health_probe_path }}"
+  changed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+    - librenms_manage_web_runtime_health_probe | bool
+
 - name: Deploy LibreNMS PHP-FPM pool
   template:
     src: php-fpm-librenms.conf.j2
@@ -2324,6 +2346,24 @@
   when:
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_self_heal_enabled | bool
+    - ansible_service_mgr == 'systemd'
+
+- name: Validate daily-update canary configuration
+  assert:
+    that:
+      - librenms_daily_canary_host | length > 0
+      - librenms_daily_canary_host in librenms_active_web_nodes
+      - librenms_daily_canary_stabilization_seconds | int >= 0
+      - librenms_daily_canary_wait_timeout | int > 0
+      - librenms_daily_canary_wait_delay | int > 0
+    fail_msg: >-
+      Daily-update canary mode requires a selected active web host and positive
+      wait settings. Set librenms_daily_canary_host to an entry in
+      librenms_active_web_nodes, or disable librenms_daily_canary_enabled.
+  when:
+    - librenms_manage_daily_maintenance | bool
+    - librenms_daily_self_heal_enabled | bool
+    - librenms_daily_canary_enabled | bool
     - ansible_service_mgr == 'systemd'
 
 - name: Create LibreNMS daily maintenance helper directory

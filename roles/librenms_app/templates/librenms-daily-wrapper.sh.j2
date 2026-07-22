@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 {% set pre_upgrade_backup_enabled = librenms_manage_scheduled_backups | bool and librenms_backup_pre_upgrade_enabled | bool %}
 {% set clear_healthy_update_failure_notification = librenms_daily_self_heal_clear_healthy_update_failure_notification | bool %}
+{% set daily_runtime_health_enabled = librenms_manage_web_runtime_health_probe | bool %}
 set -u
 set -o pipefail
 
@@ -15,6 +16,13 @@ GIT_LOCK_CLEANUP="{{ librenms_daily_self_heal_git_lock_cleanup | bool | ternary(
 GIT_METADATA_REPAIR="{{ librenms_daily_self_heal_git_metadata_repair | bool | ternary('true', 'false') }}"
 GIT_RETRY_AFTER_REPAIR="{{ librenms_daily_self_heal_git_retry_after_repair | bool | ternary('true', 'false') }}"
 CLEAR_CACHE_AFTER_DAILY="{{ librenms_daily_self_heal_clear_laravel_cache_after_daily | bool | ternary('true', 'false') }}"
+VERIFY_WEB_HEALTH="{{ librenms_daily_self_heal_verify_web_health | bool | ternary('true', 'false') }}"
+WEB_HEALTH_URL="http://{{ ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)) }}{{ librenms_nginx_runtime_health_check_path if daily_runtime_health_enabled else librenms_app_probe_path }}"
+WEB_HEALTH_HOST="{{ librenms_haproxy_web_check_host_effective }}"
+WEB_HEALTH_STATUSES="{{ '200' if daily_runtime_health_enabled else librenms_app_probe_success_statuses | join(' ') }}"
+WEB_HEALTH_RETRIES="{{ librenms_daily_self_heal_web_health_retries | int }}"
+WEB_HEALTH_DELAY="{{ librenms_daily_self_heal_web_health_delay | int }}"
+WEB_HEALTH_TIMEOUT="{{ librenms_daily_self_heal_web_health_timeout | int }}"
 HEALTHY_UPDATE_FAILURE_IS_SUCCESS="{{ librenms_daily_self_heal_treat_healthy_update_failure_as_success | bool | ternary('true', 'false') }}"
 CLEAR_HEALTHY_UPDATE_FAILURE_NOTIFICATION="{{ clear_healthy_update_failure_notification | ternary('true', 'false') }}"
 HEALTHY_FAILURE_NOTIFICATION_CLEANUP_DAYS="{{ librenms_daily_self_heal_notification_cleanup_days | int }}"
@@ -24,6 +32,13 @@ GLOBAL_LOCK_NAME="{{ librenms_daily_global_lock_name }}"
 GLOBAL_LOCK_TIMEOUT="{{ librenms_daily_global_lock_timeout | int }}"
 GLOBAL_LOCK_BACKEND="{{ librenms_daily_global_lock_backend }}"
 GLOBAL_LOCK_SHARED_FILE="{{ librenms_daily_global_lock_shared_file }}"
+CANARY_ENABLED="{{ librenms_daily_canary_enabled | bool | ternary('true', 'false') }}"
+CANARY_HOST="{{ librenms_daily_canary_host }}"
+CANARY_NODE="{{ inventory_hostname }}"
+CANARY_STATE_PATH="{{ librenms_daily_canary_state_path }}"
+CANARY_STABILIZATION_SECONDS="{{ librenms_daily_canary_stabilization_seconds | int }}"
+CANARY_WAIT_TIMEOUT="{{ librenms_daily_canary_wait_timeout | int }}"
+CANARY_WAIT_DELAY="{{ librenms_daily_canary_wait_delay | int }}"
 BACKUP_WRAPPER="{{ librenms_backup_wrapper_path }}"
 PRE_UPGRADE_BACKUP_ENABLED="{{ pre_upgrade_backup_enabled | ternary('true', 'false') }}"
 PRE_UPGRADE_BACKUP_REQUIRED="{{ librenms_backup_pre_upgrade_required | bool | ternary('true', 'false') }}"
@@ -42,6 +57,105 @@ log() {
 
 run_as_librenms() {
     runuser -u "${LIBRENMS_USER}" -- "$@"
+}
+
+is_canary_node() {
+    [ "${CANARY_NODE}" = "${CANARY_HOST}" ]
+}
+
+read_canary_state_value() {
+    local key="$1"
+
+    [ -r "${CANARY_STATE_PATH}" ] || return 1
+    sed -n "s/^${key}=//p" "${CANARY_STATE_PATH}" | head -n 1
+}
+
+canary_state_is_ready() {
+    local expected_date
+    local state_date
+    local state_status
+    local completed_epoch
+    local now
+    local age
+
+    [ -r "${CANARY_STATE_PATH}" ] || return 1
+
+    expected_date="$(date +%F)"
+    state_date="$(read_canary_state_value date || true)"
+    state_status="$(read_canary_state_value status || true)"
+    completed_epoch="$(read_canary_state_value completed_epoch || true)"
+
+    [ "${state_date}" = "${expected_date}" ] || return 1
+    [ "${state_status}" = "passed" ] || return 1
+    [[ "${completed_epoch}" =~ ^[0-9]+$ ]] || return 1
+
+    now="$(date +%s)"
+    age=$((now - completed_epoch))
+    [ "${age}" -ge "${CANARY_STABILIZATION_SECONDS}" ]
+}
+
+prepare_daily_canary_gate() {
+    local deadline
+
+    [ "${CANARY_ENABLED}" = "true" ] || return 0
+    [ "${LIBRENMS_DAILY_CANARY_BYPASS:-false}" = "true" ] && return 0
+
+    if is_canary_node; then
+        if [ ! -d "$(dirname "${CANARY_STATE_PATH}")" ]; then
+            log "daily canary state directory is unavailable"
+            return 1
+        fi
+
+        rm -f -- "${CANARY_STATE_PATH}" || return 1
+        log "acting as the daily-update canary"
+        return 0
+    fi
+
+    deadline=$(( $(date +%s) + CANARY_WAIT_TIMEOUT ))
+    log "waiting for daily-update canary ${CANARY_HOST} before follower maintenance"
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+        if canary_state_is_ready; then
+            log "daily-update canary completed healthy stabilization; follower may continue"
+            return 0
+        fi
+
+        sleep "${CANARY_WAIT_DELAY}"
+    done
+
+    log "daily-update canary did not complete healthy stabilization; skipping follower maintenance"
+    return 2
+}
+
+mark_daily_canary_success() {
+    local state_dir
+    local state_tmp
+    local release
+
+    [ "${CANARY_ENABLED}" = "true" ] || return 0
+    is_canary_node || return 0
+
+    state_dir="$(dirname "${CANARY_STATE_PATH}")"
+    [ -d "${state_dir}" ] || return 1
+    state_tmp="$(mktemp "${state_dir}/.librenms-daily-canary-state.XXXXXX")" || return 1
+    release="$(run_as_librenms git -C "${LIBRENMS_DIR}" describe --tags --always 2>/dev/null || true)"
+
+    {
+        printf 'date=%s\n' "$(date +%F)"
+        printf 'host=%s\n' "${CANARY_NODE}"
+        printf 'status=passed\n'
+        printf 'completed_epoch=%s\n' "$(date +%s)"
+        printf 'release=%s\n' "${release}"
+    } > "${state_tmp}" || {
+        rm -f -- "${state_tmp}"
+        return 1
+    }
+
+    chmod 0644 "${state_tmp}" || {
+        rm -f -- "${state_tmp}"
+        return 1
+    }
+    mv -f -- "${state_tmp}" "${CANARY_STATE_PATH}"
+    log "recorded healthy daily-update canary completion"
 }
 
 acquire_cluster_maintenance_lock() {
@@ -187,7 +301,7 @@ run_daily() {
             LIBRENMS_DAILY_PRE_UPGRADE_BACKUP_ENABLED="${PRE_UPGRADE_BACKUP_ENABLED}" \
             LIBRENMS_DAILY_PRE_UPGRADE_BACKUP_REQUIRED="${PRE_UPGRADE_BACKUP_REQUIRED}" \
             LIBRENMS_DAILY_BACKUP_WRAPPER="${BACKUP_WRAPPER}" \
-            LIBRENMS_DAILY_HA_DRAIN_ENABLED="${HA_DRAIN_ENABLED}" \
+            LIBRENMS_DAILY_HA_DRAIN_ENABLED="false" \
             LIBRENMS_DAILY_HA_DRAIN_PATH="${HA_DRAIN_PATH}" \
             LIBRENMS_DAILY_HA_DRAIN_DELAY="${HA_DRAIN_DELAY}" \
             php "${GLOBAL_LOCK_HELPER}" \
@@ -269,6 +383,57 @@ restart_php_fpm() {
     systemctl restart "${PHP_FPM_SERVICE}"
 }
 
+web_health_status_accepted() {
+    case " ${WEB_HEALTH_STATUSES} " in
+        *" $1 "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+check_web_health() {
+    local attempt=1
+    local status
+
+    [ "${VERIFY_WEB_HEALTH}" = "true" ] || return 0
+
+    if ! command -v curl >/dev/null 2>&1; then
+        log "curl is unavailable; cannot verify the post-update web health"
+        return 1
+    fi
+
+    while [ "${attempt}" -le "${WEB_HEALTH_RETRIES}" ]; do
+        status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --connect-timeout "${WEB_HEALTH_TIMEOUT}" \
+            --max-time "${WEB_HEALTH_TIMEOUT}" \
+            --header "Host: ${WEB_HEALTH_HOST}" \
+            "${WEB_HEALTH_URL}" 2>/dev/null || true)"
+        if web_health_status_accepted "${status}"; then
+            log "post-update web health check passed with HTTP ${status}"
+            return 0
+        fi
+
+        log "post-update web health check ${attempt}/${WEB_HEALTH_RETRIES} returned HTTP ${status:-unreachable}"
+        attempt=$((attempt + 1))
+        [ "${attempt}" -le "${WEB_HEALTH_RETRIES}" ] && sleep "${WEB_HEALTH_DELAY}"
+    done
+
+    return 1
+}
+
+recover_web_health() {
+    check_web_health && return 0
+
+    log "post-update web health check failed; retrying local cache and web-service recovery"
+    clear_laravel_cache || log "Laravel cache clear failed during web health recovery"
+    restart_php_fpm || log "PHP-FPM restart failed during web health recovery"
+    if [ -n "{{ librenms_nginx_service_name }}" ]; then
+        systemctl restart "{{ librenms_nginx_service_name }}" ||
+            log "nginx restart failed during web health recovery"
+    fi
+
+    check_web_health
+}
+
 post_daily_web_cache_repair() {
     [ "${CLEAR_CACHE_AFTER_DAILY}" = "true" ] || return 0
 
@@ -331,6 +496,14 @@ if git_process_active; then
     exit 0
 fi
 
+prepare_daily_canary_gate
+canary_gate_rc=$?
+if [ "${canary_gate_rc}" -eq 2 ]; then
+    exit 0
+elif [ "${canary_gate_rc}" -ne 0 ]; then
+    exit "${canary_gate_rc}"
+fi
+
 acquire_cluster_maintenance_lock
 cluster_lock_rc=$?
 if [ "${cluster_lock_rc}" -eq 2 ]; then
@@ -344,9 +517,9 @@ if git_process_active; then
     exit 0
 fi
 
-if [ "${GLOBAL_LOCK_ENABLED}" != "true" ]; then
-    activate_ha_drain || exit $?
-fi
+# The outer wrapper owns the drain marker so it remains active through cache
+# refresh, PHP-FPM recovery, and the final local application health check.
+activate_ha_drain || exit $?
 
 cleanup_stale_git_locks || cleanup_rc=$?
 if [ "${cleanup_rc}" -eq 1 ]; then
@@ -374,7 +547,13 @@ fi
 post_daily_web_cache_repair
 
 if check_autoload; then
+    if ! recover_web_health; then
+        log "post-update web health did not recover; HAProxy will keep this backend down until its application check succeeds"
+        exit 1
+    fi
+
     if [ "${daily_rc}" -eq 0 ]; then
+        mark_daily_canary_success || exit $?
         cleared_count="$(clear_daily_update_failure_notification 2>/dev/null | tail -n 1)" &&
             log "cleared ${cleared_count:-0} stale daily.sh failure notification(s)" ||
             log "failed to clear stale daily.sh failure notification"
@@ -399,8 +578,14 @@ clear_laravel_cache || true
 restart_php_fpm || true
 
 if check_autoload; then
-    log "self-heal completed successfully"
-    exit 0
+    if recover_web_health; then
+        mark_daily_canary_success || exit $?
+        log "self-heal completed successfully"
+        exit 0
+    fi
+
+    log "self-heal restored autoload but not the LibreNMS web application"
+    exit 1
 fi
 
 log "self-heal did not restore LibreNMS autoload health"

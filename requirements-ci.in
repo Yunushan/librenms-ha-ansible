@@ -1,0 +1,5 @@
+# Direct CI tooling. requirements-ci.txt is generated from this file with
+# pip-compile --generate-hashes and is the only file used for installation.
+ansible-core==2.21.2
+ansible-lint==26.6.0
+yamllint==1.38.0

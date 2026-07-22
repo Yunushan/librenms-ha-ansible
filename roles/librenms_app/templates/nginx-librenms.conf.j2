@@ -63,6 +63,24 @@ server {
     }
 {% endif %}
 
+{% if librenms_manage_web_runtime_health_probe | bool %}
+    location = {{ librenms_nginx_runtime_health_check_path }} {
+        access_log off;
+{% if librenms_daily_ha_drain_enabled | bool %}
+        if (-f {{ librenms_daily_ha_drain_path }}) {
+            return 503;
+        }
+{% endif %}
+        include fastcgi.conf;
+        fastcgi_param SCRIPT_FILENAME {{ librenms_web_runtime_health_probe_path }};
+        fastcgi_param SCRIPT_NAME {{ librenms_nginx_runtime_health_check_path }};
+        fastcgi_connect_timeout {{ librenms_nginx_fastcgi_connect_timeout }};
+        fastcgi_send_timeout {{ librenms_nginx_fastcgi_send_timeout }};
+        fastcgi_read_timeout {{ librenms_nginx_fastcgi_read_timeout }};
+        fastcgi_pass unix:{{ librenms_php_fpm_socket }};
+    }
+{% endif %}
+
     location = {{ librenms_php_fpm_ping_path }} {
         access_log off;
         include fastcgi.conf;

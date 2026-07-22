@@ -303,6 +303,24 @@ Reasonable production schedules:
 Avoid running `cluster.yml` on a timer. It is a convergence tool for intentional
 changes, not a monitoring job.
 
+### Managed Strict-Status Schedule
+
+`awx-bootstrap.yml` creates and maintains a non-disruptive Status Strict
+schedule every 10 minutes by default. It fails the AWX job when a VIP, Galera,
+Redis/Sentinel, GlusterFS, dispatcher, scheduler, or runtime-health check is
+degraded. Configure AWX notifications for failed jobs to route these events to
+the on-call destination.
+
+Disable or change the cadence only when another monitoring platform owns the
+same responsibility:
+
+```yaml
+awx_bootstrap_status_schedule_enabled: false
+# Or keep it enabled and use an approved cadence:
+awx_bootstrap_status_schedule_rrule: >-
+  DTSTART:20260101T000000Z RRULE:FREQ=MINUTELY;INTERVAL=5
+```
+
 ### Managed Restore-Test Schedule
 
 `awx-bootstrap.yml` can create and maintain one weekly restore-test schedule.

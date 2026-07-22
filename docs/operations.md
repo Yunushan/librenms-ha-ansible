@@ -65,6 +65,73 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml \
   -e librenms_doctor_network_tcp_checks_enabled=true
 ```
 
+For a managed host firewall, explicitly set the management and trusted-cluster
+CIDRs in \`inventories/ha/group_vars/all.yml\`, review them with an SSH session
+that originates from the management CIDR, then apply the policy one node at a
+time:
+
+```yaml
+librenms_manage_host_firewall: true
+librenms_host_firewall_management_sources:
+  - 10.4.92.0/24
+librenms_host_firewall_cluster_sources:
+  - 10.2.7.0/24
+librenms_host_firewall_web_sources:
+  - 10.4.92.0/24
+librenms_host_firewall_syslog_sources:
+  - 10.3.24.0/24
+```
+
+```bash
+ansible-playbook -i inventories/ha/hosts.yml playbooks/firewall.yml \
+  --ask-become-pass
+```
+
+The firewall role is disabled by default, permits SSH before UFW is enabled,
+allows all traffic from only the trusted HA CIDRs, and then applies a deny-by-
+default inbound policy. It refuses to run without explicit management and
+cluster sources, so it cannot infer a network policy or silently risk an SSH
+lockout. Add \`librenms_host_firewall_snmp_sources\` when local SNMP agents are
+managed. When host-firewall management is enabled, the broad legacy syslog and
+Gluster firewall helpers are automatically disabled in favor of this restricted
+policy.
+
+### Production secret source
+
+HA production-readiness checks require an encrypted Ansible Vault file by
+default. The default path is
+`inventories/ha/group_vars/vault.yml`, which should contain the generated
+application, database, Redis, Sentinel, and VRRP secrets:
+
+```bash
+python3 scripts/generate-secrets.py > inventories/ha/group_vars/vault.yml
+ansible-vault encrypt inventories/ha/group_vars/vault.yml
+```
+
+For secrets injected by AWX or another external system, deliberately select
+the external mode and identify the provider and credential reference. The
+reference is recorded only as configuration metadata; secret values are never
+written to readiness evidence or task output. External mode also requires a
+fixed-argument provider command that can run successfully on the Ansible
+controller. The command output and environment are redacted, so it should
+perform a non-mutating provider lookup without echoing the secret.
+
+```yaml
+librenms_production_readiness_secret_source: external
+librenms_production_readiness_external_secret_provider: AWX credential
+librenms_production_readiness_external_secret_reference: LibreNMS HA secrets
+librenms_production_readiness_external_secret_validation_command:
+  - vault
+  - kv
+  - get
+  - -field=version
+  - secret/librenms-ha
+```
+
+Set `librenms_production_readiness_require_encrypted_vault: false` only for a
+documented exception. It disables this certification gate, not the normal
+Ansible Vault or external-secret mechanism.
+
 6. Check HA state and then the application:
 
 ```bash
@@ -220,6 +287,90 @@ reduced cluster size, then requires the restored node to rejoin
 HAProxy database VIP. A timeout is a failed recovery proof, not a successful
 drill with a slow backend.
 
+After every restored drill, the role retries the VIP application probe and runs
+`validate.php` on an active LibreNMS node. It requires healthy database, Redis,
+dispatcher, and rrdcached dependencies before reporting success. Successful
+drills also create a compact, secret-free evidence record on the Ansible
+controller at `/var/lib/librenms-ha/failover-evidence/`, retained for 90 days.
+Each new record has a root-readable SHA-256 sidecar. Production readiness
+rejects a missing, malformed, or mismatched checksum by default, so run a new
+confirmed drill after enabling this version if older evidence has no sidecar.
+Configure `librenms_failover_test_evidence_dir`,
+`librenms_failover_test_evidence_retention_days`, or set
+`librenms_failover_test_write_evidence: false` to follow controller storage
+policy. Failed runs retain their detailed evidence in the Ansible or AWX job
+output and do not create a passing record.
+
+On HA deployments, the daily update wrapper also requires the local PHP runtime
+database health endpoint to return HTTP 200 before it removes its drain marker.
+This is the same deep check used by HAProxy, so a node whose web workers cannot
+query MariaDB stays out of rotation while the wrapper attempts its local
+cache/PHP-FPM recovery.
+
+The full production readiness gate also writes a separate secret-free passing
+record, SHA-256 sidecar, and authenticated HMAC-SHA256 sidecar to
+/var/lib/librenms-ha/production-readiness-evidence/ on the Ansible controller
+and retains them for 365 days. Both sidecars are verified immediately after
+they are written. The HMAC uses the existing app key without printing it, so a
+record and ordinary checksum changed together cannot be accepted by an actor
+who can modify evidence storage but cannot access the application secret. The
+record contains the completed time, topology, and which live verification
+scopes passed; it does not contain credentials, private keys, or backup paths.
+Configure
+librenms_production_readiness_evidence_dir,
+librenms_production_readiness_evidence_retention_days, or set
+librenms_production_readiness_write_evidence: false to follow controller
+storage policy. Set
+`librenms_production_readiness_evidence_integrity_enabled: false` or
+`librenms_production_readiness_evidence_hmac_enabled: false` only when an
+external immutable evidence store provides equivalent integrity protection.
+AWX also receives the result through job statistics.
+
+The readiness run installs a root-only controller verifier at
+`/usr/local/sbin/librenms-production-readiness-evidence-verify`. To validate
+the newest retained record later without exposing the app key, run:
+
+```bash
+cd /var/lib/librenms-ha/production-readiness-evidence
+latest=$(ls -1t production-readiness-*.json | head -n 1)
+sudo /usr/local/sbin/librenms-production-readiness-evidence-verify \
+  --evidence "$latest" --app-env /opt/librenms/.env
+```
+
+In HA mode, that gate also requires a successful controller-side failover drill
+record no older than 30 days by default. The drill must cover at least
+`web_backend` and `keepalived_vip`; set
+`librenms_production_readiness_required_failover_cases` to require additional
+cases such as `redis_master` or `galera_node`. The record is also bound to the
+current HA mode and VIP, so evidence copied from another environment cannot
+satisfy this gate. It must include a measured recovery time no greater than the
+900-second default objective; set
+`librenms_production_readiness_max_failover_recovery_seconds` only after
+reviewing the service recovery-time objective. This is deliberately fail-closed:
+current service health does not prove that a VIP transition works.
+
+The gate also verifies that the managed `librenms-backup-daily.timer` is active,
+has a future invocation, and that its most recent service execution is not in a
+failed state. This protects the ongoing recovery-point objective after the
+one-time backup and restore verification completes. Set
+`librenms_production_readiness_require_scheduled_daily_backup: false` only for
+a reviewed deployment that uses an independently managed backup scheduler.
+
+The disposable database restore verification is also timed and must complete
+within 1,800 seconds by default. The resulting duration and objective are kept
+in the controller-side readiness evidence. Set
+`librenms_production_readiness_max_database_restore_seconds` to the approved
+database recovery-time objective for the deployment.
+
+The gate runs Doctor's live route and TCP matrix before it writes its passing
+record. A failed Galera, Redis, GlusterFS, or load-balancer path therefore
+cannot leave a misleading production-readiness evidence file behind.
+
+`site.yml` and `syslog.yml` apply HAProxy and Keepalived configuration with
+`serial: 1`. This deliberately rolls changes across load-balancer nodes so a
+template, certificate, or syslog-listener change cannot reload every HAProxy
+instance and restart every Keepalived instance simultaneously.
+
 Use `librenms_failover_test_haproxy_host`,
 `librenms_failover_test_dispatcher_host`,
 `librenms_failover_test_redis_query_host`, and
@@ -265,7 +416,12 @@ librenms_status_alert_webhook_headers:
 
 Webhook delivery is delegated to the Ansible controller by default. Set
 `librenms_status_alert_webhook_delegate` only if the webhook endpoint is
-reachable from a specific managed host instead.
+reachable from a specific managed host instead. HA production-readiness runs
+require this channel by default: the webhook URL must use HTTPS, certificate
+validation must remain enabled, and `librenms_status_alerts_enabled` must be
+true. Set `librenms_production_readiness_require_status_alert_routing: false`
+only for a documented exception while an external alerting route is being
+established.
 
 ### Diagnostics bundles
 
@@ -335,6 +491,19 @@ that runs LibreNMS as the `librenms` user, checks PHP autoload health afterward,
 and repairs incomplete `vendor/` installs by rerunning LibreNMS' Composer
 wrapper, clearing Laravel caches, and restarting PHP-FPM.
 
+HA mode also uses a deterministic canary by default: the first active web node
+in inventory is the canary, and all other nodes wait for its same-day healthy
+completion record on GlusterFS before they can start their own maintenance.
+The record is written only after the canary's post-update runtime probe has
+passed, then waits five minutes by default before followers continue. If the
+canary fails or never becomes healthy, followers skip their unattended update
+instead of propagating the release failure. The relevant settings are
+`librenms_daily_canary_host`, `librenms_daily_canary_stabilization_seconds`,
+`librenms_daily_canary_wait_timeout`, and
+`librenms_daily_canary_wait_delay`. Set
+`LIBRENMS_DAILY_CANARY_BYPASS=true` only for a deliberate manual maintenance
+run that has already been approved.
+
 While a node holds the HA maintenance lock, the outer maintenance wrapper
 creates a short-lived local drain marker. Nginx returns `503` for that node's
 HAProxy health-check path, so HAProxy removes only the updating backend before
@@ -356,7 +525,12 @@ can still fail and alert, but stale local Git state should not require manual
 cleanup.
 
 After each `daily.sh` run, the wrapper clears Laravel caches and restarts
-PHP-FPM by default. This prevents web requests from holding stale generated
+PHP-FPM by default, then probes the local LibreNMS application endpoint using
+the same accepted HTTP status policy as deployment verification. If the first
+probe fails, it repeats the cache clear and restarts PHP-FPM and nginx once
+before retrying. The HA drain marker remains present throughout those checks,
+so HAProxy does not send user traffic to a node whose post-update application
+health has not recovered. This prevents web requests from holding stale generated
 cache or opcache references after an update, such as missing
 `bootstrap/cache/routes-v*.php` files. If `daily.sh` exits non-zero after these
 repairs but the wrapper confirms LibreNMS autoload health, the service exits
@@ -436,10 +610,17 @@ archives, then imports the database dump into a disposable database that is
 removed after the check. That
 run applies the configured daily retention policy.
 
-HAProxy also checks the LibreNMS `/about` route for each web backend by default.
-If an update leaves one node with broken Composer dependencies or a Laravel boot
-error, that node is marked down for browser traffic while the healthy nodes keep
-serving the VIP.
+HA deployments use a dedicated PHP runtime health route for each web backend by
+default. It performs a small fresh database query and returns only `200 ok` or
+`503 unavailable`; it does not expose credentials or exception details. If a
+PHP-FPM worker has lost its MariaDB connection, or an update leaves one node with
+broken Composer dependencies or a Laravel boot error, HAProxy marks that backend
+down before it can continue returning intermittent browser `500` responses.
+The static `/about` check remains available by setting
+`librenms_haproxy_web_runtime_check_enabled: false`.
+`production-readiness.yml` also probes that same runtime endpoint directly on
+every active application node, so a pass proves that no backend is merely hidden
+behind a healthy VIP peer.
 
 In Gluster-backed HA mode, the LibreNMS web validation page can sample an RRD
 while `rrdcached` is actively writing it and report `RRD ERROR: could not lock
@@ -675,6 +856,12 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
   --ask-become-pass \
   -e librenms_galera_recover_confirm=true
 ```
+
+site.yml also fails closed in this state after the first successful cluster
+bootstrap. It never chooses the configured database host merely because it is
+first in inventory. Keep librenms_galera_auto_recover_unsafe_bootstrap false
+unless an operator has approved a narrowly scoped exception; the default
+recovery tie-breaker is manual.
 
 Bootstrap only the selected host reported by the playbook:
 

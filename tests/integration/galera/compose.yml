@@ -1,0 +1,32 @@
+---
+name: librenms-galera-integration
+
+x-galera-node: &galera-node
+  image: mariadb:11.4@sha256:a794d9eb009e20de605858a11f32f63b4075cbd197c650436f0e3b457e4caed7
+  environment:
+    MARIADB_ROOT_PASSWORD: integration-secret
+  volumes:
+    - ./galera.cnf:/etc/mysql/conf.d/99-galera-integration.cnf:ro
+
+services:
+  galera-1:
+    <<: *galera-node
+    command:
+      - mariadbd
+      - --wsrep-node-name=galera-1
+      - --wsrep-node-address=galera-1
+      - --wsrep-new-cluster
+
+  galera-2:
+    <<: *galera-node
+    command:
+      - mariadbd
+      - --wsrep-node-name=galera-2
+      - --wsrep-node-address=galera-2
+
+  galera-3:
+    <<: *galera-node
+    command:
+      - mariadbd
+      - --wsrep-node-name=galera-3
+      - --wsrep-node-address=galera-3

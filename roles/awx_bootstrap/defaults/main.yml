@@ -36,6 +36,15 @@ awx_bootstrap_fail_on_missing_credentials: true
 awx_bootstrap_execution_environment_name: ""
 awx_bootstrap_fail_on_missing_execution_environment: true
 
+# Read-only recurring health verification. This job only fails when the strict
+# status playbook detects a degraded component; AWX notifications can then
+# route that failure to the responsible on-call destination.
+awx_bootstrap_status_schedule_enabled: true
+awx_bootstrap_status_schedule_name: LibreNMS HA - Status Strict Every 10 Minutes
+awx_bootstrap_status_schedule_rrule: >-
+  DTSTART:20260101T000000Z RRULE:FREQ=MINUTELY;INTERVAL=10
+awx_bootstrap_status_job_template_name: LibreNMS HA - Status Strict
+
 # Disabled by default because this performs a real disposable database import.
 # When enabled, the schedule selects the newest managed daily backup rather
 # than relying on a timestamp that was known when AWX was configured.

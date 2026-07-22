@@ -1,0 +1,204 @@
+---
+- name: Verify the VIP application endpoint after all recoveries
+  uri:
+    url: "{{ librenms_failover_test_vip_url }}"
+    headers:
+      Host: "{{ librenms_failover_test_http_host }}"
+    method: GET
+    return_content: false
+    status_code: "{{ librenms_failover_test_http_statuses }}"
+    timeout: "{{ librenms_failover_test_http_timeout }}"
+    follow_redirects: "{{ librenms_failover_test_http_follow_redirects }}"
+    validate_certs: "{{ librenms_failover_test_validate_certs | bool }}"
+  delegate_to: "{{ librenms_failover_test_probe_delegate_effective }}"
+  register: librenms_failover_test_post_recovery_vip_probe
+  retries: "{{ librenms_failover_test_probe_retries | int }}"
+  delay: "{{ librenms_failover_test_probe_delay | int }}"
+  until: >-
+    (librenms_failover_test_post_recovery_vip_probe.status | default(0) | int)
+    in librenms_failover_test_http_statuses
+  changed_when: false
+
+- name: Select LibreNMS node for post-recovery validation
+  set_fact:
+    librenms_failover_test_post_recovery_validation_host: >-
+      {{ librenms_failover_test_active_nodes | first | default('') }}
+  when: librenms_failover_test_post_recovery_validate | bool
+
+- name: Require a LibreNMS node for post-recovery validation
+  assert:
+    that:
+      - librenms_failover_test_post_recovery_validation_host | length > 0
+    fail_msg: >-
+      No active LibreNMS node is available for post-recovery validation.
+  when: librenms_failover_test_post_recovery_validate | bool
+
+- name: Run LibreNMS validation after all recoveries
+  command:
+    argv:
+      - php
+      - validate.php
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  delegate_to: "{{ librenms_failover_test_post_recovery_validation_host }}"
+  register: librenms_failover_test_post_recovery_validation
+  retries: "{{ librenms_failover_test_probe_retries | int }}"
+  delay: "{{ librenms_failover_test_probe_delay | int }}"
+  until:
+    - librenms_failover_test_post_recovery_validation.rc == 0
+    - "'[FAIL]' not in librenms_failover_test_post_recovery_validation.stdout"
+  changed_when: false
+  when: librenms_failover_test_post_recovery_validate | bool
+
+- name: Require LibreNMS dependencies after all recoveries
+  assert:
+    that:
+      - "'[OK]    Database Connected' in librenms_failover_test_post_recovery_validation.stdout"
+      - "'[OK]    Redis is functional' in librenms_failover_test_post_recovery_validation.stdout"
+      - "'[OK]    Dispatcher Service is enabled' in librenms_failover_test_post_recovery_validation.stdout"
+      - "'[OK]    Connected to rrdcached' in librenms_failover_test_post_recovery_validation.stdout"
+    fail_msg: >-
+      LibreNMS validation did not confirm database, Redis, dispatcher, and RRD
+      dependencies after the controlled failover drill. Do not declare the
+      cluster recovered until this passes.
+  when: librenms_failover_test_post_recovery_validate | bool
+
+- name: Calculate HA failover drill recovery time
+  set_fact:
+    librenms_failover_test_completed_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+    librenms_failover_test_elapsed_seconds: >-
+      {{
+        (now(utc=true, fmt='%s') | int)
+        - (librenms_failover_test_started_epoch | int)
+      }}
+    librenms_failover_test_evidence_filename: >-
+      failover-drill-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}.json
+  delegate_to: localhost
+  run_once: true
+
+- name: Require HA failover drill recovery within its objective
+  assert:
+    that:
+      - >-
+        (librenms_failover_test_elapsed_seconds | int)
+        <= (librenms_failover_test_max_recovery_seconds | int)
+    fail_msg: >-
+      HA failover drill recovered in
+      {{ librenms_failover_test_elapsed_seconds }} seconds, exceeding the
+      configured {{ librenms_failover_test_max_recovery_seconds }}-second
+      recovery objective.
+  delegate_to: localhost
+  run_once: true
+
+- name: Prepare HA failover drill evidence content
+  set_fact:
+    librenms_failover_test_evidence_content: >-
+      {{
+        {
+          'completed_at': librenms_failover_test_completed_at,
+          'started_at': librenms_failover_test_started_at,
+          'elapsed_seconds': librenms_failover_test_elapsed_seconds | int,
+          'result': 'passed',
+          'mode': librenms_mode,
+          'vip': librenms_vip_ip,
+          'cases': librenms_failover_test_cases,
+          'probe_delegate': librenms_failover_test_probe_delegate_effective,
+          'vip_http_status':
+            librenms_failover_test_post_recovery_vip_probe.status,
+          'validation_host': librenms_failover_test_post_recovery_validation_host
+            | default(''),
+          'validation_enabled': librenms_failover_test_post_recovery_validate | bool,
+          'web_backend_target': librenms_failover_test_web_backend_host_effective,
+          'haproxy_target': librenms_failover_test_haproxy_host_effective | default(''),
+          'dispatcher_target': librenms_failover_test_dispatcher_host_effective,
+          'galera_target': librenms_failover_test_galera_host_effective,
+          'redis_original_master': librenms_failover_test_redis_master_inventory_host
+            | default('')
+        }
+        | to_nice_json
+      }}
+  delegate_to: localhost
+  no_log: true
+  run_once: true
+
+- name: Create controller-side HA failover evidence directory
+  file:
+    path: "{{ librenms_failover_test_evidence_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  delegate_to: localhost
+  become: true
+  when: librenms_failover_test_write_evidence | bool
+
+- name: Find expired HA failover evidence records
+  find:
+    paths: "{{ librenms_failover_test_evidence_dir }}"
+    patterns:
+      - "failover-drill-*.json"
+      - "failover-drill-*.json.sha256"
+    age: "{{ librenms_failover_test_evidence_retention_days | int }}d"
+    age_stamp: mtime
+    file_type: file
+  delegate_to: localhost
+  register: librenms_failover_test_expired_evidence
+  changed_when: false
+  when: librenms_failover_test_write_evidence | bool
+
+- name: Remove expired HA failover evidence records
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_failover_test_expired_evidence.files | default([]) }}"
+  delegate_to: localhost
+  become: true
+  when: librenms_failover_test_write_evidence | bool
+
+- name: Write successful HA failover drill evidence
+  copy:
+    dest: "{{ librenms_failover_test_evidence_dir }}/{{ librenms_failover_test_evidence_filename }}"
+    content: "{{ librenms_failover_test_evidence_content }}"
+    owner: root
+    group: root
+    mode: "0640"
+  delegate_to: localhost
+  become: true
+  register: librenms_failover_test_evidence
+  when: librenms_failover_test_write_evidence | bool
+
+- name: Write HA failover drill evidence checksum
+  copy:
+    dest: >-
+      {{ librenms_failover_test_evidence_dir }}/{{
+      librenms_failover_test_evidence_filename }}.sha256
+    content: >-
+      {{ librenms_failover_test_evidence_content | hash('sha256') }}
+      {{ librenms_failover_test_evidence_filename }}
+    owner: root
+    group: root
+    mode: "0640"
+  delegate_to: localhost
+  become: true
+  when:
+    - librenms_failover_test_write_evidence | bool
+    - librenms_failover_test_evidence_integrity_enabled | bool
+
+- name: Publish HA failover drill result for controller job records
+  set_stats:
+    data:
+      librenms_ha_failover_test:
+        completed_at: "{{ librenms_failover_test_completed_at }}"
+        elapsed_seconds: "{{ librenms_failover_test_elapsed_seconds | int }}"
+        recovery_objective_seconds: >-
+          {{ librenms_failover_test_max_recovery_seconds | int }}
+        result: passed
+        vip: "{{ librenms_vip_ip }}"
+        cases: "{{ librenms_failover_test_cases }}"
+        evidence_path: >-
+          {{
+            librenms_failover_test_evidence.dest
+            | default('controller evidence disabled')
+          }}

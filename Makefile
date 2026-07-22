@@ -1,4 +1,4 @@
-.PHONY: install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-galera-readiness test-daily-maintenance-guardrails test-docker-ha-galera-config integration-haproxy-web integration-redis-sentinel standalone cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
+.PHONY: install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-galera-readiness test-galera-bootstrap-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-docker-ha-galera-config integration-galera integration-haproxy-web integration-redis-sentinel standalone cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -34,19 +34,46 @@ syntax-check:
 inventory-check:
 	python3 scripts/validate-inventory.py --inventory inventories/ha/hosts.yml --group-vars inventories/ha/group_vars/all.yml
 
-ci: python-smoke lint syntax-check test-galera-readiness test-daily-maintenance-guardrails
+ci: python-smoke lint syntax-check test-galera-readiness test-galera-bootstrap-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails
 
 test-galera-readiness:
 	bash tests/unit/test-galera-readiness-agent.sh
 
+test-galera-bootstrap-guardrails:
+	bash tests/unit/test-galera-bootstrap-guardrails.sh
+
 test-daily-maintenance-guardrails:
 	bash tests/unit/test-daily-maintenance-guardrails.sh
+
+test-runtime-web-health-guardrails:
+	bash tests/unit/test-runtime-web-health-guardrails.sh
+
+test-failover-recovery-guardrails:
+	bash tests/unit/test-failover-recovery-guardrails.sh
+
+test-load-balancer-rollout-guardrails:
+	bash tests/unit/test-load-balancer-rollout-guardrails.sh
+
+test-production-readiness-evidence-guardrails:
+	bash tests/unit/test-production-readiness-evidence-guardrails.sh
+
+test-production-readiness-evidence-verifier:
+	bash tests/unit/test-production-readiness-evidence-verifier.sh
+
+test-awx-status-schedule-guardrails:
+	bash tests/unit/test-awx-status-schedule-guardrails.sh
+
+test-host-firewall-guardrails:
+	bash tests/unit/test-host-firewall-guardrails.sh
 
 test-docker-ha-galera-config:
 	bash tests/unit/test-docker-ha-galera-config.sh
 
 integration-haproxy-web:
 	bash tests/integration/haproxy-web/test.sh
+
+integration-galera:
+	bash tests/integration/galera/test.sh
 
 integration-redis-sentinel:
 	bash tests/integration/redis-sentinel/test.sh
@@ -83,6 +110,9 @@ galera-recover:
 
 ha-failover-test:
 	ansible-playbook -i $(HA_INVENTORY) playbooks/ha-failover-test.yml $(PLAYBOOK_FLAGS) -e librenms_failover_test_confirm=true $(ANSIBLE_EXTRA_ARGS)
+
+firewall:
+	ansible-playbook -i $(HA_INVENTORY) playbooks/firewall.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 backup:
 	ansible-playbook -i $(HA_INVENTORY) playbooks/backup.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)

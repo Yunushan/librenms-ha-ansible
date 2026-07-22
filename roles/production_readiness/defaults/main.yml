@@ -3,14 +3,55 @@
 # The backup check creates one normal scheduled-category backup to prove that
 # the remote copy works before a production declaration.
 librenms_production_readiness_network_tcp_checks_enabled: true
+librenms_production_readiness_require_host_firewall: >-
+  {{ librenms_manage_host_firewall | bool }}
+librenms_production_readiness_require_status_alert_routing: >-
+  {{ librenms_mode == 'ha' }}
+librenms_production_readiness_require_encrypted_vault: >-
+  {{ librenms_mode == 'ha' }}
+librenms_production_readiness_secret_source: ansible_vault
+librenms_production_readiness_ansible_vault_file: >-
+  {{ inventory_dir }}/group_vars/vault.yml
+librenms_production_readiness_external_secret_provider: ""
+librenms_production_readiness_external_secret_reference: ""
+# External mode must prove provider access at readiness time without printing
+# values. Supply a fixed argv list such as [vault, kv, get, -field=version,
+# secret/librenms-ha] and, when needed, environment supplied by AWX or the
+# controller's credential integration.
+librenms_production_readiness_external_secret_validation_command: []
+librenms_production_readiness_external_secret_validation_environment: {}
 librenms_production_readiness_verify_offsite_backup: "{{ librenms_mode == 'ha' }}"
 librenms_production_readiness_verify_database_restore: "{{ librenms_mode == 'ha' }}"
+librenms_production_readiness_max_database_restore_seconds: 1800
+librenms_production_readiness_require_scheduled_daily_backup: >-
+  {{ librenms_mode == 'ha' }}
 librenms_production_readiness_backup_category: daily
 librenms_production_readiness_vip_probe_retries: 6
 librenms_production_readiness_vip_probe_delay: 5
 librenms_production_readiness_verify_vip_tls: "{{ librenms_haproxy_tls_enabled | bool }}"
+librenms_production_readiness_verify_runtime_web_health: >-
+  {{ librenms_haproxy_web_runtime_check_enabled | bool }}
+librenms_production_readiness_require_recent_failover_evidence: "{{ librenms_mode == 'ha' }}"
+librenms_production_readiness_failover_evidence_dir: >-
+  {{ librenms_failover_test_evidence_dir | default('/var/lib/librenms-ha/failover-evidence') }}
+librenms_production_readiness_failover_evidence_max_age_days: 30
+librenms_production_readiness_require_failover_evidence_integrity: >-
+  {{ librenms_failover_test_evidence_integrity_enabled | bool }}
+librenms_production_readiness_max_failover_recovery_seconds: >-
+  {{ librenms_failover_test_max_recovery_seconds | default(900) }}
+librenms_production_readiness_required_failover_cases:
+  - web_backend
+  - keepalived_vip
 librenms_production_readiness_db_proxy_probe_count: 6
 librenms_production_readiness_verify_shared_lock: "{{ librenms_mode == 'ha' }}"
 librenms_production_readiness_shared_lock_probe_hold: 8
 librenms_production_readiness_shared_lock_probe_start_delay: 10
 librenms_production_readiness_shared_lock_probe_timeout: 30
+librenms_production_readiness_write_evidence: true
+librenms_production_readiness_evidence_dir: /var/lib/librenms-ha/production-readiness-evidence
+librenms_production_readiness_evidence_retention_days: 365
+librenms_production_readiness_evidence_integrity_enabled: true
+librenms_production_readiness_evidence_hmac_enabled: >-
+  {{ librenms_production_readiness_evidence_integrity_enabled | bool }}
+librenms_production_readiness_evidence_verifier_path: >-
+  /usr/local/sbin/librenms-production-readiness-evidence-verify

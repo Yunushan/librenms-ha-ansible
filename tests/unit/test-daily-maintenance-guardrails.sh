@@ -42,18 +42,48 @@ main() {
 
     require_contains \
         "${wrapper}" \
-        'LIBRENMS_DAILY_HA_DRAIN_ENABLED="${HA_DRAIN_ENABLED}"' \
-        'The global-lock helper must receive the HA drain setting.'
+        'LIBRENMS_DAILY_HA_DRAIN_ENABLED="false"' \
+        'The outer wrapper must retain the HA drain through post-update recovery.'
+    require_contains \
+        "${wrapper}" \
+        'librenms_nginx_runtime_health_check_path if daily_runtime_health_enabled' \
+        'HA maintenance must use the database runtime health endpoint after an update.'
     require_contains \
         "${wrapper_execution}" \
-        'if [ "${GLOBAL_LOCK_ENABLED}" != "true" ]; then
-    activate_ha_drain || exit $?' \
-        'Global-lock contenders must not drain before the lock holder is known.'
+        'activate_ha_drain || exit $?' \
+        'The lock holder must drain itself before daily maintenance.'
     require_order \
         "${wrapper_execution}" \
         'acquire_cluster_maintenance_lock' \
-        'if [ "${GLOBAL_LOCK_ENABLED}" != "true" ]; then' \
+        'activate_ha_drain || exit $?' \
         'The wrapper must acquire or skip the shared lock before any local drain.'
+    require_order \
+        "${wrapper_execution}" \
+        'post_daily_web_cache_repair' \
+        'recover_web_health' \
+        'The web health check must run after cache and PHP-FPM maintenance.'
+    require_contains \
+        "${wrapper}" \
+        'post-update web health did not recover' \
+        'An unhealthy application must fail daily maintenance instead of reporting a clean update.'
+    require_contains \
+        "${wrapper}" \
+        'waiting for daily-update canary ${CANARY_HOST}' \
+        'HA followers must wait for a deterministic healthy canary before maintenance.'
+    require_order \
+        "${wrapper_execution}" \
+        'prepare_daily_canary_gate' \
+        'acquire_cluster_maintenance_lock' \
+        'Followers must pass the canary gate before they can contend for the shared lock.'
+    require_order \
+        "${wrapper_execution}" \
+        'recover_web_health' \
+        'mark_daily_canary_success || exit $?' \
+        'The canary marker must only be written after local application recovery succeeds.'
+    require_contains \
+        "${wrapper}" \
+        'daily-update canary did not complete healthy stabilization; skipping follower maintenance' \
+        'Followers must skip rather than perform an unattended rollout after a failed canary.'
     require_order \
         "${helper}" \
         'SELECT GET_LOCK' \

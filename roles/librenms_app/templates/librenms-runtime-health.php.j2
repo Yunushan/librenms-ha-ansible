@@ -1,0 +1,28 @@
+<?php
+
+declare(strict_types=1);
+
+/*
+ * Keep this endpoint intentionally small and non-sensitive. HAProxy uses it to
+ * stop routing users to PHP-FPM workers that cannot make a fresh database query.
+ */
+$init_modules = [];
+
+header('Content-Type: text/plain; charset=utf-8');
+header('Cache-Control: no-store');
+
+try {
+    require dirname(__DIR__) . '/includes/init.php';
+
+    $result = \Illuminate\Support\Facades\DB::selectOne('SELECT 1 AS ready');
+
+    if ((int) ($result->ready ?? 0) !== 1) {
+        throw new RuntimeException('database readiness query returned an unexpected result');
+    }
+
+    http_response_code(200);
+    echo "ok\n";
+} catch (Throwable) {
+    http_response_code(503);
+    echo "unavailable\n";
+}
