@@ -2,7 +2,7 @@
 
 একাধিক Linux পরিবারে LibreNMS-এর **standalone, distributed polling, এবং full HA** deployment-এর জন্য production-oriented Ansible automation।
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ For the exact controller-to-node ports, cluster east-west traffic, and sudo requ
 - optional local SNMP agent management
 - SNMP **v1**, **v2c**, এবং **v3** support
 - LibreNMS node add/remove workflow
-- GitHub-ready repo structure with MIT license, lint workflow, CONTRIBUTING, SECURITY, example inventories, and secret generator
+- GitHub-ready repo structure with 0BSD license, lint workflow, CONTRIBUTING, SECURITY, example inventories, and secret generator
 
 ---
 
@@ -381,4 +381,4 @@ Reporting guidance-এর জন্য [SECURITY.md](../../SECURITY.md) পড�
 
 ## License / লাইসেন্স
 
-MIT. [LICENSE](../../LICENSE) দেখুন।
+0BSD. [LICENSE](../../LICENSE) দেখুন।

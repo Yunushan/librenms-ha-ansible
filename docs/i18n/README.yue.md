@@ -2,7 +2,7 @@
 
 畀 production 用嘅 Ansible automation，用嚟喺多種 Linux 系統上部署 LibreNMS 嘅 **standalone、distributed polling 同 full HA**。
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ LibreNMS 喺單一 server 上好容易起得郁，但當你需要以下一樣或
 - optional local SNMP agent management
 - SNMP **v1**、**v2c**、**v3** support
 - LibreNMS nodes add / remove workflow
-- GitHub-ready repo structure with MIT license, lint workflow, CONTRIBUTING, SECURITY, example inventories, 同 secret generator
+- GitHub-ready repo structure with 0BSD license, lint workflow, CONTRIBUTING, SECURITY, example inventories, 同 secret generator
 
 ---
 
@@ -381,4 +381,4 @@ ansible-lint
 
 ## License / 授權
 
-MIT。請參閱 [LICENSE](../../LICENSE)。
+0BSD。請參閱 [LICENSE](../../LICENSE)。

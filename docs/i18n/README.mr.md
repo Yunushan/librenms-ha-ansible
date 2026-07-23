@@ -2,7 +2,7 @@
 
 अनेक Linux कुटुंबांवर LibreNMS चे **standalone, distributed polling, आणि full HA** deployment करण्यासाठी production-oriented Ansible automation.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ LibreNMS एकाच server वर चालवणे सोपे आहे, �
 - optional local SNMP agent management
 - SNMP **v1**, **v2c**, आणि **v3** support
 - LibreNMS nodes add/remove workflow
-- GitHub-ready repo structure with MIT license, lint workflow, CONTRIBUTING, SECURITY, example inventories, आणि secret generator
+- GitHub-ready repo structure with 0BSD license, lint workflow, CONTRIBUTING, SECURITY, example inventories, आणि secret generator
 
 ---
 
@@ -381,4 +381,4 @@ Reporting guidance साठी [SECURITY.md](../../SECURITY.md) वाचा।
 
 ## License / परवाना
 
-MIT. [LICENSE](../../LICENSE) पहा।
+0BSD. [LICENSE](../../LICENSE) पहा।

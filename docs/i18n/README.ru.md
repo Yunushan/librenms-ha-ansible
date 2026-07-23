@@ -2,7 +2,7 @@
 
 Продуманная для production автоматизация Ansible для развертывания LibreNMS в режимах **standalone, distributed polling и full HA** на нескольких семействах Linux.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ LibreNMS легко поднять на одном сервере, но эксп
 - опциональное управление локальным SNMP agent
 - поддержка SNMP **v1**, **v2c** и **v3**
 - workflow для добавления и удаления LibreNMS узлов
-- GitHub-ready структура с MIT license, lint workflow, CONTRIBUTING, SECURITY, example inventories и генератором секретов
+- GitHub-ready структура с 0BSD license, lint workflow, CONTRIBUTING, SECURITY, example inventories и генератором секретов
 
 ---
 
@@ -384,4 +384,4 @@ Pull requests приветствуются. Сначала прочитайте 
 
 ## Лицензия / License
 
-MIT. См. [LICENSE](../../LICENSE).
+0BSD. См. [LICENSE](../../LICENSE).

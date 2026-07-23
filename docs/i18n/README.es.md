@@ -2,7 +2,7 @@
 
 Automatizacion con Ansible pensada para produccion para despliegues **standalone, distributed polling y full HA** de LibreNMS en varias familias Linux.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -467,4 +467,4 @@ Lee [SECURITY.md](../../SECURITY.md) para la guia de reporte.
 
 ## Licencia / License
 
-MIT. Vease [LICENSE](../../LICENSE).
+0BSD. Vease [LICENSE](../../LICENSE).

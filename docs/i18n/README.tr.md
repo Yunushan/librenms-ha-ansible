@@ -2,7 +2,7 @@
 
 Uretim odakli Ansible otomasyonu ile **standalone, distributed polling ve full HA** LibreNMS kurulumlarini birden fazla Linux ailesinde yonetin.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -461,4 +461,4 @@ Bildirim rehberi icin [SECURITY.md](../../SECURITY.md) dosyasini oku.
 
 ## Lisans / License
 
-MIT. Bkz. [LICENSE](../../LICENSE).
+0BSD. Bkz. [LICENSE](../../LICENSE).

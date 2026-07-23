@@ -2,7 +2,7 @@
 
 複数の Linux ファミリー上で **standalone、distributed polling、full HA** の LibreNMS を展開するための、本番運用向け Ansible 自動化です。
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ LibreNMS は 1 台のサーバーなら簡単に動かせますが、次のよ�
 - optional なローカル SNMP agent 管理
 - SNMP **v1**、**v2c**、**v3** のサポート
 - LibreNMS ノードの追加・削除 workflow
-- MIT license、lint workflow、CONTRIBUTING、SECURITY、example inventories、secret generator を含む GitHub-ready な構成
+- 0BSD license、lint workflow、CONTRIBUTING、SECURITY、example inventories、secret generator を含む GitHub-ready な構成
 
 ---
 
@@ -384,4 +384,4 @@ Pull request は歓迎です。まず [CONTRIBUTING.md](../../CONTRIBUTING.md) �
 
 ## ライセンス / License
 
-MIT。 [LICENSE](../../LICENSE) を参照してください。
+0BSD。 [LICENSE](../../LICENSE) を参照してください。

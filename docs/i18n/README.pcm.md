@@ -2,7 +2,7 @@
 
 Na production-minded Ansible automation wey fit deploy LibreNMS for **standalone, distributed polling, and full HA** setup across plenty Linux families.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ This repo give you one Ansible project wey fit deploy:
 - optional local SNMP agent management
 - SNMP **v1**, **v2c**, and **v3** support
 - workflow to add and remove LibreNMS nodes
-- GitHub-ready repo structure with MIT license, lint workflow, CONTRIBUTING, SECURITY, example inventories, and secret generator
+- GitHub-ready repo structure with 0BSD license, lint workflow, CONTRIBUTING, SECURITY, example inventories, and secret generator
 
 ---
 
@@ -381,4 +381,4 @@ Read [SECURITY.md](../../SECURITY.md) for reporting guidance.
 
 ## License / License
 
-MIT. See [LICENSE](../../LICENSE).
+0BSD. See [LICENSE](../../LICENSE).

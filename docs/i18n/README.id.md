@@ -2,7 +2,7 @@
 
 Otomasi Ansible yang dirancang untuk production untuk deployment LibreNMS **standalone, distributed polling, dan full HA** di berbagai keluarga Linux.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ Repo ini memberi Anda satu proyek Ansible yang dapat melakukan deployment:
 - manajemen agent SNMP lokal opsional
 - dukungan SNMP **v1**, **v2c**, dan **v3**
 - workflow untuk menambah dan menghapus node LibreNMS
-- struktur repo yang siap GitHub dengan MIT license, lint workflow, CONTRIBUTING, SECURITY, example inventories, dan helper pembuat secret
+- struktur repo yang siap GitHub dengan 0BSD license, lint workflow, CONTRIBUTING, SECURITY, example inventories, dan helper pembuat secret
 
 ---
 
@@ -384,4 +384,4 @@ Baca [SECURITY.md](../../SECURITY.md) untuk panduan pelaporan.
 
 ## Lisensi / License
 
-MIT. Lihat [LICENSE](../../LICENSE).
+0BSD. Lihat [LICENSE](../../LICENSE).

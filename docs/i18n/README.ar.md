@@ -2,7 +2,7 @@
 
 أتمتة Ansible موجهة للإنتاج لنشر LibreNMS في أوضاع **standalone** و **distributed polling** و **full HA** على عدة عائلات من Linux.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ For the exact controller-to-node ports, cluster east-west traffic, and sudo requ
 - إدارة local SNMP agent اختيارية
 - دعم SNMP **v1** و **v2c** و **v3**
 - workflow لإضافة وإزالة عقد LibreNMS
-- بنية repo جاهزة لـ GitHub مع MIT license و lint workflow و CONTRIBUTING و SECURITY و inventories أمثلة ومولّد secrets
+- بنية repo جاهزة لـ GitHub مع 0BSD license و lint workflow و CONTRIBUTING و SECURITY و inventories أمثلة ومولّد secrets
 
 ---
 
@@ -381,4 +381,4 @@ ansible-lint
 
 ## الترخيص / License
 
-MIT. راجع [LICENSE](../../LICENSE).
+0BSD. راجع [LICENSE](../../LICENSE).

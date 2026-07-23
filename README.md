@@ -2,7 +2,7 @@
 
 Production-minded Ansible automation for **LibreNMS standalone, distributed polling, and full HA** deployments across multiple Linux families.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -72,7 +72,7 @@ This repository gives you one Ansible project that can deploy:
 - optional AWX controller deployment for teams that want GUI-driven operations
 - workflows for **adding** and **removing** LibreNMS nodes
 - GitHub-ready repo structure with:
-  - MIT license
+  - 0BSD license
   - lint workflow
   - CONTRIBUTING and SECURITY docs
   - example inventories
@@ -1886,4 +1886,4 @@ Please read [SECURITY.md](SECURITY.md) for reporting guidance.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+0BSD. See [LICENSE](LICENSE).

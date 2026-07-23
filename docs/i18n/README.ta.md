@@ -2,7 +2,7 @@
 
 பல Linux குடும்பங்களில் LibreNMS இன் **standalone, distributed polling, மற்றும் full HA** deployment களுக்கான production-oriented Ansible automation.
 
-![MIT License](https://img.shields.io/badge/license-MIT-green.svg)
+![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible-core%202.15%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
@@ -45,7 +45,7 @@ For the exact controller-to-node ports, cluster east-west traffic, and sudo requ
 - optional local SNMP agent management
 - SNMP **v1**, **v2c**, மற்றும் **v3** support
 - LibreNMS nodes add/remove workflow
-- GitHub-ready repo structure with MIT license, lint workflow, CONTRIBUTING, SECURITY, example inventories, மற்றும் secret generator
+- GitHub-ready repo structure with 0BSD license, lint workflow, CONTRIBUTING, SECURITY, example inventories, மற்றும் secret generator
 
 ---
 
@@ -381,4 +381,4 @@ Reporting guidance க்காக [SECURITY.md](../../SECURITY.md) ஐப் �
 
 ## License / உரிமம்
 
-MIT. [LICENSE](../../LICENSE) ஐப் பார்க்கவும்.
+0BSD. [LICENSE](../../LICENSE) ஐப் பார்க்கவும்.
