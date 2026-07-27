@@ -1,6 +1,10 @@
 ---
 librenms_mode: ha
 librenms_install_profile: full
+# Enable only after completing the production values below and before running
+# playbooks/production-readiness.yml. This makes the readiness gate require
+# TLS and the explicit source-restricted host firewall policy.
+# librenms_production_profile: true
 
 librenms_fqdn: librenms.example.com
 librenms_timezone: Etc/UTC

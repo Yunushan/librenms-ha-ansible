@@ -21,6 +21,7 @@
 
 ## Validation
 
+- [ ] Required GitHub checks, including `dependency-review`, are green.
 - [ ] `python scripts/ci-python-smoke.py`
 - [ ] `yamllint .`
 - [ ] `ansible-lint`

@@ -29,6 +29,32 @@ Use this order for HA work. Stop at the first failure, fix that layer, then
 restart from the same stage. Avoid running recovery playbooks as a reflex;
 `galera-recover.yml` is only for a cluster with no Galera `Primary` component.
 
+### Declare the Production Profile
+
+Before certifying an HA deployment, set the explicit production-profile flag in
+`inventories/ha/group_vars/all.yml`. It does not alter services by itself; it
+makes `production-readiness.yml` reject a deployment that lacks VIP TLS or the
+reviewed source-restricted UFW policy:
+
+```yaml
+librenms_production_profile: true
+librenms_manage_host_firewall: true
+librenms_host_firewall_management_sources:
+  - 10.4.92.0/24
+librenms_host_firewall_cluster_sources:
+  - 10.2.7.0/24
+librenms_haproxy_tls_enabled: true
+librenms_backup_offsite_enabled: true
+librenms_backup_offsite_required: true
+librenms_backup_offsite_rsync_target: backup@backup.example:/srv/backups/librenms
+```
+
+Keep the flag `false` for labs, migration work, and any environment where those
+network and certificate decisions have not yet been reviewed. The readiness
+gate already requires encrypted or externally validated secrets, a working
+offsite DB/config backup, a restore verification, and recent failover evidence
+for HA mode.
+
 ### First HA deployment
 
 1. Validate inventory and local YAML before touching the nodes:

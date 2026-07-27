@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 TASKS_FILE="$ROOT_DIR/roles/production_readiness/tasks/main.yml"
 DEFAULTS_FILE="$ROOT_DIR/roles/production_readiness/defaults/main.yml"
 PLAYBOOK_FILE="$ROOT_DIR/playbooks/production-readiness.yml"
+GLOBAL_DEFAULTS_FILE="$ROOT_DIR/roles/librenms_defaults/defaults/main.yml"
 
 require_text() {
     local file="$1"
@@ -18,6 +19,9 @@ require_text() {
 }
 
 require_text "$DEFAULTS_FILE" "librenms_production_readiness_write_evidence: true"
+require_text "$GLOBAL_DEFAULTS_FILE" "librenms_production_profile: false"
+require_text "$DEFAULTS_FILE" "librenms_production_profile | bool or librenms_manage_host_firewall | bool"
+require_text "$DEFAULTS_FILE" "librenms_production_profile | bool and librenms_mode == 'ha'"
 require_text "$DEFAULTS_FILE" "librenms_production_readiness_evidence_retention_days: 365"
 require_text "$DEFAULTS_FILE" "librenms_production_readiness_evidence_integrity_enabled: true"
 require_text "$DEFAULTS_FILE" "librenms_production_readiness_evidence_hmac_enabled"
@@ -63,6 +67,10 @@ require_text "$TASKS_FILE" "database_restore_elapsed_seconds"
 require_text "$TASKS_FILE" "librenms_status_alert_webhook_url | default('')"
 require_text "$TASKS_FILE" "librenms_status_alert_webhook_validate_certs | default(true)"
 require_text "$TASKS_FILE" "Require a declared production secret source"
+require_text "$TASKS_FILE" "librenms_production_profile | bool and librenms_mode == 'ha'"
+require_text "$TASKS_FILE" "librenms_host_firewall_management_sources | length"
+require_text "$TASKS_FILE" "librenms_host_firewall_cluster_sources | length"
+require_text "$TASKS_FILE" "or librenms_haproxy_tls_enabled | bool"
 require_text "$TASKS_FILE" "Verify external production secret provider access"
 require_text "$TASKS_FILE" "expand_argument_vars: false"
 require_text "$TASKS_FILE" "Require an encrypted Ansible Vault secret file for production"

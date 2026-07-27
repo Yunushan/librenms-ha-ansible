@@ -64,6 +64,18 @@
       - not (librenms_mode == 'ha') or librenms_backup_include_config | bool
       - not (librenms_mode == 'ha') or (librenms_backup_lock_timeout | int) > 0
       - >-
+        not (librenms_production_profile | bool and librenms_mode == 'ha')
+        or librenms_manage_host_firewall | bool
+      - >-
+        not (librenms_production_profile | bool and librenms_mode == 'ha')
+        or (librenms_host_firewall_management_sources | length) > 0
+      - >-
+        not (librenms_production_profile | bool and librenms_mode == 'ha')
+        or (librenms_host_firewall_cluster_sources | length) > 0
+      - >-
+        not (librenms_production_profile | bool and librenms_mode == 'ha')
+        or librenms_haproxy_tls_enabled | bool
+      - >-
         not (librenms_mode == 'ha')
         or not (librenms_production_readiness_require_scheduled_daily_backup | bool)
         or librenms_manage_scheduled_backups | bool
@@ -111,7 +123,9 @@
       for all secrets, require an off-cluster DB/config backup target, retain
       the HA daily database lock and scheduled backup, bind MariaDB to a managed
       address, configure certificate-validated HTTPS status alert routing, and
-      provide at least two web/LB nodes plus three Galera nodes for HA mode.
+      provide at least two web/LB nodes plus three Galera nodes for HA mode. A
+      declared production profile also requires reviewed management and cluster
+      firewall CIDRs plus TLS at the VIP.
   no_log: true
   run_once: true
 
