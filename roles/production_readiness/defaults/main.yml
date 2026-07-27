@@ -4,7 +4,7 @@
 # the remote copy works before a production declaration.
 librenms_production_readiness_network_tcp_checks_enabled: true
 librenms_production_readiness_require_host_firewall: >-
-  {{ librenms_manage_host_firewall | bool }}
+  {{ librenms_production_profile | bool or librenms_manage_host_firewall | bool }}
 librenms_production_readiness_require_status_alert_routing: >-
   {{ librenms_mode == 'ha' }}
 librenms_production_readiness_require_encrypted_vault: >-
@@ -28,7 +28,11 @@ librenms_production_readiness_require_scheduled_daily_backup: >-
 librenms_production_readiness_backup_category: daily
 librenms_production_readiness_vip_probe_retries: 6
 librenms_production_readiness_vip_probe_delay: 5
-librenms_production_readiness_verify_vip_tls: "{{ librenms_haproxy_tls_enabled | bool }}"
+librenms_production_readiness_verify_vip_tls: >-
+  {{
+    (librenms_haproxy_tls_enabled | bool)
+    or (librenms_production_profile | bool and librenms_mode == 'ha')
+  }}
 librenms_production_readiness_verify_runtime_web_health: >-
   {{ librenms_haproxy_web_runtime_check_enabled | bool }}
 librenms_production_readiness_require_recent_failover_evidence: "{{ librenms_mode == 'ha' }}"

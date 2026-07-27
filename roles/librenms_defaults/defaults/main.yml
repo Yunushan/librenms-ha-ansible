@@ -1,6 +1,10 @@
 ---
 librenms_repo_url: https://github.com/librenms/librenms.git
 librenms_version: latest-stable
+# Set this only after the inventory has the reviewed security and recovery
+# controls required for a real production declaration. The live readiness gate
+# then fails closed when TLS or the host firewall policy is missing.
+librenms_production_profile: false
 librenms_manage_updates: true
 librenms_update_channel: release
 librenms_update_enabled: true

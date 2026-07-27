@@ -28,6 +28,12 @@ For a transparent source-level readiness score and the live evidence still
 required before go-live, see
 [docs/production-readiness-assessment.md](docs/production-readiness-assessment.md).
 
+For a real HA production declaration, explicitly enable
+`librenms_production_profile: true` only after setting reviewed firewall source
+CIDRs and HAProxy TLS. The readiness gate then fails closed when either control
+is missing; the exact inventory example and verification sequence are in
+[docs/operations.md](docs/operations.md#declare-the-production-profile).
+
 ---
 
 ## Why This Exists

@@ -46,6 +46,7 @@ Do not call a cluster production-ready until these gates pass.
 | --- | --- | --- |
 | Inventory shape | Inventory validates and all role groups match the intended topology. | `python3 scripts/validate-inventory.py --inventory inventories/ha/hosts.yml --group-vars inventories/ha/group_vars/all.yml` |
 | YAML and local checks | Repository YAML and helper scripts parse cleanly. | `python3 scripts/ci-parse-yaml.py`, `make ci` on a Linux controller |
+| Source governance | Protected `main`, green required GitHub checks, no open security alerts, private vulnerability reporting, Dependabot security updates, and CodeQL enabled. | GitHub repository Security and branch-protection settings |
 | Preflight | OS, package, disk, memory, time, VIP, and route checks pass. | `playbooks/doctor.yml` |
 | Live network paths | Web, Galera, Redis/Sentinel, and Gluster ports are reachable between expected peers. | `playbooks/doctor.yml -e librenms_doctor_network_tcp_checks_enabled=true` |
 | Deployment convergence | Config and services converge without failed tasks. | `playbooks/cluster.yml` |

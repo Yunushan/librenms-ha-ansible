@@ -751,6 +751,23 @@ def main() -> int:
     if "docker compose run --rm --no-deps ansible make ci" not in lint_workflow:
         failures.append("Lint workflow must run quality gates inside the controller image")
 
+    dependency_review_workflow = read(".github/workflows/dependency-review.yml")
+    if "permissions:\n  contents: read" not in dependency_review_workflow:
+        failures.append("Dependency review workflow must use a read-only GitHub token")
+    if "runs-on: ubuntu-24.04" not in dependency_review_workflow:
+        failures.append("Dependency review workflow must pin its runner to ubuntu-24.04")
+    if "timeout-minutes: 10" not in dependency_review_workflow:
+        failures.append("Dependency review workflow must bound execution time to 10 minutes")
+    if not re.search(
+        r"actions/dependency-review-action@[0-9a-f]{40}(?:\s+#\s+v\S+)?",
+        dependency_review_workflow,
+    ):
+        failures.append(
+            "Dependency review workflow must pin its action to an immutable commit"
+        )
+    if "fail-on-severity: moderate" not in dependency_review_workflow:
+        failures.append("Dependency review workflow must fail on moderate vulnerabilities")
+
     ci_requirements = read("requirements-ci.txt")
     ci_tool_versions: dict[str, str] = {}
     for package in ("ansible-core", "ansible-lint", "yamllint"):
@@ -804,6 +821,11 @@ def main() -> int:
         "Host firewall enforcement must stay opt-in until CIDRs are reviewed",
     )
     failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_production_profile: false",
+        "Production hardening must be an explicit inventory declaration",
+    )
+    failures += require(
         "roles/host_firewall/tasks/main.yml",
         "Allow management SSH before enabling UFW",
         "Host firewall policy must preserve management SSH before enabling UFW",
@@ -817,6 +839,16 @@ def main() -> int:
         "roles/production_readiness/tasks/main.yml",
         "Require active UFW when the managed host-firewall policy is enabled",
         "Production readiness must verify an enabled host firewall remains active",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "librenms_production_profile | bool and librenms_mode == 'ha'",
+        "A declared HA production profile must require hardened controls",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "or librenms_haproxy_tls_enabled | bool",
+        "A declared HA production profile must require VIP TLS",
     )
     failures += require(
         "roles/production_readiness/defaults/main.yml",

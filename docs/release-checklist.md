@@ -108,6 +108,28 @@ python scripts/ci-ansible-syntax-check.py
 ansible-lint
 ```
 
+## GitHub Release Governance
+
+For the default branch, configure GitHub branch protection or an equivalent
+ruleset before declaring a release production-ready:
+
+- Require pull requests; do not permit direct production changes to `main`.
+- Require a green `lint` workflow, including `ansible-lint`,
+  `controller-image`, `haproxy-web-failover`, `galera-failover`,
+  `docker-ha-galera-config`, and `redis-sentinel-failover`.
+- Require a green `dependency-review` workflow for pull requests.
+- Require at least one approving review from a maintainer other than the
+  author when the repository has more than one maintainer.
+- Require resolved review conversations, disallow force pushes, and retain
+  GitHub private vulnerability reporting.
+- Keep GitHub secret-scanning push protection, Dependabot alerts and automated
+  security updates, and CodeQL default setup enabled; triage every open alert
+  before release.
+
+These repository settings cannot be enforced from Ansible. Record their status
+in the release change record and recheck them after repository ownership or
+administrator changes.
+
 For a production-facing release, run these against a lab HA inventory before
 announcing readiness:
 
