@@ -30,4 +30,45 @@ require_rolling_load_balancer_play() {
 require_rolling_load_balancer_play "${ROOT_DIR}/playbooks/site.yml"
 require_rolling_load_balancer_play "${ROOT_DIR}/playbooks/syslog.yml"
 
+readonly HAPROXY_TASKS="${ROOT_DIR}/roles/haproxy_keepalived/tasks/main.yml"
+readonly HAPROXY_TEMPLATE="${ROOT_DIR}/roles/haproxy_keepalived/templates/haproxy.cfg.j2"
+readonly DEFAULTS="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
+
+grep -Fq 'librenms_galera_readiness_agent_probe_timeout' "${HAPROXY_TASKS}" || {
+    printf 'Galera agent preflight must use its bounded probe timeout.\n' >&2
+    exit 1
+}
+grep -Fq 'librenms_galera_readiness_agent_probe_retries' "${HAPROXY_TASKS}" || {
+    printf 'Galera agent preflight must retry during socket/cluster convergence.\n' >&2
+    exit 1
+}
+grep -Fq 'Ensure Galera readiness agent sockets are active before HAProxy reload' "${HAPROXY_TASKS}" || {
+    printf 'HAProxy rollout must activate Galera readiness sockets before probing.\n' >&2
+    exit 1
+}
+grep -Fq 'timeout check {{ librenms_galera_readiness_agent_check_timeout }}' "${HAPROXY_TEMPLATE}" || {
+    printf 'Galera HAProxy checks need an agent-specific timeout.\n' >&2
+    exit 1
+}
+query_timeout=$(awk '$1 == "librenms_galera_readiness_agent_query_timeout:" { print $2 }' "${DEFAULTS}")
+check_timeout=$(awk '$1 == "librenms_galera_readiness_agent_check_timeout:" { print $2 }' "${DEFAULTS}")
+probe_timeout=$(awk '$1 == "librenms_galera_readiness_agent_probe_timeout:" { print $2 }' "${DEFAULTS}")
+probe_retries=$(awk '$1 == "librenms_galera_readiness_agent_probe_retries:" { print $2 }' "${DEFAULTS}")
+check_timeout=${check_timeout%s}
+probe_timeout=${probe_timeout%s}
+
+if [[ ! "${query_timeout}" =~ ^[0-9]+$ || ! "${check_timeout}" =~ ^[0-9]+$ \
+    || ! "${probe_timeout}" =~ ^[0-9]+$ || ! "${probe_retries}" =~ ^[0-9]+$ ]]; then
+    printf 'Galera readiness time budgets must be explicit integer seconds.\n' >&2
+    exit 1
+fi
+if ((check_timeout <= query_timeout || probe_timeout <= query_timeout)); then
+    printf 'Galera readiness callers must outlive the agent query timeout.\n' >&2
+    exit 1
+fi
+if ((probe_retries < 2)); then
+    printf 'Galera readiness deployment preflight must allow convergence retries.\n' >&2
+    exit 1
+fi
+
 printf 'Load-balancer rollout guardrail test passed.\n'

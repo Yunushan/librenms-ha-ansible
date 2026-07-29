@@ -186,6 +186,7 @@ frontend librenms_db
 backend galera_nodes
     mode tcp
     balance roundrobin
+    timeout check {{ librenms_galera_readiness_agent_check_timeout }}
 {% if librenms_haproxy_db_tcp_keepalive | bool %}
     option srvtcpka
 {% endif %}

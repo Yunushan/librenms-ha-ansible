@@ -42,6 +42,7 @@ EOF
     sed \
         -e 's@{{ librenms_mariadb_service_name | quote }}@"mariadb"@' \
         -e 's@{{ librenms_mariadb_socket | quote }}@"/run/mysqld/mysqld.sock"@' \
+        -e 's@{{ librenms_galera_readiness_agent_query_timeout | int }}@2@' \
         "${TEMPLATE}" >"${temporary_dir}/agent"
     chmod +x "${temporary_dir}/agent"
 

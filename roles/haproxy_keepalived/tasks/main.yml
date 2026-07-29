@@ -444,10 +444,22 @@
     - librenms_db_mode == 'galera'
     - (librenms_haproxy_unavailable_galera_backends_after_recovery | length) > 0
 
-- name: Verify Galera readiness agents respond before HAProxy reload
+- name: Ensure Galera readiness agent sockets are active before HAProxy reload
+  systemd:
+    name: "{{ librenms_galera_readiness_agent_socket_unit }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_active_db_nodes }}"
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Verify Galera readiness agents converge before HAProxy reload
   shell: |-
     set -o pipefail
-    timeout "{{ librenms_haproxy_timeout_check }}" bash -c '
+    timeout "{{ librenms_galera_readiness_agent_probe_timeout }}" bash -c '
       exec 3<>/dev/tcp/"$1"/"$2"
       IFS= read -r response <&3
       [ "${response}" = "up" ]
@@ -458,6 +470,9 @@
   register: librenms_haproxy_galera_readiness_agent_probe
   changed_when: false
   failed_when: false
+  until: (librenms_haproxy_galera_readiness_agent_probe.rc | default(1) | int) == 0
+  retries: "{{ librenms_galera_readiness_agent_probe_retries | int }}"
+  delay: "{{ librenms_galera_readiness_agent_probe_delay | int }}"
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
@@ -483,7 +498,14 @@
   fail:
     msg: |-
       HAProxy configuration was not changed because no Galera readiness agent
-      reported an eligible Primary/Synced backend.
+      reported an eligible Primary/Synced backend after
+      {{ librenms_galera_readiness_agent_probe_retries }} bounded attempts.
+
+      The readiness socket was explicitly started on every active database
+      node before these probes. A continuing failure therefore means Galera is
+      not Primary/Synced, the socket cannot answer within
+      {{ librenms_galera_readiness_agent_probe_timeout }}, or the cluster
+      network is blocking TCP/{{ librenms_galera_readiness_agent_port }}.
 
       Agent probes:
       {{ librenms_haproxy_galera_readiness_agent_probe.results | default([]) }}
