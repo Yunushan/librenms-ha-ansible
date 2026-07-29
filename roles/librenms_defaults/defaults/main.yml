@@ -626,14 +626,18 @@ librenms_startup_repair_runtime_retries: 18
 librenms_startup_repair_runtime_delay: 10
 librenms_startup_repair_fix_git_rrd_placeholder: true
 librenms_startup_repair_fix_writable_ownership: true
-# PHP-FPM workers normally reconnect on the next request. Restarting all of
-# them for every transient DB error can itself create repeated web failures, so
-# keep this emergency recovery action opt-in.
-librenms_startup_repair_restart_php_fpm_on_db_gone_away: false
-librenms_startup_repair_db_gone_away_log_lines: 400
+# HA database failovers can leave long-lived PHP workers holding connections
+# that HAProxy has correctly closed. Recycle those workers with a graceful,
+# rate-limited reload only after a fresh application-level DB probe succeeds.
+librenms_startup_repair_restart_php_fpm_on_db_gone_away: >-
+  {{ librenms_mode == 'ha' and librenms_manage_php_fpm | bool }}
+librenms_startup_repair_reload_php_fpm_after_db_recovery: >-
+  {{ librenms_mode == 'ha' and librenms_manage_php_fpm | bool }}
+librenms_startup_repair_db_readiness_marker: /run/librenms-ha-startup-repair/database-ready.state
+librenms_startup_repair_db_gone_away_log_lines: 2000
 librenms_startup_repair_db_gone_away_marker: /run/librenms-ha-startup-repair/db-gone-away.last
 librenms_startup_repair_db_gone_away_db_check_timeout: 10
-librenms_startup_repair_db_gone_away_php_fpm_cooldown: 900
+librenms_startup_repair_db_gone_away_php_fpm_cooldown: 120
 librenms_startup_repair_service_recovery_enabled: true
 librenms_startup_repair_service_recovery_timeout: 180
 librenms_startup_repair_service_recovery_delay: 5

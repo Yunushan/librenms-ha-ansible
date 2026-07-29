@@ -71,6 +71,10 @@
 
 ### Changed
 
+- Enabled guarded HA database recovery for managed PHP-FPM workers. The
+  30-second startup repair timer now tracks database readiness transitions,
+  gracefully reloads stale workers only after a successful database probe, and
+  retries rate-limited recovery instead of prematurely marking it handled.
 - Changed HA daily maintenance so only the node holding the shared maintenance
   lock enters HAProxy drain mode; competing timer runs no longer drain all web
   backends before they discover the lock is busy.

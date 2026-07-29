@@ -117,9 +117,9 @@ def main() -> int:
         'validate: "php -l %s"',
         "Deployment must validate the generated PHP lock helper",
     )
-    if read("roles/librenms_app/tasks/main.yml").count('validate: "bash -n %s"') < 2:
+    if read("roles/librenms_app/tasks/main.yml").count('validate: "bash -n %s"') < 3:
         failures.append(
-            "Deployment must validate rendered daily-maintenance and backup shell wrappers"
+            "Deployment must validate rendered daily-maintenance, backup, and startup-repair shell wrappers"
         )
     failures += require(
         "roles/librenms_defaults/defaults/main.yml",
@@ -128,8 +128,18 @@ def main() -> int:
     )
     failures += require(
         "roles/librenms_defaults/defaults/main.yml",
-        "librenms_startup_repair_restart_php_fpm_on_db_gone_away: false",
-        "Transient database errors must not restart PHP-FPM by default",
+        "librenms_startup_repair_restart_php_fpm_on_db_gone_away: >-",
+        "HA database errors must trigger guarded stale-worker recovery by default",
+    )
+    failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_startup_repair_reload_php_fpm_after_db_recovery: >-",
+        "HA database recovery must recycle stale PHP-FPM database connections by default",
+    )
+    failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_startup_repair_db_readiness_marker:",
+        "HA database recovery must retain readiness transition state",
     )
     failures += require(
         "roles/librenms_defaults/defaults/main.yml",
@@ -139,8 +149,27 @@ def main() -> int:
     failures += require(
         "roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2",
         "PHP-FPM recovery cooldown is active",
-        "Optional PHP-FPM database recovery must be rate-limited",
+        "PHP-FPM database recovery must be rate-limited",
     )
+    failures += require(
+        "roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2",
+        "recover_php_fpm_after_db_recovery()",
+        "Startup repair must react to a database unready-to-ready transition",
+    )
+    failures += require(
+        "roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2",
+        'PHP-FPM recovery cooldown is active"\n    return 75',
+        "A rate-limited PHP-FPM recovery must remain pending for a later retry",
+    )
+    if (
+        read("roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2").count(
+            "recover_php_fpm_after_db_recovery || true"
+        )
+        < 2
+    ):
+        failures.append(
+            "Startup repair must sample database readiness before and after service recovery"
+        )
     failures += require(
         "roles/mariadb/tasks/main.yml",
         "librenms_mariadb_upstream_repo_setup_checksum",
