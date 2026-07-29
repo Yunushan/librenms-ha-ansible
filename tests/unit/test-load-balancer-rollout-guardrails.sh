@@ -42,6 +42,27 @@ grep -Fq 'librenms_galera_readiness_agent_probe_retries' "${HAPROXY_TASKS}" || {
     printf 'Galera agent preflight must retry during socket/cluster convergence.\n' >&2
     exit 1
 }
+probe_block="$(
+    awk '
+        /- name: Verify Galera readiness agents converge before HAProxy reload/ {
+            capture=1
+        }
+        capture && /^- name:/ && !/Verify Galera readiness agents converge before HAProxy reload/ {
+            exit
+        }
+        capture {
+            print
+        }
+    ' "${HAPROXY_TASKS}"
+)"
+grep -Fq 'for ((attempt = 1; attempt <= PROBE_RETRIES; attempt++))' <<<"${probe_block}" || {
+    printf 'Galera agent preflight must perform bounded retries inside one task result.\n' >&2
+    exit 1
+}
+if grep -Eq '^[[:space:]]+(until|retries|delay):' <<<"${probe_block}"; then
+    printf 'Galera agent preflight must not emit misleading Ansible retry failures.\n' >&2
+    exit 1
+fi
 grep -Fq 'Ensure Galera readiness agent sockets are active before HAProxy reload' "${HAPROXY_TASKS}" || {
     printf 'HAProxy rollout must activate Galera readiness sockets before probing.\n' >&2
     exit 1

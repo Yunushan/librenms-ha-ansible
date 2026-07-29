@@ -914,7 +914,59 @@
           )
       ) is none
 
-- name: Ensure RRD mountpoint exists on LibreNMS nodes
+- name: Detect active Gluster-backed RRD mount on LibreNMS nodes
+  command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - TARGET
+      - --mountpoint
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_gluster_rrd_active_mount
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Inspect unmounted RRD mountpoint path on LibreNMS nodes
+  stat:
+    path: "{{ librenms_gluster_mountpoint }}"
+    follow: false
+  register: librenms_gluster_rrd_mountpoint_stat
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
+
+- name: Refuse unsafe non-directory RRD mountpoint paths
+  assert:
+    that:
+      - >-
+        not (librenms_gluster_rrd_mountpoint_stat.stat.exists | default(false)) or
+        (librenms_gluster_rrd_mountpoint_stat.stat.isdir | default(false)) or
+        (librenms_gluster_rrd_mountpoint_stat.stat.islnk | default(false))
+    fail_msg: >-
+      Refusing to replace {{ librenms_gluster_mountpoint }} because it exists
+      and is neither a directory nor a symbolic link. Move that path aside
+      deliberately before mounting the Gluster RRD volume.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
+
+- name: Remove legacy RRD mountpoint symlink without deleting its target
+  file:
+    path: "{{ librenms_gluster_mountpoint }}"
+    state: absent
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
+    - librenms_gluster_rrd_mountpoint_stat.stat.islnk | default(false) | bool
+
+- name: Ensure unmounted RRD mountpoint exists on LibreNMS nodes
   file:
     path: "{{ librenms_gluster_mountpoint }}"
     state: directory
@@ -924,6 +976,7 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
+    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
 
 - name: Mount GlusterFS volume on LibreNMS nodes
   ansible.posix.mount:

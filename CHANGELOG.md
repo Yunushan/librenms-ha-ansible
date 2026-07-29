@@ -74,6 +74,15 @@
 
 ### Changed
 
+- Made Gluster-backed RRD mount preparation idempotent when the mount is
+  already active, and safely replaces only legacy mountpoint symlinks while
+  refusing unexpected files.
+- Made the opt-in host-firewall role load shared defaults reliably and skip
+  safely when the feature flag is not defined by inventory.
+- Kept Galera readiness convergence retries inside one bounded probe result so
+  successful HAProxy rollouts no longer print misleading failed-retry banners.
+- Excluded the generated project-local Ansible Galaxy cache from source secret
+  scans so local checks remain portable after `make site` installs collections.
 - Aligned Galera readiness-agent query, HAProxy check, and deployment probe
   timeouts; HAProxy rollout now activates readiness sockets and allows bounded
   convergence retries before treating every database backend as unavailable.
