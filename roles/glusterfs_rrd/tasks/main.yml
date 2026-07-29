@@ -931,6 +931,138 @@
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
 
+- name: Probe active Gluster-backed RRD mount accessibility
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_gluster_mount_health_timeout | int }}s"
+      - stat
+      - --dereference
+      - --format=%F
+      - --
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_gluster_rrd_mount_health
+  changed_when: false
+  failed_when: false
+  retries: "{{ librenms_gluster_mount_health_retries | int }}"
+  delay: "{{ librenms_gluster_mount_health_retry_delay | int }}"
+  until: (librenms_gluster_rrd_mount_health.rc | default(1) | int) == 0
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) == 0
+
+- name: Record stale Gluster-backed RRD client mount state
+  set_fact:
+    librenms_gluster_rrd_mount_is_stale: >-
+      {{
+        (librenms_gluster_rrd_active_mount.rc | default(1) | int) == 0
+        and (librenms_gluster_rrd_mount_health.rc | default(1) | int) != 0
+      }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Refuse disabled stale Gluster RRD client mount recovery
+  assert:
+    that:
+      - >-
+        not (librenms_gluster_rrd_mount_is_stale | default(false) | bool) or
+        (librenms_gluster_recover_stale_client_mounts | bool)
+    fail_msg: >-
+      {{ librenms_gluster_mountpoint }} is still present in the mount table but
+      failed {{ librenms_gluster_mount_health_retries }} bounded filesystem
+      access probes. Enable librenms_gluster_recover_stale_client_mounts or
+      repair and remount this Gluster client path before continuing.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Gather service state before stale Gluster RRD mount recovery
+  service_facts:
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_gluster_rrd_mount_is_stale | default(false) | bool
+    - librenms_gluster_recover_stale_client_mounts | bool
+
+- name: Record whether RRDCacheD was running before mount recovery
+  set_fact:
+    librenms_gluster_rrdcached_was_running: >-
+      {{
+        ansible_facts.services.get(
+          librenms_rrdcached_service_name ~ '.service', {}
+        ).get('state', '') == 'running'
+        or ansible_facts.services.get(
+          librenms_rrdcached_service_name, {}
+        ).get('state', '') == 'running'
+      }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_gluster_rrd_mount_is_stale | default(false) | bool
+    - librenms_gluster_recover_stale_client_mounts | bool
+
+- name: Stop active RRDCacheD before stale Gluster RRD mount recovery
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: stopped
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_gluster_rrd_mount_is_stale | default(false) | bool
+    - librenms_gluster_recover_stale_client_mounts | bool
+    - librenms_gluster_rrdcached_was_running | default(false) | bool
+
+- name: Lazily detach stale Gluster-backed RRD client mount
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_gluster_stale_unmount_timeout | int }}s"
+      - umount
+      - --lazy
+      - --
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_gluster_rrd_stale_unmount
+  changed_when: (librenms_gluster_rrd_stale_unmount.rc | int) == 0
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_gluster_rrd_mount_is_stale | default(false) | bool
+    - librenms_gluster_recover_stale_client_mounts | bool
+
+- name: Re-detect Gluster-backed RRD mount after stale mount recovery
+  command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - TARGET
+      - --nocanonicalize
+      - --mountpoint
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_gluster_rrd_active_mount_after_recovery
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Verify stale Gluster-backed RRD mount was detached
+  assert:
+    that:
+      - >-
+        (librenms_gluster_rrd_active_mount_after_recovery.rc | default(1) | int) != 0
+    fail_msg: >-
+      The inaccessible Gluster client mount at {{ librenms_gluster_mountpoint }}
+      remained in the mount table after a bounded lazy detach. RRDCacheD remains
+      stopped to avoid writing into an unsafe storage path.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_gluster_rrd_mount_is_stale | default(false) | bool
+    - librenms_gluster_recover_stale_client_mounts | bool
+
 - name: Inspect unmounted RRD mountpoint path on LibreNMS nodes
   stat:
     path: "{{ librenms_gluster_mountpoint }}"
@@ -939,7 +1071,8 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
-    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
+    - >-
+      (librenms_gluster_rrd_active_mount_after_recovery.rc | default(1) | int) != 0
 
 - name: Refuse unsafe non-directory RRD mountpoint paths
   assert:
@@ -955,7 +1088,8 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
-    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
+    - >-
+      (librenms_gluster_rrd_active_mount_after_recovery.rc | default(1) | int) != 0
 
 - name: Remove legacy RRD mountpoint symlink without deleting its target
   file:
@@ -964,7 +1098,8 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
-    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
+    - >-
+      (librenms_gluster_rrd_active_mount_after_recovery.rc | default(1) | int) != 0
     - librenms_gluster_rrd_mountpoint_stat.stat.islnk | default(false) | bool
 
 - name: Ensure unmounted RRD mountpoint exists on LibreNMS nodes
@@ -977,7 +1112,34 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
-    - (librenms_gluster_rrd_active_mount.rc | default(1) | int) != 0
+    - >-
+      (librenms_gluster_rrd_active_mount_after_recovery.rc | default(1) | int) != 0
+
+- name: Verify prepared unmounted RRD mountpoint is a real directory
+  stat:
+    path: "{{ librenms_gluster_mountpoint }}"
+    follow: false
+  register: librenms_gluster_rrd_prepared_mountpoint_stat
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - >-
+      (librenms_gluster_rrd_active_mount_after_recovery.rc | default(1) | int) != 0
+
+- name: Refuse an invalid prepared RRD mountpoint
+  assert:
+    that:
+      - librenms_gluster_rrd_prepared_mountpoint_stat.stat.exists | default(false)
+      - librenms_gluster_rrd_prepared_mountpoint_stat.stat.isdir | default(false)
+      - not (librenms_gluster_rrd_prepared_mountpoint_stat.stat.islnk | default(false))
+    fail_msg: >-
+      Refusing to mount GlusterFS because {{ librenms_gluster_mountpoint }} is
+      not an accessible, literal directory after mountpoint repair.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - >-
+      (librenms_gluster_rrd_active_mount_after_recovery.rc | default(1) | int) != 0
 
 - name: Mount GlusterFS volume on LibreNMS nodes
   ansible.posix.mount:
@@ -993,6 +1155,49 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Verify mounted Gluster-backed RRD path is accessible
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_gluster_mount_health_timeout | int }}s"
+      - stat
+      - --dereference
+      - --format=%F
+      - --
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_gluster_rrd_mounted_health
+  changed_when: false
+  failed_when: false
+  retries: "{{ librenms_gluster_mount_health_retries | int }}"
+  delay: "{{ librenms_gluster_mount_health_retry_delay | int }}"
+  until: (librenms_gluster_rrd_mounted_health.rc | default(1) | int) == 0
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Refuse an inaccessible Gluster-backed RRD mount
+  assert:
+    that:
+      - (librenms_gluster_rrd_mounted_health.rc | default(1) | int) == 0
+    fail_msg: >-
+      GlusterFS is listed at {{ librenms_gluster_mountpoint }}, but the mounted
+      path is not accessible after {{ librenms_gluster_mount_health_retries }}
+      bounded probes. RRDCacheD will not be restored on this unsafe path.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+
+- name: Restore RRDCacheD after stale Gluster RRD mount recovery
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: started
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in groups.get('librenms_nodes', [])
+    - librenms_gluster_rrd_mount_is_stale | default(false) | bool
+    - librenms_gluster_recover_stale_client_mounts | bool
+    - librenms_gluster_rrdcached_was_running | default(false) | bool
 
 - name: Repair Gluster-backed RRD ownership and permissions
   file:

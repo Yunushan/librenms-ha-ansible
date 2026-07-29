@@ -33,6 +33,7 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/diagnostics.yml --ask-bec
 | Galera has no Primary component | `galera-recover.yml` evidence mode | Confirm one safe bootstrap host only after evidence |
 | Full cluster boot has red validation | `post-reboot.yml` | Recover Galera/Redis/Gluster only if convergence fails |
 | Graphs have gaps after outage | SNMPv3 from surviving poller, dispatcher status, RRD mount | Accept missed intervals; fix continuing polling/storage gaps |
+| RRD mount task reports `File exists` or validation cannot fetch RRD results | Literal mount entry plus a bounded `stat` of the RRD path | Leave stale-client recovery enabled; it detaches and remounts only an inaccessible Gluster FUSE mount |
 | Database connection errors or intermittent schema/time validation | HAProxy DB backend state, Galera sync, DB/PHP time | Fix stale/down DB backend or time drift before app validation |
 
 ## One Node Hard Power-Off

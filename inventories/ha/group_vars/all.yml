@@ -65,6 +65,9 @@ librenms_gluster_brick_path: /gluster/brick1/librenms-rrd
 librenms_gluster_mountpoint: /opt/librenms/rrd
 librenms_gluster_manage_brick_device: false
 librenms_gluster_brick_device: /dev/sdb1
+# Recover a FUSE mount that remains in the mount table but no longer permits
+# filesystem access. Healthy Gluster mounts are never detached by this repair.
+librenms_gluster_recover_stale_client_mounts: true
 
 librenms_vip_enabled: true
 librenms_vip_ip: 10.10.10.10

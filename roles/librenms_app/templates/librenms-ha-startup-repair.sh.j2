@@ -12,6 +12,12 @@ RRD_MODE={{ librenms_rrd_mode | quote }}
 RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
 RRD_PERMISSION_REPAIR={{ librenms_rrd_permission_repair_path | quote }}
 GLUSTER_MOUNT_WAIT={{ librenms_startup_repair_gluster_mount_wait | int }}
+GLUSTER_STALE_MOUNT_RECOVERY={{ (librenms_gluster_recover_stale_client_mounts | bool) | ternary('1', '0') }}
+GLUSTER_MOUNT_HEALTH_TIMEOUT={{ librenms_gluster_mount_health_timeout | int }}
+GLUSTER_MOUNT_HEALTH_RETRIES={{ librenms_gluster_mount_health_retries | int }}
+GLUSTER_MOUNT_HEALTH_RETRY_DELAY={{ librenms_gluster_mount_health_retry_delay | int }}
+GLUSTER_STALE_UNMOUNT_TIMEOUT={{ librenms_gluster_stale_unmount_timeout | int }}
+RRDCACHED_SERVICE={{ librenms_rrdcached_service_name | quote }}
 RUNTIME_RETRIES={{ librenms_startup_repair_runtime_retries | int }}
 RUNTIME_DELAY={{ librenms_startup_repair_runtime_delay | int }}
 FIX_GIT_RRD_PLACEHOLDER={{ (librenms_startup_repair_fix_git_rrd_placeholder | bool) | ternary('1', '0') }}
@@ -61,18 +67,83 @@ run_as_librenms() {
   runuser -u "${LIBRENMS_USER}" -- "$@"
 }
 
+rrd_mount_present() {
+  findmnt --noheadings --output TARGET --nocanonicalize \
+    --mountpoint "${RRD_PATH}" >/dev/null 2>&1
+}
+
+rrd_path_accessible() {
+  local attempt=1
+
+  while [ "${attempt}" -le "${GLUSTER_MOUNT_HEALTH_RETRIES}" ]; do
+    if timeout "${GLUSTER_MOUNT_HEALTH_TIMEOUT}" stat --dereference \
+        --format=%F -- "${RRD_PATH}" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [ "${attempt}" -lt "${GLUSTER_MOUNT_HEALTH_RETRIES}" ]; then
+      sleep "${GLUSTER_MOUNT_HEALTH_RETRY_DELAY}"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+prepare_rrd_mountpoint() {
+  if [ -L "${RRD_PATH}" ]; then
+    unlink -- "${RRD_PATH}" || return 1
+  elif [ -e "${RRD_PATH}" ] && [ ! -d "${RRD_PATH}" ]; then
+    log "refusing non-directory RRD mountpoint ${RRD_PATH}"
+    return 1
+  fi
+
+  mkdir -p -- "${RRD_PATH}"
+}
+
+recover_stale_rrd_mount() {
+  rrd_mount_present || return 0
+  rrd_path_accessible && return 0
+  [ "${GLUSTER_STALE_MOUNT_RECOVERY}" = "1" ] || return 1
+
+  local restart_rrdcached=0
+  if systemctl is-active --quiet "${RRDCACHED_SERVICE}"; then
+    restart_rrdcached=1
+    systemctl stop "${RRDCACHED_SERVICE}" || return 1
+  fi
+
+  log "detaching inaccessible Gluster RRD mount ${RRD_PATH}"
+  if ! timeout "${GLUSTER_STALE_UNMOUNT_TIMEOUT}" \
+      umount --lazy -- "${RRD_PATH}"; then
+    return 1
+  fi
+
+  rrd_mount_present && return 1
+  prepare_rrd_mountpoint || return 1
+  mount "${RRD_PATH}" >/dev/null 2>&1 || return 1
+  rrd_mount_present || return 1
+  rrd_path_accessible || return 1
+
+  if [ "${restart_rrdcached}" = "1" ]; then
+    systemctl start "${RRDCACHED_SERVICE}" || return 1
+  fi
+
+  log "restored accessible Gluster RRD mount ${RRD_PATH}"
+}
+
 wait_for_rrd_mount() {
   [ "${RRD_MODE}" = "glusterfs" ] || return 0
 
-  local elapsed=0
-  while [ "${elapsed}" -lt "${GLUSTER_MOUNT_WAIT}" ]; do
-    if findmnt --target "${RRD_PATH}" >/dev/null 2>&1; then
-      return 0
+  local deadline=$((SECONDS + GLUSTER_MOUNT_WAIT))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if rrd_mount_present; then
+      recover_stale_rrd_mount && return 0
+      sleep 2
+      continue
     fi
 
+    prepare_rrd_mountpoint || return 1
     mount "${RRD_PATH}" >/dev/null 2>&1 || true
     sleep 2
-    elapsed=$((elapsed + 2))
   done
 
   log "RRD path ${RRD_PATH} is not mounted after ${GLUSTER_MOUNT_WAIT}s"
