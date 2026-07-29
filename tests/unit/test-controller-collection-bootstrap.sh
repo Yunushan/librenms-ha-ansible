@@ -5,8 +5,22 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 launcher="${repo_root}/scripts/ansible-playbook.sh"
 ansible_config="${repo_root}/ansible.cfg"
 collection_requirements="${repo_root}/requirements.yml"
+collection_state_checker="${repo_root}/scripts/ansible-collection-state.py"
+python_bin="${PYTHON_BIN:-python3}"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "${temporary_dir}"' EXIT
+
+write_manifest() {
+    local root="$1"
+    local namespace="$2"
+    local collection="$3"
+    local version="$4"
+    local collection_dir="${root}/ansible_collections/${namespace}/${collection}"
+
+    mkdir -p "${collection_dir}"
+    printf '{"collection_info":{"version":"%s"}}\n' "${version}" \
+        > "${collection_dir}/MANIFEST.json"
+}
 
 grep -Eq '^stdout_callback[[:space:]]*=[[:space:]]*ansible\.builtin\.default[[:space:]]*$' "${ansible_config}"
 grep -Eq '^callback_result_format[[:space:]]*=[[:space:]]*yaml[[:space:]]*$' "${ansible_config}"
@@ -28,8 +42,29 @@ cat > "${fake_bin}/ansible-galaxy" <<'EOF'
 #!/usr/bin/env bash
 printf 'galaxy' >> "${CALL_LOG}"
 printf ' <%s>' "$@" >> "${CALL_LOG}"
-printf '\n' >> "${CALL_LOG}"
-exit "${FAKE_GALAXY_EXIT:-0}"
+printf ' mismatch-policy <%s>\n' \
+    "${ANSIBLE_COLLECTIONS_ON_ANSIBLE_VERSION_MISMATCH:-}" >> "${CALL_LOG}"
+
+fake_rc="${FAKE_GALAXY_EXIT:-0}"
+if [ "${fake_rc}" -ne 0 ]; then
+    exit "${fake_rc}"
+fi
+
+collections_root="${ANSIBLE_COLLECTIONS_PATH%%:*}"
+write_manifest() {
+    local namespace="$1"
+    local collection="$2"
+    local version="$3"
+    local collection_dir="${collections_root}/ansible_collections/${namespace}/${collection}"
+
+    mkdir -p "${collection_dir}"
+    printf '{"collection_info":{"version":"%s"}}\n' "${version}" \
+        > "${collection_dir}/MANIFEST.json"
+}
+
+write_manifest ansible posix 2.2.2
+write_manifest community general 11.4.8
+write_manifest ansible mysql 5.2.0
 EOF
 
 cat > "${fake_bin}/ansible-playbook" <<'EOF'
@@ -54,6 +89,47 @@ grep -Fq "galaxy <collection> <install> <-r> <${repo_root}/requirements.yml> <-p
 grep -Fq 'playbook <-i> <inventories/ha/hosts.yml> <playbooks/site.yml> <--check>' "${call_log}"
 grep -Fq "config <${repo_root}/ansible.cfg>" "${call_log}"
 grep -Fq "collections <${collections_path}>" "${call_log}"
+"${python_bin}" "${collection_state_checker}" \
+    --requirements "${collection_requirements}" \
+    --collections-path "${collections_path}" \
+    --require-installed
+
+if grep -Fq '<--force>' "${call_log}"; then
+    echo "A first-time collection install must not require a forced refresh." >&2
+    exit 1
+fi
+
+write_manifest "${collections_path}" community general 13.2.0
+: > "${call_log}"
+PATH="${fake_bin}:${PATH}" \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml --check
+
+grep -Fq '<--force>' "${call_log}"
+grep -Fq 'mismatch-policy <ignore>' "${call_log}"
+"${python_bin}" "${collection_state_checker}" \
+    --requirements "${collection_requirements}" \
+    --collections-path "${collections_path}" \
+    --require-installed
+
+: > "${call_log}"
+PATH="${fake_bin}:${PATH}" \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml --check
+
+if grep -Fq '<--force>' "${call_log}"; then
+    echo "Converged collection pins must not be force-reinstalled." >&2
+    exit 1
+fi
+
+if grep -Fq 'mismatch-policy <ignore>' "${call_log}"; then
+    echo "Compatibility warnings must remain enabled after collection convergence." >&2
+    exit 1
+fi
 
 : > "${call_log}"
 set +e
