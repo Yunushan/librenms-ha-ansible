@@ -3,8 +3,21 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 launcher="${repo_root}/scripts/ansible-playbook.sh"
+ansible_config="${repo_root}/ansible.cfg"
+collection_requirements="${repo_root}/requirements.yml"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "${temporary_dir}"' EXIT
+
+grep -Eq '^stdout_callback[[:space:]]*=[[:space:]]*ansible\.builtin\.default[[:space:]]*$' "${ansible_config}"
+grep -Eq '^callback_result_format[[:space:]]*=[[:space:]]*yaml[[:space:]]*$' "${ansible_config}"
+
+if grep -Eq '^stdout_callback[[:space:]]*=[[:space:]]*yaml[[:space:]]*$' "${ansible_config}"; then
+    echo "The removed community.general.yaml callback must not be configured." >&2
+    exit 1
+fi
+
+grep -A1 -F -- '- name: community.general' "${collection_requirements}" \
+    | grep -Eq 'version:[[:space:]]*11\.4\.8[[:space:]]*$'
 
 fake_bin="${temporary_dir}/bin"
 call_log="${temporary_dir}/calls.log"

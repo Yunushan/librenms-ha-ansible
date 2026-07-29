@@ -74,6 +74,9 @@
 
 ### Changed
 
+- Replaced the removed `community.general.yaml` stdout callback with the
+  built-in default callback's YAML result format and pinned `community.general`
+  to the maintained 11.x line compatible with ansible-core 2.16 controllers.
 - Enabled guarded HA database recovery for managed PHP-FPM workers. The
   30-second startup repair timer now tracks database readiness transitions,
   gracefully reloads stale workers only after a successful database probe, and
