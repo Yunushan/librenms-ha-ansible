@@ -25,6 +25,7 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 IGNORED_PARTS = {
+    ".ansible",
     ".git",
     "__pycache__",
     ".venv",

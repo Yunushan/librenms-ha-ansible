@@ -67,6 +67,9 @@ jobs:
       - name: Test host-firewall guardrails
         run: make test-host-firewall-guardrails
 
+      - name: Test Gluster RRD mount guardrails
+        run: make test-gluster-rrd-mount-guardrails
+
       - name: Run ansible-lint
         run: ansible-lint
 

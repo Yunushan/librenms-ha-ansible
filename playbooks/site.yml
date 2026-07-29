@@ -66,4 +66,4 @@
   serial: 1
   roles:
     - role: host_firewall
-      when: librenms_manage_host_firewall | bool
+      when: (librenms_manage_host_firewall | default(false)) | bool

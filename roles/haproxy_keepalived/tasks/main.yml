@@ -459,20 +459,35 @@
 - name: Verify Galera readiness agents converge before HAProxy reload
   shell: |-
     set -o pipefail
-    timeout "{{ librenms_galera_readiness_agent_probe_timeout }}" bash -c '
-      exec 3<>/dev/tcp/"$1"/"$2"
-      IFS= read -r response <&3
-      [ "${response}" = "up" ]
-    ' _ "{{ hostvars[item].ansible_host | default(item) }}" "{{ librenms_galera_readiness_agent_port }}"
+    for ((attempt = 1; attempt <= PROBE_RETRIES; attempt++)); do
+      if timeout "${PROBE_TIMEOUT}" bash -c '
+        exec 3<>/dev/tcp/"$1"/"$2"
+        IFS= read -r response <&3
+        [ "${response}" = "up" ]
+      ' _ "${AGENT_HOST}" "${AGENT_PORT}"; then
+        printf 'up after %d attempt(s)\n' "${attempt}"
+        exit 0
+      fi
+
+      if ((attempt < PROBE_RETRIES)); then
+        sleep "${PROBE_DELAY}"
+      fi
+    done
+
+    printf 'down after %d attempt(s)\n' "${PROBE_RETRIES}"
+    exit 1
   args:
     executable: /bin/bash
+  environment:
+    AGENT_HOST: "{{ hostvars[item].ansible_host | default(item) }}"
+    AGENT_PORT: "{{ librenms_galera_readiness_agent_port | string }}"
+    PROBE_TIMEOUT: "{{ librenms_galera_readiness_agent_probe_timeout }}"
+    PROBE_RETRIES: "{{ librenms_galera_readiness_agent_probe_retries | int | string }}"
+    PROBE_DELAY: "{{ librenms_galera_readiness_agent_probe_delay | int | string }}"
   loop: "{{ librenms_active_db_nodes }}"
   register: librenms_haproxy_galera_readiness_agent_probe
   changed_when: false
   failed_when: false
-  until: (librenms_haproxy_galera_readiness_agent_probe.rc | default(1) | int) == 0
-  retries: "{{ librenms_galera_readiness_agent_probe_retries | int }}"
-  delay: "{{ librenms_galera_readiness_agent_probe_delay | int }}"
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
