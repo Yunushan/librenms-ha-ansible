@@ -6,6 +6,7 @@ readonly DEFAULTS_FILE="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
 readonly PROBE_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/librenms-runtime-health.php.j2"
 readonly NGINX_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/nginx-librenms.conf.j2"
 readonly HAPROXY_TEMPLATE="${ROOT_DIR}/roles/haproxy_keepalived/templates/haproxy.cfg.j2"
+readonly STARTUP_REPAIR_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2"
 readonly READINESS_DEFAULTS="${ROOT_DIR}/roles/production_readiness/defaults/main.yml"
 readonly READINESS_TASKS="${ROOT_DIR}/roles/production_readiness/tasks/main.yml"
 readonly INTEGRATION_HAPROXY="${ROOT_DIR}/tests/integration/haproxy-web/haproxy.cfg"
@@ -29,6 +30,7 @@ main() {
     local probe
     local nginx
     local haproxy
+    local startup_repair
     local readiness_defaults
     local readiness_tasks
     local integration_haproxy
@@ -38,6 +40,7 @@ main() {
     probe="$(tr -d '\r' < "${PROBE_TEMPLATE}")"
     nginx="$(tr -d '\r' < "${NGINX_TEMPLATE}")"
     haproxy="$(tr -d '\r' < "${HAPROXY_TEMPLATE}")"
+    startup_repair="$(tr -d '\r' < "${STARTUP_REPAIR_TEMPLATE}")"
     readiness_defaults="$(tr -d '\r' < "${READINESS_DEFAULTS}")"
     readiness_tasks="$(tr -d '\r' < "${READINESS_TASKS}")"
     integration_haproxy="$(tr -d '\r' < "${INTEGRATION_HAPROXY}")"
@@ -91,6 +94,37 @@ main() {
         "${haproxy}" \
         "librenms_nginx_runtime_health_check_path" \
         "HAProxy must use the runtime health URI instead of a static response."
+    require_contains \
+        "${defaults}" \
+        "librenms_startup_repair_restart_php_fpm_on_db_gone_away: >-" \
+        "HA mode must enable guarded recovery for fresh SQLSTATE 2006 errors."
+    require_contains \
+        "${defaults}" \
+        "librenms_startup_repair_reload_php_fpm_after_db_recovery: >-" \
+        "HA mode must enable guarded PHP-FPM recovery after database restoration."
+    require_contains \
+        "${defaults}" \
+        "librenms_startup_repair_db_readiness_marker:" \
+        "Database readiness transitions must be persisted between repair runs."
+    require_contains \
+        "${startup_repair}" \
+        "recover_php_fpm_after_db_recovery()" \
+        "Startup repair must react when the database frontend recovers."
+    require_contains \
+        "${startup_repair}" \
+        'previous_state}" != "unready"' \
+        "Startup repair must reload workers only after an observed outage."
+    require_contains \
+        "${startup_repair}" \
+        'PHP-FPM recovery cooldown is active"
+    return 75' \
+        "Cooldown-limited recovery must remain pending instead of being marked handled."
+    require_contains \
+        "${startup_repair}" \
+        "mark_latest_db_gone_away_error_handled" \
+        "A successful transition recovery must suppress duplicate log-triggered reloads."
+    [[ "$(grep -c 'recover_php_fpm_after_db_recovery || true' "${STARTUP_REPAIR_TEMPLATE}")" -ge 2 ]] \
+        || fail "Startup repair must sample DB readiness before and after service recovery."
     require_contains \
         "${readiness_defaults}" \
         "librenms_production_readiness_verify_runtime_web_health" \

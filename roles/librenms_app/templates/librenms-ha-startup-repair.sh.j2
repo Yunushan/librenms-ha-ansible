@@ -21,6 +21,8 @@ SERVICE_RECOVERY_TIMEOUT={{ librenms_startup_repair_service_recovery_timeout | i
 SERVICE_RECOVERY_DELAY={{ librenms_startup_repair_service_recovery_delay | int }}
 PHP_FPM_SERVICE={{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) | quote }}
 RESTART_PHP_FPM_ON_DB_GONE_AWAY={{ (librenms_startup_repair_restart_php_fpm_on_db_gone_away | bool) | ternary('1', '0') }}
+RELOAD_PHP_FPM_AFTER_DB_RECOVERY={{ (librenms_startup_repair_reload_php_fpm_after_db_recovery | bool) | ternary('1', '0') }}
+DB_READINESS_MARKER={{ librenms_startup_repair_db_readiness_marker | quote }}
 DB_GONE_AWAY_LOG_LINES={{ librenms_startup_repair_db_gone_away_log_lines | int }}
 DB_GONE_AWAY_MARKER={{ librenms_startup_repair_db_gone_away_marker | quote }}
 DB_GONE_AWAY_DB_CHECK_TIMEOUT={{ librenms_startup_repair_db_gone_away_db_check_timeout | int }}
@@ -295,12 +297,86 @@ recover_persistently_unready_local_galera() {
   fi
 }
 
-recover_php_fpm_after_db_gone_away() {
+mark_latest_db_gone_away_error_handled() {
   local latest_error
-  local handled_error
+
+  latest_error=$(latest_db_gone_away_error || true)
+  [ -n "${latest_error}" ] || return 0
+
+  printf '%s\n' "${latest_error}" > "${DB_GONE_AWAY_MARKER}" 2>/dev/null || true
+}
+
+gracefully_reload_php_fpm_after_database_recovery() {
+  local reason=$1
   local marker_dir
   local handled_at
   local now
+
+  [ -n "${PHP_FPM_SERVICE}" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+
+  marker_dir=$(dirname "${DB_GONE_AWAY_MARKER}")
+  mkdir -p "${marker_dir}" >/dev/null 2>&1 || true
+  handled_at=$(cat "${DB_GONE_AWAY_MARKER}.handled-at" 2>/dev/null || printf '0')
+  case "${handled_at}" in
+    *[!0-9]*|'') handled_at=0 ;;
+  esac
+  now=$(date +%s)
+  if [ $((now - handled_at)) -lt "${DB_GONE_AWAY_PHP_FPM_COOLDOWN}" ]; then
+    log "${reason}; PHP-FPM recovery cooldown is active"
+    return 75
+  fi
+
+  log "${reason}; gracefully reloading ${PHP_FPM_SERVICE}"
+  if systemctl reload "${PHP_FPM_SERVICE}" >/dev/null 2>&1; then
+    printf '%s\n' "${now}" > "${DB_GONE_AWAY_MARKER}.handled-at" 2>/dev/null || true
+    return 0
+  else
+    log "failed to reload ${PHP_FPM_SERVICE} after database recovery"
+    return 1
+  fi
+}
+
+recover_php_fpm_after_db_recovery() {
+  local previous_state
+  local marker_dir
+
+  [ "${RELOAD_PHP_FPM_AFTER_DB_RECOVERY}" = "1" ] || return 0
+  [ -n "${PHP_FPM_SERVICE}" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+
+  marker_dir=$(dirname "${DB_READINESS_MARKER}")
+  mkdir -p "${marker_dir}" >/dev/null 2>&1 || return 0
+  previous_state=$(cat "${DB_READINESS_MARKER}" 2>/dev/null || true)
+
+  if ! librenms_database_ready; then
+    if [ "${previous_state}" != "unready" ]; then
+      log "LibreNMS database frontend became unready; waiting for safe recovery"
+    fi
+    printf 'unready\n' > "${DB_READINESS_MARKER}" 2>/dev/null || true
+    return 0
+  fi
+
+  if [ -z "${previous_state}" ]; then
+    printf 'ready\n' > "${DB_READINESS_MARKER}" 2>/dev/null || true
+    return 0
+  fi
+
+  if [ "${previous_state}" != "unready" ]; then
+    printf 'ready\n' > "${DB_READINESS_MARKER}" 2>/dev/null || true
+    return 0
+  fi
+
+  if gracefully_reload_php_fpm_after_database_recovery \
+    "LibreNMS database frontend recovered"; then
+    printf 'ready\n' > "${DB_READINESS_MARKER}" 2>/dev/null || true
+    mark_latest_db_gone_away_error_handled
+  fi
+}
+
+recover_php_fpm_after_db_gone_away() {
+  local latest_error
+  local handled_error
 
   [ "${RESTART_PHP_FPM_ON_DB_GONE_AWAY}" = "1" ] || return 0
   [ -n "${PHP_FPM_SERVICE}" ] || return 0
@@ -317,34 +393,22 @@ recover_php_fpm_after_db_gone_away() {
     return 0
   fi
 
-  marker_dir=$(dirname "${DB_GONE_AWAY_MARKER}")
-  mkdir -p "${marker_dir}" >/dev/null 2>&1 || true
-  handled_at=$(cat "${DB_GONE_AWAY_MARKER}.handled-at" 2>/dev/null || printf '0')
-  case "${handled_at}" in
-    *[!0-9]*|'') handled_at=0 ;;
-  esac
-  now=$(date +%s)
-  if [ $((now - handled_at)) -lt "${DB_GONE_AWAY_PHP_FPM_COOLDOWN}" ]; then
-    log "detected fresh LibreNMS DB gone-away error; PHP-FPM recovery cooldown is active"
+  if gracefully_reload_php_fpm_after_database_recovery \
+    "detected fresh LibreNMS DB gone-away error"; then
     printf '%s\n' "${latest_error}" > "${DB_GONE_AWAY_MARKER}" 2>/dev/null || true
-    return 0
-  fi
-
-  log "detected fresh LibreNMS DB gone-away error; gracefully reloading ${PHP_FPM_SERVICE}"
-  if systemctl reload "${PHP_FPM_SERVICE}" >/dev/null 2>&1; then
-    printf '%s\n' "${latest_error}" > "${DB_GONE_AWAY_MARKER}" 2>/dev/null || true
-    printf '%s\n' "${now}" > "${DB_GONE_AWAY_MARKER}.handled-at" 2>/dev/null || true
-  else
-    log "failed to reload ${PHP_FPM_SERVICE} after DB gone-away error"
   fi
 }
 
+recover_php_fpm_after_db_recovery || true
 recover_systemd_units || true
 repair_writable_paths
 repair_git_rrd_placeholder
 ensure_systemd_units
-configure_librenms_runtime || true
 recover_persistently_unready_local_galera || true
+recover_php_fpm_after_db_recovery || true
+if librenms_database_ready; then
+  configure_librenms_runtime || true
+fi
 recover_php_fpm_after_db_gone_away || true
 
 exit 0

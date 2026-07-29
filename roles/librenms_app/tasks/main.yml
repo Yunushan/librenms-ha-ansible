@@ -2526,6 +2526,7 @@
     owner: root
     group: root
     mode: "0750"
+    validate: "bash -n %s"
   when:
     - librenms_startup_repair_enabled | bool
     - ansible_service_mgr == 'systemd'

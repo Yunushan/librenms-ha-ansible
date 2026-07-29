@@ -823,12 +823,23 @@ bootstrap when Galera has valid saved state. It does not force an unsafe Galera
 bootstrap; if no `Primary` component forms, use `galera-recover.yml`.
 
 The startup repair timer also watches recent `librenms.log` output for a fresh
-`MySQL server has gone away` / SQLSTATE `2006` error. PHP-FPM recovery is
-disabled by default because PHP workers reconnect per request and repeatedly
-restarting FPM can create its own HTTP errors. For a deliberately enabled
-emergency response, the timer uses a graceful reload only after the DB probe is
-healthy and applies `librenms_startup_repair_db_gone_away_php_fpm_cooldown`
-between reloads.
+`MySQL server has gone away` / SQLSTATE `2006` error. In HA mode it also records
+database frontend readiness on every run. After an observed `unready` to
+`ready` transition, or after a fresh SQLSTATE `2006` while the frontend is
+healthy, it gracefully reloads managed PHP-FPM workers once so stale database
+connections cannot survive the failover. The reload is enabled by default only
+for managed HA PHP-FPM, requires a fresh successful DB probe, and applies
+`librenms_startup_repair_db_gone_away_php_fpm_cooldown` between attempts. A
+cooldown-limited or failed reload remains pending and is retried by a later
+timer run instead of being incorrectly marked handled.
+
+This closes the persistent-worker recovery gap, but no proxy can replay a
+MySQL transaction that was already in flight when its Galera member failed. A
+single request can still fail at the exact failover boundary; HAProxy removes
+the unhealthy backend and the application tier repairs itself automatically.
+The role deliberately does not bootstrap a completely unavailable Galera
+cluster without operator confirmation because doing so could create
+split-brain or data loss.
 
 After all nodes return, check the self-healing units before rerunning Ansible:
 
