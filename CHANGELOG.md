@@ -76,7 +76,8 @@
 
 - Made Gluster-backed RRD mount preparation idempotent when the mount is
   already active, and safely replaces only legacy mountpoint symlinks while
-  refusing unexpected files.
+  refusing unexpected files; active symlink targets no longer bypass the
+  legacy mountpoint migration.
 - Made the opt-in host-firewall role load shared defaults reliably and skip
   safely when the feature flag is not defined by inventory.
 - Kept Galera readiness convergence retries inside one bounded probe result so

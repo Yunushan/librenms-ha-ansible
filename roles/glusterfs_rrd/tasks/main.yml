@@ -921,6 +921,7 @@
       - --noheadings
       - --output
       - TARGET
+      - --nocanonicalize
       - --mountpoint
       - "{{ librenms_gluster_mountpoint }}"
   register: librenms_gluster_rrd_active_mount
