@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added a controller-side playbook launcher and `make site` workflow that
+  synchronize the pinned Ansible Galaxy collections before playbook parsing,
+  preventing missing-collection failures after dependency updates.
 - Added HA runtime status reporting through `playbooks/status.yml`, including
   VIP ownership, HAProxy/Keepalived state, Galera, Redis Sentinel, GlusterFS,
   LibreNMS dispatcher and scheduler state, writable-path drift, unit drift, and

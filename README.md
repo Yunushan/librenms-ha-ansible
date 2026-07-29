@@ -600,6 +600,25 @@ cd librenms-ha-ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 
+For routine HA convergence, use the repository launcher through Make. It
+synchronizes the exact collection versions pinned in `requirements.yml` before
+Ansible parses the playbook, then runs `playbooks/site.yml`:
+
+```bash
+make site
+```
+
+The equivalent explicit command is:
+
+```bash
+./scripts/ansible-playbook.sh -i inventories/ha/hosts.yml playbooks/site.yml
+```
+
+Use the launcher (or another Make playbook target) after `git pull`. A bare
+`ansible-playbook` command does not install collections automatically; when
+using it intentionally, run `make install` first whenever `requirements.yml`
+changes.
+
 ### Optional: use a Docker-based controller
 
 If you do not want to install Ansible tooling directly on the controller host, this repo also includes a containerized controller workflow.

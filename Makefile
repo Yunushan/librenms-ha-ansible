@@ -1,4 +1,4 @@
-.PHONY: install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-galera-readiness test-galera-bootstrap-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-docker-ha-galera-config integration-galera integration-haproxy-web integration-redis-sentinel standalone cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
+.PHONY: install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-docker-ha-galera-config integration-galera integration-haproxy-web integration-redis-sentinel standalone site cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -10,6 +10,7 @@ GALERA_RECOVER_BOOTSTRAP_HOST ?=
 GALERA_RECOVER_CONFIRM ?= false
 PLAYBOOK_FLAGS ?=
 ANSIBLE_EXTRA_ARGS ?=
+ANSIBLE_PLAYBOOK ?= ./scripts/ansible-playbook.sh
 DOCKER_ANSIBLE ?= docker compose run --rm -v $(SSH_DIR):/root/.ssh:ro ansible
 
 install:
@@ -34,7 +35,10 @@ syntax-check:
 inventory-check:
 	python3 scripts/validate-inventory.py --inventory inventories/ha/hosts.yml --group-vars inventories/ha/group_vars/all.yml
 
-ci: python-smoke lint syntax-check test-galera-readiness test-galera-bootstrap-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails
+ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails
+
+test-controller-collection-bootstrap:
+	bash tests/unit/test-controller-collection-bootstrap.sh
 
 test-galera-readiness:
 	bash tests/unit/test-galera-readiness-agent.sh
@@ -79,55 +83,58 @@ integration-redis-sentinel:
 	bash tests/integration/redis-sentinel/test.sh
 
 standalone:
-	ansible-playbook -i $(STANDALONE_INVENTORY) playbooks/standalone.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(STANDALONE_INVENTORY) playbooks/standalone.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+site:
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/site.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 cluster:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/cluster.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/cluster.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 doctor:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/doctor.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/doctor.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 doctor-live:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/doctor.yml $(PLAYBOOK_FLAGS) -e librenms_doctor_network_tcp_checks_enabled=true $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/doctor.yml $(PLAYBOOK_FLAGS) -e librenms_doctor_network_tcp_checks_enabled=true $(ANSIBLE_EXTRA_ARGS)
 
 status:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/status.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/status.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 status-strict:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/status.yml $(PLAYBOOK_FLAGS) -e librenms_status_alert_fail_on_degraded=true $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/status.yml $(PLAYBOOK_FLAGS) -e librenms_status_alert_fail_on_degraded=true $(ANSIBLE_EXTRA_ARGS)
 
 post-reboot:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/post-reboot.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/post-reboot.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 maintenance-enter:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/maintenance-enter.yml $(PLAYBOOK_FLAGS) -e librenms_maintenance_target=$(MAINTENANCE_TARGET) -e librenms_maintenance_confirm=true $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/maintenance-enter.yml $(PLAYBOOK_FLAGS) -e librenms_maintenance_target=$(MAINTENANCE_TARGET) -e librenms_maintenance_confirm=true $(ANSIBLE_EXTRA_ARGS)
 
 maintenance-exit:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/maintenance-exit.yml $(PLAYBOOK_FLAGS) -e librenms_maintenance_target=$(MAINTENANCE_TARGET) -e librenms_maintenance_confirm=true $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/maintenance-exit.yml $(PLAYBOOK_FLAGS) -e librenms_maintenance_target=$(MAINTENANCE_TARGET) -e librenms_maintenance_confirm=true $(ANSIBLE_EXTRA_ARGS)
 
 galera-recover:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/galera-recover.yml $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/galera-recover.yml $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) $(ANSIBLE_EXTRA_ARGS)
 
 ha-failover-test:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/ha-failover-test.yml $(PLAYBOOK_FLAGS) -e librenms_failover_test_confirm=true $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/ha-failover-test.yml $(PLAYBOOK_FLAGS) -e librenms_failover_test_confirm=true $(ANSIBLE_EXTRA_ARGS)
 
 firewall:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/firewall.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/firewall.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 backup:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/backup.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/backup.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 restore-test:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/restore-test.yml $(PLAYBOOK_FLAGS) -e librenms_restore_test_backup_dir=$(RESTORE_TEST_BACKUP_DIR) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/restore-test.yml $(PLAYBOOK_FLAGS) -e librenms_restore_test_backup_dir=$(RESTORE_TEST_BACKUP_DIR) $(ANSIBLE_EXTRA_ARGS)
 
 validate:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/validate.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/validate.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 production-readiness:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/production-readiness.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/production-readiness.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 diagnostics:
-	ansible-playbook -i $(HA_INVENTORY) playbooks/diagnostics.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/diagnostics.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 pre-maintenance:
 	$(MAKE) doctor-live
@@ -156,10 +163,10 @@ upgrade-node-exit:
 	$(MAKE) validate
 
 awx-controller:
-	ansible-playbook -i $(AWX_INVENTORY) playbooks/awx-controller.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(AWX_INVENTORY) playbooks/awx-controller.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 awx-bootstrap:
-	ansible-playbook -i $(AWX_INVENTORY) playbooks/awx-bootstrap.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(AWX_INVENTORY) playbooks/awx-bootstrap.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 docker-build:
 	docker compose build ansible
