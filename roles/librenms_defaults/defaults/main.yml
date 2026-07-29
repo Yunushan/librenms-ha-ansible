@@ -484,6 +484,14 @@ librenms_galera_readiness_agent_socket_unit: librenms-galera-readiness-agent.soc
 librenms_galera_readiness_agent_service_unit: librenms-galera-readiness-agent@.service
 librenms_galera_readiness_agent_port: 9201
 librenms_galera_readiness_agent_interval: 3s
+# The agent may spend up to two seconds querying MariaDB.  Keep HAProxy's
+# agent timeout above that ceiling, and give deployment preflight enough time
+# for systemd socket activation plus a bounded set of convergence retries.
+librenms_galera_readiness_agent_query_timeout: 2
+librenms_galera_readiness_agent_check_timeout: 3s
+librenms_galera_readiness_agent_probe_timeout: 5s
+librenms_galera_readiness_agent_probe_retries: 6
+librenms_galera_readiness_agent_probe_delay: 2
 librenms_galera_self_heal_enabled: "{{ librenms_db_mode == 'galera' }}"
 librenms_galera_self_heal_failure_threshold: 4
 librenms_galera_self_heal_restart_cooldown: 600

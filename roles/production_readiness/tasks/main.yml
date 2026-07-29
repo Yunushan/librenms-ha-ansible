@@ -752,7 +752,7 @@
   command:
     argv:
       - timeout
-      - "{{ librenms_haproxy_timeout_check }}"
+      - "{{ librenms_galera_readiness_agent_probe_timeout }}"
       - /bin/bash
       - -c
       - >-
@@ -764,6 +764,9 @@
       - "{{ librenms_galera_readiness_agent_port }}"
   register: librenms_production_galera_readiness_agent
   changed_when: false
+  until: (librenms_production_galera_readiness_agent.rc | default(1) | int) == 0
+  retries: "{{ librenms_galera_readiness_agent_probe_retries | int }}"
+  delay: "{{ librenms_galera_readiness_agent_probe_delay | int }}"
   when:
     - librenms_mode == 'ha'
     - librenms_galera_readiness_agent_enabled | bool

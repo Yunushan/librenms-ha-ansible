@@ -74,6 +74,9 @@
 
 ### Changed
 
+- Aligned Galera readiness-agent query, HAProxy check, and deployment probe
+  timeouts; HAProxy rollout now activates readiness sockets and allows bounded
+  convergence retries before treating every database backend as unavailable.
 - Replaced the removed `community.general.yaml` stdout callback with the
   built-in default callback's YAML result format and pinned `community.general`
   to the maintained 11.x line compatible with ansible-core 2.16 controllers.
