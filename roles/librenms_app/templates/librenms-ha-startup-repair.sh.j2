@@ -9,7 +9,7 @@ LIBRENMS_DIR={{ librenms_install_dir | quote }}
 LIBRENMS_USER={{ librenms_user | quote }}
 LIBRENMS_GROUP={{ librenms_group | quote }}
 RRD_MODE={{ librenms_rrd_mode | quote }}
-RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
+RRD_PATH={{ librenms_rrdcached_base_path | quote }}
 RRD_PERMISSION_REPAIR={{ librenms_rrd_permission_repair_path | quote }}
 GLUSTER_MOUNT_WAIT={{ librenms_startup_repair_gluster_mount_wait | int }}
 GLUSTER_STALE_MOUNT_RECOVERY={{ (librenms_gluster_recover_stale_client_mounts | bool) | ternary('1', '0') }}
@@ -208,8 +208,6 @@ repair_writable_path() {
 
 repair_writable_paths() {
   [ "${FIX_WRITABLE_OWNERSHIP}" = "1" ] || return 0
-
-  wait_for_rrd_mount || true
 
   if [ -x "${RRD_PERMISSION_REPAIR}" ]; then
     "${RRD_PERMISSION_REPAIR}" || true
@@ -472,6 +470,7 @@ recover_php_fpm_after_db_gone_away() {
 
 recover_php_fpm_after_db_recovery || true
 recover_systemd_units || true
+wait_for_rrd_mount || true
 repair_writable_paths
 repair_git_rrd_placeholder
 ensure_systemd_units

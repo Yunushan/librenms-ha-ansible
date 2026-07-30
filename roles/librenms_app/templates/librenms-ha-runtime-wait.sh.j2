@@ -3,7 +3,7 @@ set -u
 
 LIBRENMS_DIR={{ librenms_install_dir | quote }}
 RRD_MODE={{ librenms_rrd_mode | quote }}
-RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
+RRD_PATH={{ librenms_rrdcached_base_path | quote }}
 
 WAIT_TIMEOUT={{ librenms_dispatcher_runtime_wait_timeout | int }}
 WAIT_DELAY={{ librenms_dispatcher_runtime_wait_delay | int }}

@@ -6,6 +6,7 @@ TASKS_FILE="$ROOT_DIR/roles/glusterfs_rrd/tasks/main.yml"
 DEFAULTS_FILE="$ROOT_DIR/roles/librenms_defaults/defaults/main.yml"
 RUNTIME_WAIT_TEMPLATE="$ROOT_DIR/roles/librenms_app/templates/librenms-ha-runtime-wait.sh.j2"
 STARTUP_REPAIR_TEMPLATE="$ROOT_DIR/roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2"
+RRD_PERMISSION_REPAIR_TEMPLATE="$ROOT_DIR/roles/librenms_app/templates/librenms-ha-rrd-permission-repair.sh.j2"
 
 require_text() {
     local expected="$1"
@@ -50,6 +51,8 @@ require_file_text "$DEFAULTS_FILE" \
     "librenms_gluster_recover_stale_client_mounts: true"
 require_file_text "$STARTUP_REPAIR_TEMPLATE" "recover_stale_rrd_mount()"
 require_file_text "$STARTUP_REPAIR_TEMPLATE" \
+    'RRD_PATH={{ librenms_rrdcached_base_path | quote }}'
+require_file_text "$STARTUP_REPAIR_TEMPLATE" \
     'umount --lazy -- "${RRD_PATH}"'
 require_file_text "$STARTUP_REPAIR_TEMPLATE" \
     'systemctl stop "${RRDCACHED_SERVICE}"'
@@ -57,7 +60,21 @@ require_file_text "$STARTUP_REPAIR_TEMPLATE" \
     'systemctl start "${RRDCACHED_SERVICE}"'
 require_file_text "$RUNTIME_WAIT_TEMPLATE" "--nocanonicalize"
 require_file_text "$RUNTIME_WAIT_TEMPLATE" \
+    'RRD_PATH={{ librenms_rrdcached_base_path | quote }}'
+require_file_text "$RUNTIME_WAIT_TEMPLATE" \
     'stat --dereference --format=%F'
+require_file_text "$RRD_PERMISSION_REPAIR_TEMPLATE" \
+    'RRD_PATH={{ librenms_rrdcached_base_path | quote }}'
+
+startup_main_mount_wait_line="$(grep -nFx 'wait_for_rrd_mount || true' "$STARTUP_REPAIR_TEMPLATE" | cut -d: -f1)"
+startup_writable_repair_line="$(grep -nFx 'repair_writable_paths' "$STARTUP_REPAIR_TEMPLATE" | cut -d: -f1)"
+
+if [[ -z "$startup_main_mount_wait_line" \
+    || -z "$startup_writable_repair_line" \
+    || "$startup_main_mount_wait_line" -ge "$startup_writable_repair_line" ]]; then
+    printf 'Startup stale-mount recovery must run independently before writable ownership repair.\n' >&2
+    exit 1
+fi
 
 startup_health_line="$(grep -nF 'rrd_path_accessible && return 0' "$STARTUP_REPAIR_TEMPLATE" | head -n 1 | cut -d: -f1)"
 startup_enable_line="$(grep -nF 'GLUSTER_STALE_MOUNT_RECOVERY' "$STARTUP_REPAIR_TEMPLATE" | tail -n 1 | cut -d: -f1)"

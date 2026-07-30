@@ -5,7 +5,7 @@ LOCK_FILE=/run/librenms-ha-rrd-permission-repair.lock
 exec 9>"${LOCK_FILE}"
 flock -n 9 || exit 0
 
-RRD_PATH={{ (librenms_install_dir ~ '/rrd') | quote }}
+RRD_PATH={{ librenms_rrdcached_base_path | quote }}
 LIBRENMS_USER={{ librenms_user | quote }}
 LIBRENMS_GROUP={{ librenms_group | quote }}
 
