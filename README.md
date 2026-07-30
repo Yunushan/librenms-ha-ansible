@@ -1485,6 +1485,7 @@ librenms_redis_master_host: lnms1
 librenms_rrd_mode: local            # local | glusterfs | external
 librenms_rrdcached_scope: all       # all for Gluster-backed HA; primary for a single TCP daemon
 librenms_rrdcached_endpoint_strategy: vip_tcp  # vip_tcp | primary_tcp | unix
+librenms_gluster_recover_stale_client_mounts: true
 ```
 
 With `librenms_rrd_mode: glusterfs` and a VIP, the role defaults to an HAProxy
@@ -1495,6 +1496,15 @@ RRDCacheD writer while still allowing another node to take over. Set
 `librenms_rrdcached_scope: primary` and
 `librenms_rrdcached_endpoint_strategy: primary_tcp` only if you intentionally
 want the older primary-node TCP endpoint behavior.
+
+Gluster FUSE can rarely leave a client path in the mount table while filesystem
+operations return `Transport endpoint is not connected`. With stale client
+mount recovery enabled, deployment and the recurring HA repair timer require
+several bounded access probes to fail before stopping an active `rrdcached`,
+lazily detaching only that inaccessible mount, remounting it, and restoring the
+service. Healthy mounts are never detached. Set
+`librenms_gluster_recover_stale_client_mounts: false` to make this condition
+fail closed for manual storage recovery instead.
 
 ### VIP / HAProxy / Keepalived
 
