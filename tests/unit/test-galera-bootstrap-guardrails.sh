@@ -28,6 +28,9 @@ require_text "$TASKS_FILE" "librenms_galera_bootstrap_selected_from_recovery | d
 require_text "$TASKS_FILE" "librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))"
 require_text "$TASKS_FILE" "librenms_galera_bootstrap_effective_host not in ("
 require_text "$TASKS_FILE" 'delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"'
+require_text "$TASKS_FILE" "librenms_galera_local_service_expected"
+require_text "$TASKS_FILE" "librenms_galera_cluster_has_live_member | bool"
+require_text "$TASKS_FILE" "librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))"
 
 if grep -Fq -- 'delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"' "$TASKS_FILE"; then
     printf 'Galera bootstrap delegation must always have a non-empty fallback host.\n' >&2

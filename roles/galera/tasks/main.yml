@@ -1088,9 +1088,21 @@
   set_fact:
     librenms_galera_local_service_expected: >-
       {{
-        librenms_galera_cluster_has_live_member | bool
-        or inventory_hostname != librenms_galera_bootstrap_effective_host
-        or librenms_galera_cluster_bootstrapped_this_run | default(false)
+        (
+          librenms_galera_cluster_has_live_member | bool
+          or librenms_galera_cluster_bootstrapped_this_run | default(false, true) | bool
+          or (
+            (
+              librenms_galera_bootstrap_effective_host
+              | default('', true)
+              | string
+              | trim
+              | length
+            ) > 0
+            and librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
+            and inventory_hostname != librenms_galera_bootstrap_effective_host
+          )
+        )
       }}
   when: librenms_db_mode == 'galera'
 
@@ -1151,6 +1163,18 @@
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
+    - >-
+      librenms_galera_cluster_has_live_member | bool
+      or (
+        (
+          librenms_galera_bootstrap_effective_host
+          | default('', true)
+          | string
+          | trim
+          | length
+        ) > 0
+        and librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
+      )
   block:
     - name: Reset failed MariaDB unit state before Galera service start
       command:
