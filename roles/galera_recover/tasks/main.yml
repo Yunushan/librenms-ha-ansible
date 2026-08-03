@@ -474,12 +474,23 @@
       -e librenms_galera_recover_bootstrap_host={{ librenms_galera_recover_selected_host | default('<selected-host>') }}
   run_once: true
 
+- name: End Galera recovery after read-only evidence collection
+  meta: end_play
+  when: not (librenms_galera_recover_confirm | bool)
+  run_once: true
+
+- name: End Galera recovery after confirmed position collection
+  meta: end_play
+  when:
+    - librenms_galera_recover_confirm | bool
+    - librenms_galera_recover_bootstrap_host | default('', true) | trim | length == 0
+  run_once: true
+
 - name: Require explicit recovery confirmation and selected host
   assert:
     that:
-      - librenms_galera_recover_confirm | bool
       - librenms_galera_recover_selected_host | default('') | length > 0
-      - librenms_galera_recover_bootstrap_host | length > 0
+      - librenms_galera_recover_bootstrap_host | default('', true) | trim | length > 0
       - librenms_galera_recover_bootstrap_host == librenms_galera_recover_selected_host
     fail_msg: |-
       Refusing to bootstrap Galera without an explicit matching confirmation.

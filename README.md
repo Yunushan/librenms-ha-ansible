@@ -1061,6 +1061,9 @@ First run it without confirmation to collect non-destructive evidence from
 ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml --ask-become-pass
 ```
 
+The equivalent Make target is `make galera-recover`. With its default settings,
+it prints the evidence and exits without stopping MariaDB or modifying Galera.
+
 If no node has `safe_to_bootstrap: 1`, Galera requires stopped MariaDB data
 directories before `galera_recovery` can report recovered positions. The guarded
 playbook therefore requires explicit confirmation before stopping MariaDB:

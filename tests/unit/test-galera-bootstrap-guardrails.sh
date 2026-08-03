@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 TASKS_FILE="$ROOT_DIR/roles/galera/tasks/main.yml"
 DEFAULTS_FILE="$ROOT_DIR/roles/librenms_defaults/defaults/main.yml"
+RECOVERY_TASKS_FILE="$ROOT_DIR/roles/galera_recover/tasks/main.yml"
 
 require_text() {
     local file="$1"
@@ -36,6 +37,17 @@ require_text "$TASKS_FILE" 'delegate_to: "{{ librenms_galera_bootstrap_effective
 require_text "$TASKS_FILE" "librenms_galera_local_service_expected"
 require_text "$TASKS_FILE" "librenms_galera_cluster_has_live_member | bool"
 require_text "$TASKS_FILE" "librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))"
+require_text "$RECOVERY_TASKS_FILE" "End Galera recovery after read-only evidence collection"
+require_text "$RECOVERY_TASKS_FILE" "End Galera recovery after confirmed position collection"
+require_text "$RECOVERY_TASKS_FILE" "librenms_galera_recover_bootstrap_host | default('', true) | trim | length == 0"
+
+evidence_end_line="$(grep -nF -- '- name: End Galera recovery after read-only evidence collection' "$RECOVERY_TASKS_FILE" | cut -d: -f1)"
+recovery_assert_line="$(grep -nF -- '- name: Require explicit recovery confirmation and selected host' "$RECOVERY_TASKS_FILE" | cut -d: -f1)"
+
+if [ -z "$evidence_end_line" ] || [ -z "$recovery_assert_line" ] || [ "$evidence_end_line" -ge "$recovery_assert_line" ]; then
+    printf 'Read-only Galera recovery must end before the bootstrap assertion.\n' >&2
+    exit 1
+fi
 
 if grep -Fq -- 'delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"' "$TASKS_FILE"; then
     printf 'Galera bootstrap delegation must always have a non-empty fallback host.\n' >&2

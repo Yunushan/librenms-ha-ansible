@@ -902,6 +902,10 @@ guarded recovery workflow:
 ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml --ask-become-pass
 ```
 
+The equivalent Make target is `make galera-recover`. Without recovery variables
+it runs evidence mode only and exits without stopping MariaDB or changing
+Galera state.
+
 If no node has `safe_to_bootstrap: 1`, collect `galera_recovery` evidence. This
 stops MariaDB on reachable Galera nodes and reports the highest recovered
 `seqno` candidate without bootstrapping:
