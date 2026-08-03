@@ -278,7 +278,9 @@
 
 - name: Recover Galera positions when no node is marked safe to bootstrap
   shell: |-
-    { galera_recovery 2>&1 || true; } | awk '
+    recovery_output="$(galera_recovery 2>&1)"
+    recovery_rc=$?
+    recovered_json="$(printf '%s\n' "$recovery_output" | awk '
       /Recovered position/ {
         pos=$NF
         gsub(/[;,]/, "", pos)
@@ -289,7 +291,18 @@
         }
         split(pos, parts, ":")
         printf "{\"uuid\":\"%s\",\"seqno\":%d}\n", parts[1], parts[2]
-      }'
+      }')"
+
+    if printf '%s\n' "$recovered_json" | grep -q '^{"uuid":"'; then
+      printf '%s\n' "$recovered_json"
+      if [ "$recovery_rc" -ne 0 ]; then
+        printf '%s\n' "$recovery_output" >&2
+      fi
+      exit 0
+    fi
+
+    printf '%s\n' "$recovery_output" >&2
+    exit 1
   args:
     executable: /bin/bash
   loop: "{{ librenms_galera_recovery_target_nodes | default(librenms_active_db_nodes) }}"
@@ -300,6 +313,7 @@
   ignore_unreachable: true
   when:
     - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_auto_recover_unsafe_bootstrap | bool
@@ -320,6 +334,7 @@
   loop: "{{ librenms_galera_recovered_state.results | default([]) }}"
   when:
     - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_auto_recover_unsafe_bootstrap | bool
@@ -336,6 +351,7 @@
       }}
   when:
     - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - (librenms_galera_recovered_positions | default([]) | length) > 0
@@ -350,6 +366,7 @@
       }}
   when:
     - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_max_recovered_seqno is defined
@@ -386,6 +403,7 @@
       }}
   when:
     - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_max_recovered_seqno is defined
@@ -425,6 +443,7 @@
       then rerun the playbook.
   when:
     - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_auto_recover_unsafe_bootstrap | bool
@@ -451,6 +470,7 @@
       explicit recovery tie-break policy.
   when:
     - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
     - librenms_galera_marker.stat.exists | default(false) | bool

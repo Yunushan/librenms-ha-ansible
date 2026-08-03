@@ -23,4 +23,21 @@ require_text "$TASKS_FILE" "Fail closed when existing Galera cluster needs manua
 require_text "$TASKS_FILE" "librenms_galera_marker.stat.exists | default(false) | bool"
 require_text "$TASKS_FILE" "if librenms_galera_initial_bootstrap_required | bool"
 
+recovery_block="$(awk '
+    /- name: Recover Galera positions when no node is marked safe to bootstrap/ { capture=1 }
+    capture { print }
+    capture && /- name:/ && !/- name: Recover Galera positions when no node is marked safe to bootstrap/ && seen { exit }
+    capture && /register: librenms_galera_recovered_state/ { seen=1 }
+' "$TASKS_FILE")"
+
+if ! grep -Fq -- 'inventory_hostname == (librenms_active_db_nodes | first)' <<<"$recovery_block"; then
+    printf 'Galera recovery probes must run only on the active DB coordinator.\n' >&2
+    exit 1
+fi
+
+if ! grep -Fq -- 'recovery_output="$(galera_recovery 2>&1)"' "$TASKS_FILE"; then
+    printf 'Galera recovery diagnostics must preserve galera_recovery output.\n' >&2
+    exit 1
+fi
+
 printf 'Galera bootstrap guardrail test passed.\n'
