@@ -189,10 +189,82 @@
     name: "{{ librenms_base_packages + librenms_common_extra_packages }}"
     state: present
 
-- name: Set system timezone
+- name: Detect hardware clock utility
+  ansible.builtin.stat:
+    path: /usr/sbin/hwclock
+  register: librenms_hwclock_probe
+
+- name: Detect timedatectl utility
+  ansible.builtin.stat:
+    path: /usr/bin/timedatectl
+  register: librenms_timedatectl_probe
+
+- name: Set system timezone with community timezone module
   community.general.timezone:
     name: "{{ librenms_timezone }}"
     hwclock: "{{ librenms_timezone_hwclock | default(omit, true) }}"
+  when: librenms_hwclock_probe.stat.exists
+
+- name: Read current system timezone without hardware clock utility
+  ansible.builtin.command:
+    argv:
+      - timedatectl
+      - show
+      - --property=Timezone
+      - --value
+  register: librenms_current_timezone
+  changed_when: false
+  failed_when: false
+  when:
+    - not librenms_hwclock_probe.stat.exists
+    - librenms_timedatectl_probe.stat.exists
+
+- name: Set system timezone with timedatectl
+  ansible.builtin.command:
+    argv:
+      - timedatectl
+      - set-timezone
+      - "{{ librenms_timezone }}"
+  register: librenms_timedatectl_set
+  changed_when: librenms_timedatectl_set.rc == 0
+  failed_when: false
+  when:
+    - not librenms_hwclock_probe.stat.exists
+    - librenms_timedatectl_probe.stat.exists
+    - librenms_current_timezone.stdout | trim != librenms_timezone
+
+- name: Validate timezone data for direct timezone fallback
+  ansible.builtin.stat:
+    path: "/usr/share/zoneinfo/{{ librenms_timezone }}"
+  register: librenms_timezone_file
+  when:
+    - not librenms_hwclock_probe.stat.exists
+    - >-
+      not librenms_timedatectl_probe.stat.exists
+      or (librenms_timedatectl_set.rc | default(0)) != 0
+
+- name: Require timezone data for direct timezone fallback
+  ansible.builtin.assert:
+    that:
+      - librenms_timezone_file.stat.exists
+    fail_msg: "Timezone data was not found for {{ librenms_timezone }}."
+  when:
+    - not librenms_hwclock_probe.stat.exists
+    - >-
+      not librenms_timedatectl_probe.stat.exists
+      or (librenms_timedatectl_set.rc | default(0)) != 0
+
+- name: Set system timezone with direct localtime fallback
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ librenms_timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: true
+  when:
+    - not librenms_hwclock_probe.stat.exists
+    - >-
+      not librenms_timedatectl_probe.stat.exists
+      or (librenms_timedatectl_set.rc | default(0)) != 0
 
 - name: Ensure state directory exists
   file:
