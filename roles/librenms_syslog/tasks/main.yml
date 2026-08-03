@@ -8,6 +8,11 @@
       - librenms_syslog_forward_protocol in ['udp', 'tcp']
       - not (librenms_syslog_forward_local_logs | bool) or librenms_syslog_forward_target | length > 0
       - not (librenms_syslog_forward_local_logs | bool) or librenms_syslog_forward_selector | length > 0
+      - not (librenms_syslog_action_queue_enabled | bool) or librenms_syslog_action_queue_filename | length > 0
+      - not (librenms_syslog_action_queue_enabled | bool) or librenms_syslog_action_queue_spool_dir | length > 0
+      - (librenms_syslog_action_queue_size | int) > 0
+      - (librenms_syslog_action_queue_worker_threads | int) > 0
+      - (librenms_syslog_action_resume_interval | int) > 0
     fail_msg: "Only the rsyslog backend is currently supported for LibreNMS syslog ingestion."
 
 - name: Refresh apt cache for syslog receiver packages
@@ -106,6 +111,24 @@
     - librenms_syslog_manage_runtime_user_group | bool
     - librenms_syslog_runtime_user | length > 0
     - (librenms_syslog_runtime_user_getent.ansible_facts.getent_passwd | default({})) | length > 0
+
+- name: Ensure LibreNMS syslog action queue spool directory exists
+  file:
+    path: "{{ librenms_syslog_action_queue_spool_dir }}"
+    state: directory
+    owner: >-
+      {{
+        librenms_syslog_runtime_user
+        if (
+          librenms_syslog_runtime_user | length > 0
+          and (librenms_syslog_runtime_user_getent.ansible_facts.getent_passwd | default({})) | length > 0
+        )
+        else 'root'
+      }}
+    group: root
+    mode: "0750"
+  notify: Restart rsyslog
+  when: librenms_syslog_action_queue_enabled | bool
 
 - name: Check LibreNMS syslog sink exists
   stat:

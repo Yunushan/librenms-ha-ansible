@@ -42,8 +42,11 @@ MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
 GALERA_SELF_HEAL_ENABLED={{ (librenms_galera_self_heal_enabled | bool) | ternary('1', '0') }}
 GALERA_SELF_HEAL_FAILURE_THRESHOLD={{ librenms_galera_self_heal_failure_threshold | int }}
 GALERA_SELF_HEAL_RESTART_COOLDOWN={{ librenms_galera_self_heal_restart_cooldown | int }}
+GALERA_SELF_HEAL_MIN_HEALTHY_PEERS={{ librenms_galera_self_heal_min_healthy_peers | int }}
+GALERA_SELF_HEAL_SERVICE_ACTION_TIMEOUT={{ librenms_galera_self_heal_service_action_timeout | int }}
+GALERA_SELF_HEAL_SERVICE_POLL_DELAY={{ librenms_galera_self_heal_service_poll_delay | int }}
+GALERA_SELF_HEAL_DIAGNOSTIC_LINES={{ librenms_galera_self_heal_diagnostic_lines | int }}
 GALERA_SELF_HEAL_STATE_DIR={{ librenms_galera_self_heal_state_dir | quote }}
-GALERA_SELF_HEAL_MIN_HEALTHY_PEERS={{ ((librenms_active_db_nodes | length) / 2) | round(0, 'ceil') | int }}
 GALERA_SELF_HEAL_LOCAL_MEMBER={{ (inventory_hostname in librenms_active_db_nodes) | ternary('1', '0') }}
 GALERA_PEERS=(
 {% for host in librenms_active_db_nodes | difference([inventory_hostname]) %}
@@ -164,6 +167,11 @@ recover_systemd_units() {
     pending=0
     for unit in "${SERVICE_RECOVERY_UNITS[@]}"; do
       [ -n "${unit}" ] || continue
+      # Galera needs peer-aware recovery. Never let the generic unit loop
+      # bypass the quorum guard in recover_persistently_unready_local_galera.
+      if [ "${DB_MODE}" = "galera" ] && [ "${unit}" = "${MARIADB_SERVICE}" ]; then
+        continue
+      fi
       systemctl list-unit-files "${unit}" >/dev/null 2>&1 || continue
 
       state=$(systemctl is-active "${unit}" 2>/dev/null || true)
@@ -299,14 +307,47 @@ peer_galera_status() {
     2>/dev/null || true
 }
 
+report_local_galera_rejoin_failure() {
+  log "local Galera did not rejoin within ${GALERA_SELF_HEAL_SERVICE_ACTION_TIMEOUT}s"
+  timeout 10 systemctl status --no-pager --full "${MARIADB_SERVICE}" 2>&1 \
+    | tail -n "${GALERA_SELF_HEAL_DIAGNOSTIC_LINES}" || true
+  timeout 10 journalctl -u "${MARIADB_SERVICE}" \
+    -n "${GALERA_SELF_HEAL_DIAGNOSTIC_LINES}" --no-pager 2>&1 || true
+}
+
+wait_for_local_galera_ready() {
+  local deadline=$((SECONDS + GALERA_SELF_HEAL_SERVICE_ACTION_TIMEOUT))
+  local local_status
+  local service_state
+
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    local_status=$(local_galera_status)
+    if galera_status_is_ready "${local_status}"; then
+      return 0
+    fi
+
+    service_state=$(systemctl is-active "${MARIADB_SERVICE}" 2>/dev/null || true)
+    if [ "${service_state}" = "failed" ]; then
+      return 1
+    fi
+
+    sleep "${GALERA_SELF_HEAL_SERVICE_POLL_DELAY}"
+  done
+
+  return 1
+}
+
 recover_persistently_unready_local_galera() {
   local local_status
   local peer
   local peer_status
   local healthy_peers=0
   local failures=0
+  local failure_threshold
   local previous_restart=0
   local now
+  local service_action
+  local service_state
 
   [ "${DB_MODE}" = 'galera' ] || return 0
   [ "${GALERA_SELF_HEAL_ENABLED}" = '1' ] || return 0
@@ -314,6 +355,7 @@ recover_persistently_unready_local_galera() {
   [ "${GALERA_SELF_HEAL_MIN_HEALTHY_PEERS}" -gt 0 ] || return 0
   command -v systemctl >/dev/null 2>&1 || return 0
 
+  service_state=$(systemctl is-active "${MARIADB_SERVICE}" 2>/dev/null || true)
   local_status=$(local_galera_status)
   if galera_status_is_ready "${local_status}"; then
     rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
@@ -335,6 +377,13 @@ recover_persistently_unready_local_galera() {
   fi
 
   mkdir -p "${GALERA_SELF_HEAL_STATE_DIR}" >/dev/null 2>&1 || return 0
+  service_action=restart
+  failure_threshold=${GALERA_SELF_HEAL_FAILURE_THRESHOLD}
+  if [ "${service_state}" != "active" ]; then
+    service_action=start
+    failure_threshold=1
+  fi
+
   failures=$(cat "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count" 2>/dev/null || printf '0')
   case "${failures}" in
     *[!0-9]*|'') failures=0 ;;
@@ -342,8 +391,8 @@ recover_persistently_unready_local_galera() {
   failures=$((failures + 1))
   printf '%s\n' "${failures}" > "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
 
-  if [ "${failures}" -lt "${GALERA_SELF_HEAL_FAILURE_THRESHOLD}" ]; then
-    log "local Galera is not ready with ${healthy_peers} synced peer(s); retry ${failures}/${GALERA_SELF_HEAL_FAILURE_THRESHOLD}"
+  if [ "${failures}" -lt "${failure_threshold}" ]; then
+    log "local Galera is not ready with ${healthy_peers} synced peer(s); retry ${failures}/${failure_threshold}"
     return 0
   fi
 
@@ -357,12 +406,17 @@ recover_persistently_unready_local_galera() {
     return 0
   fi
 
-  log "restarting persistently unready local Galera with ${healthy_peers} synced peer(s)"
-  if systemctl restart "${MARIADB_SERVICE}" >/dev/null 2>&1; then
-    printf '%s\n' "${now}" > "${GALERA_SELF_HEAL_STATE_DIR}/galera-restarted-at"
+  # Record the attempt before invoking systemd. A failed start must observe the
+  # same cooldown as a successful one instead of creating a restart storm.
+  printf '%s\n' "${now}" > "${GALERA_SELF_HEAL_STATE_DIR}/galera-restarted-at"
+  log "requesting normal Galera ${service_action} with ${healthy_peers} synced peer(s)"
+  systemctl reset-failed "${MARIADB_SERVICE}" >/dev/null 2>&1 || true
+  if timeout 10 systemctl --no-block "${service_action}" "${MARIADB_SERVICE}" \
+      >/dev/null 2>&1 && wait_for_local_galera_ready; then
     rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
+    log "local Galera rejoined the existing Primary component"
   else
-    log "failed to restart persistently unready local Galera"
+    report_local_galera_rejoin_failure
   fi
 }
 
@@ -469,12 +523,12 @@ recover_php_fpm_after_db_gone_away() {
 }
 
 recover_php_fpm_after_db_recovery || true
+recover_persistently_unready_local_galera || true
 recover_systemd_units || true
 wait_for_rrd_mount || true
 repair_writable_paths
 repair_git_rrd_placeholder
 ensure_systemd_units
-recover_persistently_unready_local_galera || true
 recover_php_fpm_after_db_recovery || true
 if librenms_database_ready; then
   configure_librenms_runtime || true

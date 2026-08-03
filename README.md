@@ -1460,15 +1460,18 @@ librenms_db_host: ""
 librenms_db_name: librenms
 librenms_db_user: librenms
 librenms_db_password: CHANGE_ME
-librenms_runtime_db_prefer_local_galera: false
+librenms_runtime_db_prefer_local_galera: true
 librenms_galera_pc_recovery: true
 ```
 
-In Galera mode, leave `librenms_db_host` empty when you want LibreNMS to use the
-HAProxy/VIP database frontend at runtime. The playbook still uses a direct live
-Galera member for install-time migrations and setup tasks. Set
-`librenms_runtime_db_prefer_local_galera: true` only if each web node should
-depend on its own local MariaDB process.
+In HA Galera mode, co-located web/database nodes use their local synced Galera
+member by default. This keeps active LibreNMS requests independent from database
+VIP moves and HAProxy backend transitions. A web node whose local database is
+not `Primary`, ready, and synced is removed by the database-aware HAProxy runtime
+check. Web-only nodes still use the HAProxy/VIP database frontend, and setting
+`librenms_runtime_db_prefer_local_galera: false` restores VIP routing for every
+web node. The playbook continues to use a directly verified live Galera member
+for install-time migrations and setup tasks.
 
 ### Redis mode
 
@@ -1522,6 +1525,7 @@ librenms_haproxy_db_check_interval: 2s
 librenms_haproxy_db_check_fall: 2
 librenms_haproxy_db_tcp_keepalive: true
 librenms_haproxy_db_shutdown_sessions_on_backend_down: true
+librenms_haproxy_db_connection_logging_enabled: false
 ```
 
 Set `librenms_vip_interface` only when you need to pin the VIP to a specific NIC. It must match an interface name from `ip -brief addr` on every `lb_nodes` host.
@@ -1536,19 +1540,44 @@ from rotation after roughly four seconds.
 For the Galera DB frontend, the default HAProxy config enables TCP keepalive and
 closes client sessions when a checked DB backend is marked down. This prevents
 long-lived LibreNMS PHP workers from continuing to use a dead MySQL connection
-after Galera or HAProxy failover.
+after Galera or HAProxy failover. Routine DB frontend connection logging is
+disabled because LibreNMS creates many short-lived database connections;
+HAProxy process and backend UP/DOWN events remain logged. Set
+`librenms_haproxy_db_connection_logging_enabled: true` only for a short,
+diagnostic capture.
 
 HAProxy also queries a local readiness agent on every Galera member. A database
 backend is eligible for LibreNMS traffic only while it reports `Primary`,
 `wsrep_ready=ON`, and `Synced`; accepting a MySQL TCP connection alone is not
-enough. The 30-second startup-repair timer can restart one persistently unready
-member after four failed checks, but only when enough peer members are already
-synced to retain quorum. It never bootstraps a cluster without a Primary
-component.
+enough. Co-located web/database nodes use their own member and are drained from
+web traffic immediately when that member fails the same deep check. The
+30-second startup-repair timer can perform a normal start/restart of one failed
+member only after at least one remote member proves it belongs to a healthy
+Primary component. Failed attempts are bounded, diagnosed, and held for the
+configured cooldown. It never bootstraps a cluster without a Primary component.
 
 The readiness agent listens on `tcp/9201` only on each Galera node's configured
 Ansible address. Allow that port from `lb_nodes` to `librenms_db` when those are
 separate hosts; no browser or monitored-device access is required.
+
+### Syslog outage buffering
+
+Remote syslog ingestion uses a disk-assisted rsyslog action queue by default.
+If `syslog.php` cannot reach the database, rsyslog retains pending messages in
+`/var/spool/rsyslog/librenms`, retries every 30 seconds instead of restarting
+PHP every second, and resumes delivery after the database recovers. The default
+queue is bounded to `1g`. Successful socket-activated Galera readiness-agent
+lifecycle messages are discarded from rsyslog while failures remain visible,
+preventing health checks from feeding a logging loop during an outage. UDP
+senders still receive no end-to-end delivery guarantee, so size the queue and
+monitoring for the expected outage and message rate.
+
+```yaml
+librenms_syslog_action_queue_enabled: true
+librenms_syslog_action_queue_max_disk_space: 1g
+librenms_syslog_action_resume_interval: 30
+librenms_syslog_suppress_galera_readiness_lifecycle: true
+```
 
 ### Redis failover tuning
 

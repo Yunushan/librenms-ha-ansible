@@ -8,6 +8,23 @@ module(load="imtcp")
 {% endif %}
 module(load="omprog")
 
+{% if librenms_syslog_suppress_galera_readiness_lifecycle | bool %}
+# Socket activation creates a short-lived systemd unit for every readiness
+# probe. Keep failures, but discard successful lifecycle chatter before it is
+# written locally or forwarded back into LibreNMS.
+if (
+    $programname == "systemd"
+    and $msg contains "librenms-galera-readiness-agent@"
+    and (
+        $msg contains "Starting "
+        or $msg contains "Finished "
+        or $msg contains "Deactivated successfully"
+    )
+) then {
+    stop
+}
+
+{% endif %}
 template(name="librenms" type="list") {
     property(name="{{ librenms_syslog_host_property }}")
     constant(value="||")
@@ -32,6 +49,17 @@ ruleset(name="librenms_remote") {
         type="omprog"
         binary="{{ librenms_syslog_php_binary }} {{ librenms_install_dir }}/syslog.php"
         template="librenms"
+{% if librenms_syslog_action_queue_enabled | bool %}
+        queue.type="{{ librenms_syslog_action_queue_type }}"
+        queue.filename="{{ librenms_syslog_action_queue_filename }}"
+        queue.spoolDirectory="{{ librenms_syslog_action_queue_spool_dir }}"
+        queue.size="{{ librenms_syslog_action_queue_size }}"
+        queue.maxDiskSpace="{{ librenms_syslog_action_queue_max_disk_space }}"
+        queue.saveOnShutdown="{{ librenms_syslog_action_queue_save_on_shutdown | bool | ternary('on', 'off') }}"
+        queue.workerThreads="{{ librenms_syslog_action_queue_worker_threads }}"
+        action.resumeInterval="{{ librenms_syslog_action_resume_interval }}"
+        action.resumeRetryCount="{{ librenms_syslog_action_resume_retry_count }}"
+{% endif %}
     )
     stop
 }
