@@ -525,8 +525,8 @@
 - name: Fail closed when Galera bootstrap host is not selected
   fail:
     msg: |-
-      Galera has no live Primary member and no effective bootstrap host was
-      selected. Refusing to stop MariaDB or run Galera bootstrap with an empty
+      Galera did not produce a valid effective bootstrap host. Refusing to stop
+      MariaDB or run Galera bootstrap with an empty or non-inventory
       delegate_to target.
 
       Live members:
@@ -547,8 +547,17 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
-    - not librenms_galera_cluster_has_live_member | bool
-    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) == 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) == 0
+      or librenms_galera_bootstrap_effective_host not in (
+        librenms_active_db_nodes | default([])
+      )
 
 - name: Report Galera live member selected for database actions
   debug:
@@ -593,7 +602,7 @@
       ({{ librenms_galera_max_recovered_seqno }}).
   when:
     - librenms_db_mode == 'galera'
-    - librenms_galera_bootstrap_selected_from_recovery | default(false)
+    - librenms_galera_bootstrap_selected_from_recovery | default(false, true) | bool
     - inventory_hostname == (librenms_active_db_nodes | first)
 
 - name: Stop MariaDB before Galera bootstrap on non-bootstrap database nodes
@@ -612,19 +621,35 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
-    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
 - name: Stop MariaDB before Galera bootstrap on the effective bootstrap host
   service:
     name: "{{ librenms_mariadb_service_name }}"
     state: stopped
-  delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+  delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
   ignore_errors: true
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
-    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
 - name: Wait for MariaDB processes to stop before Galera bootstrap
   shell: |-
@@ -650,7 +675,15 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
-    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
 - name: Force kill stale MariaDB processes before Galera bootstrap
   command:
@@ -674,7 +707,15 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
-    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
     - librenms_galera_force_kill_stale_mariadb | bool
 
 - name: Reset MariaDB unit state after force kill
@@ -773,19 +814,35 @@
     path: /var/lib/mysql/grastate.dat
     regexp: '^safe_to_bootstrap:.*$'
     replace: 'safe_to_bootstrap: 1'
-  delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+  delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
-    - librenms_galera_bootstrap_selected_from_recovery | default(false)
-    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
+    - librenms_galera_bootstrap_selected_from_recovery | default(false, true) | bool
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
 - name: Bootstrap Galera cluster on the effective bootstrap host
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
-    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
   block:
     - name: Run Galera bootstrap command # noqa: command-instead-of-module
       shell: |-
@@ -803,7 +860,7 @@
         systemctl start "{{ librenms_mariadb_service_name }}"
       args:
         executable: /bin/bash
-      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
       register: librenms_galera_bootstrap_command
       changed_when: librenms_galera_bootstrap_command.rc == 0
       async: "{{ librenms_galera_bootstrap_timeout | int }}"
@@ -813,7 +870,7 @@
       wait_for:
         path: "{{ librenms_mariadb_socket }}"
         timeout: "{{ librenms_galera_wait_timeout | int }}"
-      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
 
     - name: Verify Galera bootstrap host formed a primary component
       command:
@@ -823,7 +880,7 @@
           - "--socket={{ librenms_mariadb_socket }}"
           - -Nse
           - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
-      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
       register: librenms_galera_bootstrap_status_check
       changed_when: false
       retries: 24
@@ -840,7 +897,7 @@
           - "{{ librenms_mariadb_service_name }}"
           - --no-pager
           - -l
-      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
       register: librenms_galera_bootstrap_status
       changed_when: false
       failed_when: false
@@ -854,7 +911,7 @@
           - -n
           - "100"
           - --no-pager
-      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
       register: librenms_galera_bootstrap_journal
       changed_when: false
       failed_when: false
@@ -864,7 +921,7 @@
         argv:
           - cat
           - /var/lib/mysql/grastate.dat
-      delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+      delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
       register: librenms_galera_bootstrap_grastate
       changed_when: false
       failed_when: false
@@ -897,6 +954,17 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
+    - librenms_galera_bootstrap_command is defined
+    - (librenms_galera_bootstrap_command.rc | default(1) | int) == 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
 - name: Write Galera bootstrap marker
   file:
@@ -905,18 +973,33 @@
     owner: root
     group: root
     mode: "0644"
-  delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+  delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - librenms_galera_cluster_bootstrapped_this_run | default(false)
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
 - name: Wait for the Galera bootstrap host to accept connections
   wait_for:
     host: >-
       {{
-        hostvars[librenms_galera_bootstrap_effective_host].ansible_host
-        | default(librenms_galera_bootstrap_effective_host)
+        hostvars[
+          librenms_galera_bootstrap_effective_host
+          | default(inventory_hostname, true)
+        ].ansible_host
+        | default(
+            librenms_galera_bootstrap_effective_host
+            | default(inventory_hostname, true)
+          )
       }}
     port: "{{ librenms_db_port }}"
     timeout: "{{ librenms_galera_wait_timeout | int }}"
@@ -925,6 +1008,17 @@
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
+    - librenms_galera_bootstrap_command is defined
+    - (librenms_galera_bootstrap_command.rc | default(1) | int) == 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
 - name: Capture bootstrap host listener diagnostics
   shell: |-
@@ -942,12 +1036,23 @@
     }
   args:
     executable: /bin/bash
-  delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"
+  delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
   register: librenms_galera_bootstrap_listener_diagnostics
   changed_when: false
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
+    - librenms_galera_bootstrap_command is defined
+    - (librenms_galera_bootstrap_command.rc | default(1) | int) == 0
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
     - librenms_galera_bootstrap_tcp_wait.msg | default('') is search('Timeout')
 
 - name: Fail when the Galera bootstrap host does not accept TCP connections

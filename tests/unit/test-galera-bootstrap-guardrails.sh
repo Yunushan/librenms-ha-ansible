@@ -23,8 +23,16 @@ require_text "$TASKS_FILE" "Fail closed when existing Galera cluster needs manua
 require_text "$TASKS_FILE" "Fail closed when Galera bootstrap host is not selected"
 require_text "$TASKS_FILE" "librenms_galera_marker.stat.exists | default(false) | bool"
 require_text "$TASKS_FILE" "if librenms_galera_initial_bootstrap_required | bool"
-require_text "$TASKS_FILE" "(librenms_galera_bootstrap_effective_host | default('') | trim | length) == 0"
-require_text "$TASKS_FILE" "(librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0"
+require_text "$TASKS_FILE" "| default('', true)"
+require_text "$TASKS_FILE" "librenms_galera_bootstrap_selected_from_recovery | default(false, true) | bool"
+require_text "$TASKS_FILE" "librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))"
+require_text "$TASKS_FILE" "librenms_galera_bootstrap_effective_host not in ("
+require_text "$TASKS_FILE" 'delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"'
+
+if grep -Fq -- 'delegate_to: "{{ librenms_galera_bootstrap_effective_host }}"' "$TASKS_FILE"; then
+    printf 'Galera bootstrap delegation must always have a non-empty fallback host.\n' >&2
+    exit 1
+fi
 
 recovery_block="$(awk '
     /- name: Recover Galera positions when no node is marked safe to bootstrap/ { capture=1 }
