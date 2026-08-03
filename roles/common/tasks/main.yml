@@ -192,6 +192,7 @@
 - name: Set system timezone
   community.general.timezone:
     name: "{{ librenms_timezone }}"
+    hwclock: "{{ librenms_timezone_hwclock | default(none) }}"
 
 - name: Ensure state directory exists
   file:

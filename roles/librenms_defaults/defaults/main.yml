@@ -233,6 +233,10 @@ librenms_session_secure_cookie: ""
 librenms_app_key: CHANGE_ME
 
 librenms_timezone: Etc/UTC
+# Keep hardware-clock synchronization disabled on virtual machines and hosts
+# without a usable RTC. Set this to `UTC` or `local` when synchronization is
+# explicitly required and the host provides a working hwclock utility.
+librenms_timezone_hwclock: null
 librenms_web_server: nginx
 
 librenms_bootstrap_completed: false

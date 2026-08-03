@@ -37,6 +37,7 @@ librenms_base_packages:
   - snmp
   - snmpd
   - traceroute
+  - util-linux
   - unzip
   - wget
   - whois
