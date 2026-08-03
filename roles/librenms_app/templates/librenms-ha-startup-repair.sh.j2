@@ -172,6 +172,12 @@ recover_systemd_units() {
       if [ "${DB_MODE}" = "galera" ] && [ "${unit}" = "${MARIADB_SERVICE}" ]; then
         continue
       fi
+      # RRDCacheD must not start against an absent or stale Gluster mount.
+      # wait_for_rrd_mount and ensure_rrdcached handle it after mount health is
+      # known, while the other HA services can recover normally here.
+      if [ "${RRD_MODE}" = "glusterfs" ] && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then
+        continue
+      fi
       systemctl list-unit-files "${unit}" >/dev/null 2>&1 || continue
 
       state=$(systemctl is-active "${unit}" 2>/dev/null || true)
@@ -250,6 +256,25 @@ ensure_systemd_units() {
       systemctl enable --now "${unit}" >/dev/null 2>&1 || true
     fi
   done
+}
+
+ensure_rrdcached() {
+  [ "${SERVICE_RECOVERY_ENABLED}" = "1" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl list-unit-files "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || return 0
+
+  if [ "${RRD_MODE}" = "glusterfs" ]; then
+    rrd_mount_present || return 0
+    rrd_path_accessible || return 0
+  fi
+
+  local state
+  state=$(systemctl is-active "${RRDCACHED_SERVICE}" 2>/dev/null || true)
+  [ "${state}" = "active" ] && return 0
+
+  log "starting ${RRDCACHED_SERVICE} after RRD readiness was confirmed (state=${state:-unknown})"
+  systemctl reset-failed "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || true
+  systemctl start "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || true
 }
 
 configure_librenms_runtime() {
@@ -528,6 +553,7 @@ recover_systemd_units || true
 wait_for_rrd_mount || true
 repair_writable_paths
 repair_git_rrd_placeholder
+ensure_rrdcached || true
 ensure_systemd_units
 recover_php_fpm_after_db_recovery || true
 if librenms_database_ready; then

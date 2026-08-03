@@ -37,6 +37,18 @@
         groups.get('gluster_nodes', [])
         | difference(librenms_inactive_inventory_nodes)
       }}
+    librenms_post_reboot_rrdcached_nodes: >-
+      {{
+        (
+          librenms_post_reboot_active_nodes
+          if librenms_rrdcached_scope == 'all'
+          else [librenms_post_reboot_active_nodes | first | default('')]
+        )
+        | reject('equalto', '')
+        | list
+        if librenms_manage_rrdcached | bool
+        else []
+      }}
   run_once: true
 
 - name: Determine post-reboot probe delegates
@@ -283,6 +295,116 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == (librenms_post_reboot_active_gluster_nodes | first | default(''))
+
+- name: Trigger RRD mount repair before managed RRDCacheD convergence
+  systemd:
+    name: librenms-ha-startup-repair.service
+    state: started
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_startup_repair_enabled | bool
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+
+- name: Reload systemd before managed RRDCacheD convergence
+  systemd:
+    daemon_reload: true
+  when:
+    - ansible_service_mgr == 'systemd'
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+
+- name: Reset failed managed RRDCacheD state after reboot # noqa command-instead-of-module
+  command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_rrdcached_service_name }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_service_mgr == 'systemd'
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+
+- name: Enable and start managed RRDCacheD after reboot
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: started
+    enabled: true
+  register: librenms_post_reboot_rrdcached_start
+  failed_when: false
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+
+- name: Verify managed RRDCacheD is active after reboot # noqa command-instead-of-module
+  command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_rrdcached_service_name }}"
+  register: librenms_post_reboot_rrdcached_state
+  changed_when: false
+  failed_when: false
+  until: librenms_post_reboot_rrdcached_state.stdout == 'active'
+  retries: "{{ librenms_post_reboot_service_retries | int }}"
+  delay: "{{ librenms_post_reboot_service_delay | int }}"
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+
+- name: Capture RRDCacheD status after failed post-reboot repair # noqa command-instead-of-module
+  command:
+    argv:
+      - systemctl
+      - status
+      - "{{ librenms_rrdcached_service_name }}"
+      - --no-pager
+      - -l
+  register: librenms_post_reboot_rrdcached_status
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
+
+- name: Capture RRDCacheD journal after failed post-reboot repair # noqa command-instead-of-module
+  command:
+    argv:
+      - journalctl
+      - -u
+      - "{{ librenms_rrdcached_service_name }}"
+      - -n
+      - "50"
+      - --no-pager
+  register: librenms_post_reboot_rrdcached_journal
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
+
+- name: Fail when managed RRDCacheD remains unavailable after reboot repair
+  fail:
+    msg: |-
+      Managed RRDCacheD {{ librenms_rrdcached_service_name }} remains unavailable on
+      {{ inventory_hostname }} after the bounded post-reboot repair.
+
+      systemctl status:
+      {{ librenms_post_reboot_rrdcached_status.stdout | default('') }}
+
+      journalctl:
+      {{ librenms_post_reboot_rrdcached_journal.stdout | default('') }}
+  when:
+    - librenms_manage_rrdcached | bool
+    - ansible_os_family == 'Debian'
+    - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
 
 - name: Wait for LibreNMS dispatcher after reboot
   command:
