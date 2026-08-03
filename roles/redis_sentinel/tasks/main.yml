@@ -662,7 +662,7 @@
     librenms_redis_sentinel_consensus_query_nodes: >-
       {{
         librenms_active_redis_nodes
-        | intersect(ansible_play_hosts)
+        | intersect(ansible_play_hosts_all)
       }}
   when:
     - librenms_redis_mode == 'sentinel'
@@ -851,7 +851,7 @@
 
 - name: Set Redis Sentinel repair replica nodes
   set_fact:
-    librenms_redis_sentinel_repair_replica_nodes: "{{ librenms_redis_sentinel_repair_non_master_nodes | intersect(ansible_play_hosts) }}"
+    librenms_redis_sentinel_repair_replica_nodes: "{{ librenms_redis_sentinel_repair_non_master_nodes | intersect(ansible_play_hosts_all) }}"
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
