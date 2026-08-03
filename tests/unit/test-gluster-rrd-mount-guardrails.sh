@@ -66,8 +66,22 @@ require_file_text "$RUNTIME_WAIT_TEMPLATE" \
 require_file_text "$RRD_PERMISSION_REPAIR_TEMPLATE" \
     'RRD_PATH={{ librenms_rrdcached_base_path | quote }}'
 
-startup_main_mount_wait_line="$(grep -nFx 'wait_for_rrd_mount || true' "$STARTUP_REPAIR_TEMPLATE" | cut -d: -f1)"
-startup_writable_repair_line="$(grep -nFx 'repair_writable_paths' "$STARTUP_REPAIR_TEMPLATE" | cut -d: -f1)"
+first_line_number() {
+    local file="$1"
+    local needle="$2"
+    awk -v needle="$needle" 'index($0, needle) { print NR; exit }' "$file"
+}
+
+last_line_number() {
+    local file="$1"
+    local needle="$2"
+    awk -v needle="$needle" 'index($0, needle) { line=NR } END { if (line) print line }' "$file"
+}
+
+startup_main_mount_wait_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'wait_for_rrd_mount || true')"
+startup_writable_repair_line="$(last_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'repair_writable_paths')"
 
 if [[ -z "$startup_main_mount_wait_line" \
     || -z "$startup_writable_repair_line" \
@@ -76,12 +90,18 @@ if [[ -z "$startup_main_mount_wait_line" \
     exit 1
 fi
 
-startup_health_line="$(grep -nF 'rrd_path_accessible && return 0' "$STARTUP_REPAIR_TEMPLATE" | head -n 1 | cut -d: -f1)"
-startup_enable_line="$(grep -nF 'GLUSTER_STALE_MOUNT_RECOVERY' "$STARTUP_REPAIR_TEMPLATE" | tail -n 1 | cut -d: -f1)"
-startup_stop_line="$(grep -nF 'systemctl stop "${RRDCACHED_SERVICE}"' "$STARTUP_REPAIR_TEMPLATE" | cut -d: -f1)"
-startup_unmount_line="$(grep -nF 'umount --lazy -- "${RRD_PATH}"' "$STARTUP_REPAIR_TEMPLATE" | cut -d: -f1)"
-startup_mount_line="$(grep -nF 'mount "${RRD_PATH}"' "$STARTUP_REPAIR_TEMPLATE" | head -n 1 | cut -d: -f1)"
-startup_start_line="$(grep -nF 'systemctl start "${RRDCACHED_SERVICE}"' "$STARTUP_REPAIR_TEMPLATE" | cut -d: -f1)"
+startup_health_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'rrd_path_accessible && return 0')"
+startup_enable_line="$(last_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'GLUSTER_STALE_MOUNT_RECOVERY')"
+startup_stop_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'systemctl stop "${RRDCACHED_SERVICE}"')"
+startup_unmount_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'umount --lazy -- "${RRD_PATH}"')"
+startup_mount_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'mount "${RRD_PATH}"')"
+startup_start_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
+    'systemctl start "${RRDCACHED_SERVICE}"')"
 
 if ((startup_health_line >= startup_enable_line \
     || startup_enable_line >= startup_stop_line \
@@ -92,19 +112,30 @@ if ((startup_health_line >= startup_enable_line \
     exit 1
 fi
 
-detect_line="$(grep -nF 'Detect active Gluster-backed RRD mount' "$TASKS_FILE" | cut -d: -f1)"
-health_line="$(grep -nF 'Probe active Gluster-backed RRD mount accessibility' "$TASKS_FILE" | cut -d: -f1)"
-detach_line="$(grep -nF 'Lazily detach stale Gluster-backed RRD client mount' "$TASKS_FILE" | cut -d: -f1)"
-redetect_line="$(grep -nF 'Re-detect Gluster-backed RRD mount after stale mount recovery' "$TASKS_FILE" | cut -d: -f1)"
-inspect_line="$(grep -nF 'Inspect unmounted RRD mountpoint path' "$TASKS_FILE" | cut -d: -f1)"
-unlink_line="$(grep -nF 'Remove legacy RRD mountpoint symlink' "$TASKS_FILE" | cut -d: -f1)"
-ensure_line="$(grep -nF 'Ensure unmounted RRD mountpoint exists' "$TASKS_FILE" | cut -d: -f1)"
-prepared_line="$(grep -nF 'Verify prepared unmounted RRD mountpoint' "$TASKS_FILE" | cut -d: -f1)"
-mount_line="$(grep -nF 'Mount GlusterFS volume on LibreNMS nodes' "$TASKS_FILE" | cut -d: -f1)"
-mounted_health_line="$(grep -nF 'Verify mounted Gluster-backed RRD path is accessible' "$TASKS_FILE" | cut -d: -f1)"
-restore_line="$(grep -nF 'Restore RRDCacheD after stale Gluster RRD mount recovery' "$TASKS_FILE" | cut -d: -f1)"
-nocanonicalize_line="$(grep -nF -- '--nocanonicalize' "$TASKS_FILE" | head -n 1 | cut -d: -f1)"
-mountpoint_option_line="$(grep -nF -- '--mountpoint' "$TASKS_FILE" | head -n 1 | cut -d: -f1)"
+detect_line="$(first_line_number "$TASKS_FILE" \
+    'Detect active Gluster-backed RRD mount')"
+health_line="$(first_line_number "$TASKS_FILE" \
+    'Probe active Gluster-backed RRD mount accessibility')"
+detach_line="$(first_line_number "$TASKS_FILE" \
+    'Lazily detach stale Gluster-backed RRD client mount')"
+redetect_line="$(first_line_number "$TASKS_FILE" \
+    'Re-detect Gluster-backed RRD mount after stale mount recovery')"
+inspect_line="$(first_line_number "$TASKS_FILE" \
+    'Inspect unmounted RRD mountpoint path')"
+unlink_line="$(first_line_number "$TASKS_FILE" \
+    'Remove legacy RRD mountpoint symlink')"
+ensure_line="$(first_line_number "$TASKS_FILE" \
+    'Ensure unmounted RRD mountpoint exists')"
+prepared_line="$(first_line_number "$TASKS_FILE" \
+    'Verify prepared unmounted RRD mountpoint')"
+mount_line="$(first_line_number "$TASKS_FILE" \
+    'Mount GlusterFS volume on LibreNMS nodes')"
+mounted_health_line="$(first_line_number "$TASKS_FILE" \
+    'Verify mounted Gluster-backed RRD path is accessible')"
+restore_line="$(first_line_number "$TASKS_FILE" \
+    'Restore RRDCacheD after stale Gluster RRD mount recovery')"
+nocanonicalize_line="$(first_line_number "$TASKS_FILE" '--nocanonicalize')"
+mountpoint_option_line="$(first_line_number "$TASKS_FILE" '--mountpoint')"
 
 if ((nocanonicalize_line >= mountpoint_option_line)); then
     printf 'findmnt must disable canonicalization before matching the literal mountpoint.\n' >&2

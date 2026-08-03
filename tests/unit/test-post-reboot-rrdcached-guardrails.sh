@@ -21,7 +21,13 @@ require_file_text() {
 line_number() {
     local file="$1"
     local needle="$2"
-    grep -nF -- "$needle" "$file" | head -n 1 | cut -d: -f1
+    awk -v needle="$needle" 'index($0, needle) { print NR; exit }' "$file"
+}
+
+last_line_number() {
+    local file="$1"
+    local needle="$2"
+    awk -v needle="$needle" 'index($0, needle) { line=NR } END { if (line) print line }' "$file"
 }
 
 main() {
@@ -62,7 +68,7 @@ main() {
         'if [ "${RRD_MODE}" = "glusterfs" ] && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then')"
     startup_mount_line="$(line_number "$STARTUP_REPAIR_TEMPLATE" \
         'wait_for_rrd_mount || true')"
-    startup_writable_line="$(line_number "$STARTUP_REPAIR_TEMPLATE" \
+    startup_writable_line="$(last_line_number "$STARTUP_REPAIR_TEMPLATE" \
         'repair_writable_paths')"
     startup_start_line="$(line_number "$STARTUP_REPAIR_TEMPLATE" \
         'ensure_rrdcached || true')"
