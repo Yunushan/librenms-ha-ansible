@@ -778,12 +778,14 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - librenms_galera_bootstrap_selected_from_recovery | default(false)
+    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
 
 - name: Bootstrap Galera cluster on the effective bootstrap host
   when:
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
   block:
     - name: Run Galera bootstrap command # noqa: command-instead-of-module
       shell: |-
