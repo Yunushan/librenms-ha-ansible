@@ -24,6 +24,11 @@ librenms_db_mode: galera
 librenms_db_name: librenms
 librenms_db_user: librenms
 librenms_db_password: CHANGE_ME_DB_PASSWORD
+# Each sample web node is also a Galera member.  Use that local member at
+# runtime so database VIP moves and HAProxy backend transitions cannot break
+# active LibreNMS requests.  The deep web health check drains a node whenever
+# its local member is no longer ready.
+librenms_runtime_db_prefer_local_galera: true
 librenms_db_bootstrap_host: lnms1
 
 # MariaDB uses the Ubuntu 24.04 packages (10.11) by default. To use MariaDB
@@ -197,10 +202,30 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_web_validation_rrd_check_timeout: 900s
 # librenms_haproxy_db_tcp_keepalive: true
 # librenms_haproxy_db_shutdown_sessions_on_backend_down: true
+# Keep this false in normal production. Backend state changes remain logged,
+# while high-volume database connection logs are suppressed.
+# librenms_haproxy_db_connection_logging_enabled: false
+# Remove a web node immediately when its database-aware runtime probe fails,
+# then require three successful probes before returning it to service.
+librenms_haproxy_web_runtime_check_interval: 1s
+librenms_haproxy_web_runtime_check_fall: 1
+librenms_haproxy_web_runtime_check_rise: 3
 # librenms_galera_readiness_agent_enabled: true
 # librenms_galera_self_heal_enabled: true
 # librenms_galera_self_heal_failure_threshold: 4
 # librenms_galera_self_heal_restart_cooldown: 600
+# A stopped local member may rejoin only when at least one remote member proves
+# Primary/ready/synced. This is a normal rejoin and never bootstraps a cluster.
+# librenms_galera_self_heal_min_healthy_peers: 1
+# librenms_galera_self_heal_service_action_timeout: 180
+# Buffer syslog while the local LibreNMS database sink is unavailable. The
+# queue is disk-assisted and bounded; increase it only after sizing the spool.
+# librenms_syslog_action_queue_enabled: true
+# librenms_syslog_action_queue_max_disk_space: 1g
+# librenms_syslog_action_resume_interval: 30
+# Successful socket-activated Galera readiness probes otherwise create several
+# local systemd messages per check. Failures remain logged when this is true.
+# librenms_syslog_suppress_galera_readiness_lifecycle: true
 # Existing clusters fail closed for a total Galera outage. Do not enable unsafe
 # recovery without a reviewed recovery policy and current backups.
 # librenms_galera_auto_recover_unsafe_bootstrap: false

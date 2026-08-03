@@ -188,6 +188,17 @@ librenms_syslog_forward_port: "{{ librenms_syslog_udp_port }}"
 librenms_syslog_forward_protocol: udp
 librenms_syslog_forward_selector: "*.notice;auth,authpriv.none;cron.none;mail.none"
 librenms_syslog_host_property: fromhost-ip
+librenms_syslog_action_queue_enabled: true
+librenms_syslog_action_queue_type: LinkedList
+librenms_syslog_action_queue_filename: librenms_omprog
+librenms_syslog_action_queue_spool_dir: /var/spool/rsyslog/librenms
+librenms_syslog_action_queue_size: 10000
+librenms_syslog_action_queue_max_disk_space: 1g
+librenms_syslog_action_queue_save_on_shutdown: true
+librenms_syslog_action_queue_worker_threads: 1
+librenms_syslog_action_resume_interval: 30
+librenms_syslog_action_resume_retry_count: -1
+librenms_syslog_suppress_galera_readiness_lifecycle: true
 librenms_syslog_purge_days: 30
 librenms_syslog_enable_hooks: false
 librenms_syslog_xlate: {}
@@ -272,7 +283,12 @@ librenms_mariadb_upstream_repo_setup_path: /usr/local/sbin/mariadb_repo_setup
 librenms_mariadb_upstream_repo_setup_checksum: ""
 librenms_mariadb_upstream_state_path: /var/lib/librenms-ha-ansible/mariadb-upstream-series
 librenms_mariadb_allow_experimental_series: false
-librenms_runtime_db_prefer_local_galera: false
+# Keep co-located web/database nodes off the database VIP.  A VIP move or an
+# HAProxy backend transition can terminate an in-flight MySQL connection even
+# when the Galera primary component remains healthy.  Non-database web nodes
+# still fall back to the HAProxy/VIP frontend.
+librenms_runtime_db_prefer_local_galera: >-
+  {{ librenms_mode == 'ha' and librenms_db_mode == 'galera' }}
 librenms_runtime_db_wait_timeout: 120
 librenms_runtime_db_wait_retries: 3
 librenms_runtime_db_wait_delay: 5
@@ -464,9 +480,9 @@ librenms_manage_web_runtime_health_probe: >-
 librenms_web_runtime_health_probe_path: "{{ librenms_install_dir }}/html/librenms-runtime-health.php"
 librenms_nginx_runtime_health_check_path: /librenms-runtime-health
 librenms_haproxy_web_runtime_check_enabled: "{{ librenms_manage_web_runtime_health_probe | bool }}"
-librenms_haproxy_web_runtime_check_interval: 3s
-librenms_haproxy_web_runtime_check_fall: 2
-librenms_haproxy_web_runtime_check_rise: 2
+librenms_haproxy_web_runtime_check_interval: 1s
+librenms_haproxy_web_runtime_check_fall: 1
+librenms_haproxy_web_runtime_check_rise: 3
 librenms_nginx_redirect_unmatched_hosts: "{{ librenms_vip_enabled | bool }}"
 librenms_haproxy_db_mysql_check_enabled: true
 librenms_haproxy_db_health_user: haproxy_check
@@ -483,6 +499,10 @@ librenms_haproxy_db_timeout_client: 8h
 librenms_haproxy_db_timeout_server: 8h
 librenms_haproxy_db_tcp_keepalive: true
 librenms_haproxy_db_shutdown_sessions_on_backend_down: true
+# The DB frontend can receive hundreds of short-lived application connections
+# per second. Backend state transitions remain in HAProxy's process log; routine
+# per-connection logging is disabled by default to avoid outage log storms.
+librenms_haproxy_db_connection_logging_enabled: false
 librenms_galera_readiness_agent_enabled: "{{ librenms_db_mode == 'galera' }}"
 librenms_galera_readiness_agent_path: /usr/local/sbin/librenms-galera-readiness-agent
 librenms_galera_readiness_agent_socket_unit: librenms-galera-readiness-agent.socket
@@ -500,6 +520,10 @@ librenms_galera_readiness_agent_probe_delay: 2
 librenms_galera_self_heal_enabled: "{{ librenms_db_mode == 'galera' }}"
 librenms_galera_self_heal_failure_threshold: 4
 librenms_galera_self_heal_restart_cooldown: 600
+librenms_galera_self_heal_min_healthy_peers: 1
+librenms_galera_self_heal_service_action_timeout: 180
+librenms_galera_self_heal_service_poll_delay: 5
+librenms_galera_self_heal_diagnostic_lines: 80
 librenms_galera_self_heal_state_dir: /run/librenms-ha-startup-repair
 librenms_haproxy_web_check_interval: 1s
 librenms_haproxy_web_check_fall: 2
@@ -659,12 +683,6 @@ librenms_startup_repair_service_recovery_units:
     {{
       librenms_glusterd_service_name
       if librenms_rrd_mode == 'glusterfs'
-      else ''
-    }}
-  - >-
-    {{
-      librenms_mariadb_service_name
-      if librenms_db_mode == 'galera'
       else ''
     }}
   - >-

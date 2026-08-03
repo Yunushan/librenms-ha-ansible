@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /*
  * Keep this endpoint intentionally small and non-sensitive. HAProxy uses it to
- * stop routing users to PHP-FPM workers that cannot make a fresh database query.
+ * stop routing users to PHP-FPM workers that cannot make a safe database query.
  */
 $init_modules = [];
 
@@ -20,6 +20,32 @@ try {
         throw new RuntimeException('database readiness query returned an unexpected result');
     }
 
+{% if
+  librenms_db_mode == 'galera'
+  and librenms_db_host | length == 0
+  and librenms_runtime_db_prefer_local_galera | bool
+  and inventory_hostname in librenms_active_db_nodes
+%}
+    $galeraRows = \Illuminate\Support\Facades\DB::select(
+        "SHOW GLOBAL STATUS WHERE Variable_name IN "
+        . "('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment')"
+    );
+    $galeraStatus = [];
+
+    foreach ($galeraRows as $row) {
+        $name = (string) ($row->Variable_name ?? '');
+        $galeraStatus[$name] = (string) ($row->Value ?? '');
+    }
+
+    if (
+        ($galeraStatus['wsrep_cluster_status'] ?? '') !== 'Primary'
+        || ($galeraStatus['wsrep_ready'] ?? '') !== 'ON'
+        || ($galeraStatus['wsrep_local_state_comment'] ?? '') !== 'Synced'
+    ) {
+        throw new RuntimeException('local Galera member is not ready for application traffic');
+    }
+
+{% endif %}
     http_response_code(200);
     echo "ok\n";
 } catch (Throwable) {

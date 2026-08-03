@@ -816,11 +816,17 @@ mount before starting. Startup repair also re-enables the expected timers and
 restores ownership on writable LibreNMS paths.
 
 Startup repair also resets failed state and starts the expected HA units for the
-selected modes: Gluster, MariaDB/Galera, Redis, Redis Sentinel, RRDCacheD,
-HAProxy, and Keepalived. Galera configs include safe primary-component recovery
-by default, which helps clean full-cluster restarts re-form without an operator
-bootstrap when Galera has valid saved state. It does not force an unsafe Galera
-bootstrap; if no `Primary` component forms, use `galera-recover.yml`.
+selected modes: Gluster, Redis, Redis Sentinel, RRDCacheD, HAProxy, and
+Keepalived. MariaDB/Galera is handled by a separate peer-aware path: a stopped
+member is started immediately only when at least one remote member proves
+`Primary`, `wsrep_ready=ON`, and `Synced`; a running but unready member must fail
+the configured number of checks first. Every attempt has a bounded convergence
+window and a cooldown that is recorded before systemd is invoked, including for
+failed attempts. Galera configs include safe primary-component recovery by
+default, which helps clean full-cluster restarts re-form when Galera has valid
+saved state. Startup repair never creates a new Primary component, edits Galera
+state files, or forces an unsafe bootstrap; if no `Primary` component forms, use
+`galera-recover.yml`.
 
 The startup repair timer also watches recent `librenms.log` output for a fresh
 `MySQL server has gone away` / SQLSTATE `2006` error. In HA mode it also records
@@ -840,6 +846,18 @@ the unhealthy backend and the application tier repairs itself automatically.
 The role deliberately does not bootstrap a completely unavailable Galera
 cluster without operator confirmation because doing so could create
 split-brain or data loss.
+
+HAProxy suppresses routine per-connection logs on its internal database
+frontend by default while retaining process and backend state events. This
+prevents a database outage from producing gigabytes of connection records. For
+remote syslog, rsyslog uses a bounded disk-assisted action queue and a 30-second
+resume interval, so an unavailable LibreNMS database sink is buffered instead
+of spawning a failing PHP process every second. Tune
+`librenms_syslog_action_queue_max_disk_space` for the expected message rate and
+outage window. The queue is isolated under `/var/spool/rsyslog/librenms`.
+Successful socket-activated Galera readiness-agent lifecycle messages are
+filtered before local storage and forwarding, but agent failures remain
+visible. This queue cannot add delivery acknowledgement to UDP senders.
 
 After all nodes return, check the self-healing units before rerunning Ansible:
 

@@ -3,6 +3,8 @@ set -euo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "$BASH_SOURCE")/../.." && pwd)"
 readonly DEFAULTS_FILE="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
+readonly HA_VARS_FILE="${ROOT_DIR}/inventories/ha/group_vars/all.yml"
+readonly APP_TASKS="${ROOT_DIR}/roles/librenms_app/tasks/main.yml"
 readonly PROBE_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/librenms-runtime-health.php.j2"
 readonly NGINX_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/nginx-librenms.conf.j2"
 readonly HAPROXY_TEMPLATE="${ROOT_DIR}/roles/haproxy_keepalived/templates/haproxy.cfg.j2"
@@ -27,6 +29,8 @@ require_contains() {
 
 main() {
     local defaults
+    local ha_vars
+    local app_tasks
     local probe
     local nginx
     local haproxy
@@ -37,6 +41,8 @@ main() {
     local integration_test
 
     defaults="$(tr -d '\r' < "${DEFAULTS_FILE}")"
+    ha_vars="$(tr -d '\r' < "${HA_VARS_FILE}")"
+    app_tasks="$(tr -d '\r' < "${APP_TASKS}")"
     probe="$(tr -d '\r' < "${PROBE_TEMPLATE}")"
     nginx="$(tr -d '\r' < "${NGINX_TEMPLATE}")"
     haproxy="$(tr -d '\r' < "${HAPROXY_TEMPLATE}")"
@@ -56,12 +62,48 @@ main() {
         "HAProxy runtime health checks must be configurable."
     require_contains \
         "${defaults}" \
-        "librenms_haproxy_web_runtime_check_interval: 3s" \
-        "Runtime health checks must remove failed PHP workers promptly."
+        "librenms_haproxy_web_runtime_check_interval: 1s" \
+        "Runtime health checks must detect a failed web/database node promptly."
+    require_contains \
+        "${defaults}" \
+        "librenms_haproxy_web_runtime_check_fall: 1" \
+        "A failed database-aware probe must remove the web node immediately."
+    require_contains \
+        "${defaults}" \
+        "librenms_haproxy_web_runtime_check_rise: 3" \
+        "A recovered web node must prove stability before rejoining service."
+    require_contains \
+        "${defaults}" \
+        "librenms_runtime_db_prefer_local_galera: >-" \
+        "HA Galera must prefer local runtime database members by default."
+    require_contains \
+        "${ha_vars}" \
+        "librenms_runtime_db_prefer_local_galera: true" \
+        "The three-node HA sample must bypass the database VIP for local application traffic."
+    require_contains \
+        "${app_tasks}" \
+        "Verify preferred local Galera runtime member is synced" \
+        "Deployment must validate the local Galera member before publishing runtime configuration."
+    require_contains \
+        "${app_tasks}" \
+        "wsrep_local_state_comment[ \\t]+Synced" \
+        "The local runtime member must be synced before LibreNMS uses it."
+    require_contains \
+        "${app_tasks}" \
+        "librenms_db_host | length == 0" \
+        "An explicit runtime database host must override local Galera preference."
     require_contains \
         "${probe}" \
         "SELECT 1 AS ready" \
         "The runtime probe must make a fresh database readiness query."
+    require_contains \
+        "${probe}" \
+        "wsrep_cluster_status" \
+        "A local Galera runtime probe must reject non-Primary members."
+    require_contains \
+        "${probe}" \
+        "wsrep_local_state_comment" \
+        "A local Galera runtime probe must reject unsynced members."
     require_contains \
         "${probe}" \
         "catch (Throwable)" \

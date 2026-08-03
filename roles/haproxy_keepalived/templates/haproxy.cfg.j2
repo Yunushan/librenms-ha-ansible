@@ -177,6 +177,9 @@ backend librenms_web_validation_nodes
 frontend librenms_db
     bind {{ librenms_haproxy_bind_address }}:{{ librenms_haproxy_db_port }}
     mode tcp
+{% if not (librenms_haproxy_db_connection_logging_enabled | bool) %}
+    no log
+{% endif %}
 {% if librenms_haproxy_db_tcp_keepalive | bool %}
     option clitcpka
 {% endif %}

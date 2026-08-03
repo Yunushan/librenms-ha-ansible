@@ -3620,6 +3620,37 @@
     - librenms_mode != 'standalone'
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
+- name: Verify preferred local Galera runtime member is synced
+  command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+  register: librenms_local_runtime_galera_status
+  changed_when: false
+  retries: "{{ librenms_runtime_db_wait_retries | int }}"
+  delay: "{{ librenms_runtime_db_wait_delay | int }}"
+  until:
+    - >-
+      (librenms_local_runtime_galera_status.stdout | default(''))
+      is search('wsrep_cluster_status[ \t]+Primary')
+    - >-
+      (librenms_local_runtime_galera_status.stdout | default(''))
+      is search('wsrep_ready[ \t]+ON')
+    - >-
+      (librenms_local_runtime_galera_status.stdout | default(''))
+      is search('wsrep_local_state_comment[ \t]+Synced')
+  when:
+    - librenms_apply_post_bootstrap_config | bool
+    - librenms_db_mode == 'galera'
+    - librenms_db_host | length == 0
+    - librenms_runtime_db_prefer_local_galera | bool
+    - inventory_hostname in librenms_active_db_nodes
+
 - name: Deploy final LibreNMS runtime environment file
   template:
     src: librenms.env.j2
