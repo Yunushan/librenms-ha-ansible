@@ -661,8 +661,9 @@
   set_fact:
     librenms_redis_sentinel_consensus_query_nodes: >-
       {{
-        librenms_active_redis_nodes
-        | intersect(ansible_play_hosts_all)
+        groups.get('librenms_redis', [])
+        | difference(librenms_inactive_inventory_nodes | default([]))
+        | list
       }}
   when:
     - librenms_redis_mode == 'sentinel'
