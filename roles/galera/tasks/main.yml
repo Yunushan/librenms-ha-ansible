@@ -22,10 +22,39 @@
   register: librenms_galera_marker
   when: librenms_db_mode == 'galera'
 
+- name: Check for an existing LibreNMS database on Galera nodes
+  stat:
+    path: "{{ librenms_mariadb_datadir | default('/var/lib/mysql') }}/{{ librenms_db_name }}"
+  loop: "{{ librenms_active_db_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_database_state
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  when: librenms_db_mode == 'galera'
+
+- name: Determine whether Galera already contains application data
+  set_fact:
+    librenms_galera_existing_database_data: >-
+      {{
+        (
+          librenms_galera_database_state.results | default([])
+          | selectattr('stat.exists', 'defined')
+          | selectattr('stat.exists', 'equalto', true)
+          | list
+          | length
+        ) > 0
+      }}
+  when: librenms_db_mode == 'galera'
+
 - name: Determine whether Galera requires its initial bootstrap
   set_fact:
     librenms_galera_initial_bootstrap_required: >-
-      {{ not (librenms_galera_marker.stat.exists | default(false) | bool) }}
+      {{
+        not (librenms_galera_marker.stat.exists | default(false) | bool)
+        and not (librenms_galera_existing_database_data | default(false) | bool)
+        and not (librenms_bootstrap_completed | default(false, true) | bool)
+      }}
   when: librenms_db_mode == 'galera'
 
 - name: Probe Galera nodes for an existing primary component
@@ -473,7 +502,7 @@
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
     - (librenms_galera_safe_bootstrap_hosts | length) == 0
-    - librenms_galera_marker.stat.exists | default(false) | bool
+    - not librenms_galera_initial_bootstrap_required | bool
     - not librenms_galera_auto_recover_unsafe_bootstrap | bool
 
 - name: Determine effective Galera bootstrap host
@@ -811,7 +840,7 @@
 
 - name: Mark recovered Galera bootstrap host safe to bootstrap
   replace:
-    path: /var/lib/mysql/grastate.dat
+    path: "{{ librenms_mariadb_datadir | default('/var/lib/mysql') }}/grastate.dat"
     regexp: '^safe_to_bootstrap:.*$'
     replace: 'safe_to_bootstrap: 1'
   delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
@@ -829,6 +858,85 @@
       ) > 0
     - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
 
+- name: Read effective Galera bootstrap safety state
+  shell: |-
+    set -o pipefail
+    state_file="{{ librenms_mariadb_datadir | default('/var/lib/mysql') }}/grastate.dat"
+    if [ ! -f "${state_file}" ]; then
+      printf '%s\n' grastate_missing
+      exit 0
+    fi
+    awk -F': *' '/^safe_to_bootstrap:/ { print "safe_to_bootstrap=" $2 }' "${state_file}"
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ librenms_galera_bootstrap_effective_host | default(inventory_hostname, true) }}"
+  register: librenms_galera_bootstrap_safety_state
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
+
+- name: Determine whether Galera bootstrap safety is proven
+  set_fact:
+    librenms_galera_bootstrap_safety_verified: >-
+      {{
+        (
+          librenms_galera_initial_bootstrap_required | bool
+          and (
+            ((librenms_galera_bootstrap_safety_state | default({})).stdout | default(''))
+            is search('^(grastate_missing|safe_to_bootstrap=1)$')
+          )
+        )
+        or (
+          not librenms_galera_initial_bootstrap_required | bool
+          and (
+            ((librenms_galera_bootstrap_safety_state | default({})).stdout | default(''))
+            is search('^safe_to_bootstrap=1$')
+          )
+        )
+      }}
+  when: librenms_db_mode == 'galera'
+
+- name: Fail closed when Galera bootstrap safety is not proven
+  fail:
+    msg: |-
+      Refusing to bootstrap Galera on {{ librenms_galera_bootstrap_effective_host }}.
+
+      This is not a fresh cluster: {{ not (librenms_galera_initial_bootstrap_required | bool) }}
+      Existing LibreNMS database data: {{ librenms_galera_existing_database_data | default(false) }}
+      safe_to_bootstrap hosts: {{ librenms_galera_safe_bootstrap_hosts | default([]) }}
+      Recovered bootstrap selected: {{ librenms_galera_bootstrap_selected_from_recovery | default(false) }}
+      Effective state: {{ (librenms_galera_bootstrap_safety_state | default({})).stdout | default('missing') }}
+
+      A recovered node must be selected from the highest galera_recovery seqno and
+      marked safe_to_bootstrap: 1 before site convergence can start a new primary
+      component. Run galera-recover.yml with explicit confirmation and selection.
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - >-
+      (
+        librenms_galera_bootstrap_effective_host
+        | default('', true)
+        | string
+        | trim
+        | length
+      ) > 0
+    - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
+    - not librenms_galera_bootstrap_safety_verified | bool
+
 - name: Bootstrap Galera cluster on the effective bootstrap host
   when:
     - librenms_db_mode == 'galera'
@@ -843,6 +951,7 @@
         | length
       ) > 0
     - librenms_galera_bootstrap_effective_host in (librenms_active_db_nodes | default([]))
+    - librenms_galera_bootstrap_safety_verified | bool
   block:
     - name: Run Galera bootstrap command # noqa: command-instead-of-module
       shell: |-

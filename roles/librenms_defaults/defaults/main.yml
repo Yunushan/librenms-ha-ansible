@@ -297,10 +297,14 @@ librenms_galera_cluster_name: librenms_cluster
 librenms_galera_sst_method: rsync
 librenms_galera_pc_recovery: true
 librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapped
+# MariaDB datadir used to distinguish a fresh deployment from an existing
+# cluster whose marker was lost or never written.
+librenms_mariadb_datadir: /var/lib/mysql
 librenms_galera_wait_timeout: 120
 # A lost primary component on an existing cluster must be recovered through
 # galera-recover.yml with explicit operator confirmation. First deployment is
-# still bootstrapped automatically when the bootstrap marker does not exist.
+# still bootstrapped automatically only when the marker, application database,
+# and explicit bootstrap-completed flag are all absent.
 librenms_galera_auto_recover_unsafe_bootstrap: false
 librenms_galera_recovery_tie_breaker: manual
 librenms_galera_stop_timeout: 60
