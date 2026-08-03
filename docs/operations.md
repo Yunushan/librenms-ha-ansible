@@ -1083,25 +1083,35 @@ system's MariaDB packages. On Ubuntu 24.04 this is the MariaDB 10.11 series.
 LibreNMS automatic updates never change MariaDB packages or database series.
 
 For a fresh deployment, the project can configure the official MariaDB Community
-repository for an explicit series on Debian-family hosts. Pin the exact setup
-script hash obtained from the approved MariaDB release source:
+repository for an explicit series on Debian-family hosts. The supported local
+series are `11.4`, `11.8`, and `12.3`. Pin the exact setup script hash obtained
+from the approved MariaDB release source:
 
 ```yaml
 librenms_mariadb_repository_mode: upstream
-librenms_mariadb_upstream_series: "11.8" # 11.4 or 11.8 for Galera
+librenms_mariadb_upstream_series: "11.8" # 11.4 or 11.8 for Galera; 12.3 local only
 librenms_mariadb_upstream_repo_setup_checksum: sha256:REPLACE_WITH_64_HEX_CHARACTERS
 ```
 
 `site.yml` refuses an installed major-series change. A production Galera upgrade
 must use a separate reviewed procedure with a tested off-cluster restore,
 maintenance window, node-by-node package upgrade, and `Primary/Synced` health
-gate after every node. Do not select `12.3` for Galera. The project exposes it
-only as an experimental local-server option and requires:
+gate after every node. MariaDB 12.3 is valid for a local/standalone server, but
+must not be selected with `librenms_db_mode: galera`: the Community 12.3
+repository no longer provides the Galera package used by this role.
 
 ```yaml
+# Local/standalone example only.
+librenms_db_mode: local
 librenms_mariadb_upstream_series: "12.3"
-librenms_mariadb_allow_experimental_series: true
 ```
 
-That explicit acknowledgement is required because MariaDB 12.3 upstream
-packaging currently does not provide a safe Galera path for this project.
+The upstream repository mode is Debian-family only. On RedHat, Arch, Alpine,
+Gentoo, and other best-effort families, use the distribution package mapping or
+provide a tested site-specific package/repository override; this role does not
+pretend that MariaDB Community's Debian repository applies to those systems.
+
+Do not use `12.3` as an in-place Galera major upgrade. For any major-series
+change, take an off-cluster backup, test restore, drain the affected node, and
+follow a vendor-supported node-by-node upgrade plan before rerunning the
+playbook.

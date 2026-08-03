@@ -181,6 +181,21 @@ def main() -> int:
         "MariaDB repository download must verify its checksum",
     )
     failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_mariadb_upstream_galera_supported_series:",
+        "MariaDB series capabilities must distinguish local and Galera support",
+    )
+    failures += require(
+        "tests/unit/test-mariadb-series-guardrails.sh",
+        "MariaDB series guardrail test passed.",
+        "CI must test MariaDB series capability guardrails",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-mariadb-series-guardrails",
+        "CI must run the MariaDB series guardrail test",
+    )
+    failures += require(
         "roles/librenms_app/templates/librenms-ha-backup.sh.j2",
         "copy_offsite()",
         "Backup wrapper must retain an offsite copy capability",

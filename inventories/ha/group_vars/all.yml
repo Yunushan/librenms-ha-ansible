@@ -33,12 +33,13 @@ librenms_db_bootstrap_host: lnms1
 
 # MariaDB uses the Ubuntu 24.04 packages (10.11) by default. To use MariaDB
 # Community Server for a fresh install instead, select one explicit series and
-# pin the approved MariaDB repository setup script checksum.
+# pin the approved MariaDB repository setup script checksum. 11.4 and 11.8 are
+# supported for this HA Galera profile; 12.3 is supported for local mode only.
 # librenms_mariadb_repository_mode: upstream
 # librenms_mariadb_upstream_series: "11.8" # supported: 11.4, 11.8, 12.3
 # librenms_mariadb_upstream_repo_setup_checksum: sha256:REPLACE_WITH_64_HEX_CHARACTERS
-# MariaDB 12.3 is experimental, is not supported with Galera, and also needs:
-# librenms_mariadb_allow_experimental_series: true
+# MariaDB 12.3 cannot be selected with librenms_db_mode: galera because the
+# Community repository no longer ships the Galera package for that series.
 
 librenms_galera_cluster_name: librenms_cluster
 

@@ -4,6 +4,10 @@
 
 ### Added
 
+- Added explicit MariaDB Community Server series capability checks for 11.4,
+  11.8, and 12.3. Local/standalone deployments support all three series;
+  the built-in Galera profile is restricted to 11.4 and 11.8 because the 12.3
+  Community repository does not include the required Galera package.
 - Added a controller-side playbook launcher and `make site` workflow that
   synchronize the pinned Ansible Galaxy collections before playbook parsing,
   preventing missing-collection failures after dependency updates.

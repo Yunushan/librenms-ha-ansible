@@ -46,6 +46,9 @@ jobs:
       - name: Test Galera bootstrap guardrails
         run: make test-galera-bootstrap-guardrails
 
+      - name: Test MariaDB series guardrails
+        run: make test-mariadb-series-guardrails
+
       - name: Test daily maintenance drain guardrails
         run: make test-daily-maintenance-guardrails
 

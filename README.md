@@ -267,7 +267,9 @@ librenms_fqdn: librenms.example.com
 
 MariaDB defaults to the operating-system package series. Optional MariaDB
 Community repository support is available for explicit `11.4`, `11.8`, and
-experimental non-Galera `12.3` selection. See
+`12.3` selection. `11.4` and `11.8` are supported by the built-in Galera
+profile; `12.3` is supported for local/standalone MariaDB because its Community
+repository does not ship the Galera package required by this project. See
 [MariaDB Series Selection](docs/operations.md#mariadb-series-selection) before
 changing a database series.
 

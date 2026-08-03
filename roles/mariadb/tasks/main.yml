@@ -8,12 +8,16 @@
       - >-
         librenms_mariadb_repository_mode != 'upstream'
         or librenms_mariadb_upstream_repo_setup_checksum is match('^sha256:[A-Fa-f0-9]{64}$')
-      - librenms_mariadb_upstream_series != '12.3' or librenms_mariadb_allow_experimental_series | bool
-      - librenms_mariadb_upstream_series != '12.3' or librenms_db_mode != 'galera'
+      - >-
+        librenms_db_mode != 'galera'
+        or librenms_mariadb_upstream_series | default('') | length == 0
+        or librenms_mariadb_upstream_series in librenms_mariadb_upstream_galera_supported_series
     fail_msg: >-
       MariaDB upstream repository mode is supported only on Debian-family hosts.
-      Choose 11.4 or 11.8 for a Galera cluster.  MariaDB 12.3 is experimental
-      and cannot be selected for Galera. Set an immutable sha256 checksum for
+      MariaDB Community Server 11.4, 11.8, and 12.3 are supported for local
+      installs. Choose 11.4 or 11.8 for a Galera cluster because the MariaDB
+      12.3 Community repository does not provide the Galera package used by
+      this role. Set an immutable sha256 checksum for
       librenms_mariadb_upstream_repo_setup_checksum before enabling upstream mode.
   when: librenms_db_mode in ['local', 'galera']
 

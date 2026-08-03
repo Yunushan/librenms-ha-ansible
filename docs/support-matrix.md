@@ -28,6 +28,26 @@ passes. For example, an Ubuntu 24.04 to 26.04 upgrade should be tested one node
 at a time with the major-upgrade workflow before being treated as production
 ready.
 
+## MariaDB Series
+
+The default `distro` mode follows the operating system's package stream. The
+optional MariaDB Community repository mode is Debian-family only and requires
+an immutable SHA-256 checksum for the repository setup script. Confirm lifecycle
+and package details against the [MariaDB 11.4 release notes](https://mariadb.com/docs/release-notes/community-server/11.4),
+[MariaDB 11.8 release notes](https://mariadb.com/docs/release-notes/community-server/11.8),
+and [MariaDB 12.3 release notes](https://mariadb.com/docs/release-notes/community-server/12.3)
+before planning a major-series change.
+
+| MariaDB series | Local/standalone Community repo | Built-in Galera profile | Notes |
+| --- | --- | --- | --- |
+| 11.4 | Supported | Supported | Long-term series; use for a fresh or explicitly planned HA deployment. |
+| 11.8 | Supported | Supported | Long-term series; recommended Community-repository choice for new Galera deployments. |
+| 12.3 | Supported | Not supported by this repository's Community package path | MariaDB 12.3 is a long-term Community Server series, but its Community repository does not ship the Galera package required by this role. |
+
+The playbook never changes an installed major series during normal convergence.
+Use the documented maintenance and upgrade procedure, with an off-cluster
+backup and a tested restore, for every major-series change.
+
 ## Topology Support
 
 | Topology | Support level | Notes |
