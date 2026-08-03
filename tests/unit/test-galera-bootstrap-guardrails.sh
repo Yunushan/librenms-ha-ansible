@@ -20,8 +20,11 @@ require_text "$DEFAULTS_FILE" "librenms_galera_auto_recover_unsafe_bootstrap: fa
 require_text "$DEFAULTS_FILE" "librenms_galera_recovery_tie_breaker: manual"
 require_text "$TASKS_FILE" "Determine whether Galera requires its initial bootstrap"
 require_text "$TASKS_FILE" "Fail closed when existing Galera cluster needs manual recovery"
+require_text "$TASKS_FILE" "Fail closed when Galera bootstrap host is not selected"
 require_text "$TASKS_FILE" "librenms_galera_marker.stat.exists | default(false) | bool"
 require_text "$TASKS_FILE" "if librenms_galera_initial_bootstrap_required | bool"
+require_text "$TASKS_FILE" "(librenms_galera_bootstrap_effective_host | default('') | trim | length) == 0"
+require_text "$TASKS_FILE" "(librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0"
 
 recovery_block="$(awk '
     /- name: Recover Galera positions when no node is marked safe to bootstrap/ { capture=1 }

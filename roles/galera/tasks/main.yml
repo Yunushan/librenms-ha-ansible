@@ -522,6 +522,34 @@
       }}
   when: librenms_db_mode == 'galera'
 
+- name: Fail closed when Galera bootstrap host is not selected
+  fail:
+    msg: |-
+      Galera has no live Primary member and no effective bootstrap host was
+      selected. Refusing to stop MariaDB or run Galera bootstrap with an empty
+      delegate_to target.
+
+      Live members:
+      {{ librenms_galera_live_members | default([]) }}
+
+      safe_to_bootstrap hosts:
+      {{ librenms_galera_safe_bootstrap_hosts | default([]) }}
+
+      Recovered bootstrap host:
+      {{ librenms_galera_recovered_bootstrap_host | default('') }}
+
+      Initial bootstrap required:
+      {{ librenms_galera_initial_bootstrap_required | default(false) }}
+
+      Set librenms_galera_recover_confirm=true and explicitly select the
+      recovery host, or review the initial bootstrap configuration before
+      rerunning site convergence.
+  when:
+    - librenms_db_mode == 'galera'
+    - inventory_hostname == (librenms_active_db_nodes | first)
+    - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) == 0
+
 - name: Report Galera live member selected for database actions
   debug:
     msg: >-
@@ -584,6 +612,7 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
 
 - name: Stop MariaDB before Galera bootstrap on the effective bootstrap host
   service:
@@ -595,6 +624,7 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
 
 - name: Wait for MariaDB processes to stop before Galera bootstrap
   shell: |-
@@ -620,6 +650,7 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
 
 - name: Force kill stale MariaDB processes before Galera bootstrap
   command:
@@ -643,6 +674,7 @@
     - librenms_db_mode == 'galera'
     - inventory_hostname == (librenms_active_db_nodes | first)
     - not librenms_galera_cluster_has_live_member | bool
+    - (librenms_galera_bootstrap_effective_host | default('') | trim | length) > 0
     - librenms_galera_force_kill_stale_mariadb | bool
 
 - name: Reset MariaDB unit state after force kill
