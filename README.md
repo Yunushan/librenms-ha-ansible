@@ -284,8 +284,9 @@ This repository is built to support the distributions you asked for, but it does
 | Ubuntu | Primary | Best fit with upstream LibreNMS docs |
 | Debian | Primary | Best fit with upstream LibreNMS docs |
 | Linux Mint | Primary-ish | Uses Debian-family logic |
-| AlmaLinux | Strong best-effort | RedHat-family logic |
-| Rocky Linux | Strong best-effort | RedHat-family logic |
+| RHEL / Red Hat Enterprise Linux 8, 9, 10 | Strong best-effort | RedHat-family logic |
+| AlmaLinux 8, 9, 10 | Strong best-effort | RedHat-family logic |
+| Rocky Linux 8, 9, 10 | Strong best-effort | RedHat-family logic |
 | Fedora | Strong best-effort | RedHat-family logic |
 | CentOS / CentOS Stream | Best-effort | May need repo tuning depending on PHP availability |
 | Arch Linux | Best-effort | Family mapping included, verify package names in lab |
@@ -295,7 +296,12 @@ This repository is built to support the distributions you asked for, but it does
 
 ### Reality check
 
-Upstream LibreNMS documentation currently provides package/install examples for **Ubuntu 24.04**, **Ubuntu 22.04**, **Debian 12**, **Debian 13**, and **CentOS 8**. This repo extends beyond that with override-friendly family mappings, but you should lab-test non-primary distros before production.
+Upstream LibreNMS documentation currently provides package/install examples for **Ubuntu 24.04**, **Ubuntu 22.04**, **Debian 12**, **Debian 13**, and **CentOS 8**. This repo additionally validates Ubuntu 26.04 and RHEL-family releases 8, 9, and 10, plus PHP 8.5, Python 3.14, Laravel 13, nginx 1.31.x, and RRDtool 1.10.x when those versions are supplied by the selected vendor repositories. You should still lab-test non-primary distros before production.
+
+The common role checks the installed runtime versions during convergence and
+fails early when a package stream falls outside the support matrix. See
+[docs/support-matrix.md](docs/support-matrix.md#application-runtime-versions)
+for the exact policy and override boundary.
 
 See also:
 - [docs/README.md](docs/README.md) for the full documentation index and

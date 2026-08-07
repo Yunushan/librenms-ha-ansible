@@ -1,0 +1,135 @@
+---
+- name: Validate supported distribution major version
+  ansible.builtin.assert:
+    that:
+      - >-
+        (ansible_distribution_major_version | string)
+        in (librenms_supported_distribution_major_versions[ansible_distribution] | default([]))
+    fail_msg: >-
+      {{ ansible_distribution }} {{ ansible_distribution_major_version }} is not
+      in the supported production matrix. Supported releases for this family:
+      {{ librenms_supported_distribution_major_versions[ansible_distribution] | default([]) | join(', ') }}.
+      Set librenms_runtime_support_enabled=false only for an explicitly reviewed
+      lab or vendor-supported exception.
+  when: ansible_distribution in librenms_supported_distribution_major_versions
+
+- name: Detect Python runtime version
+  ansible.builtin.command:
+    argv:
+      - python3
+      - --version
+  register: librenms_runtime_python_version_command
+  changed_when: false
+  failed_when: false
+
+- name: Set detected Python runtime series
+  ansible.builtin.set_fact:
+    librenms_runtime_python_series: >-
+      {{
+        (
+          librenms_runtime_python_version_command.stdout
+          ~ ' '
+          ~ librenms_runtime_python_version_command.stderr
+        )
+        | regex_search('[0-9]+\\.[0-9]+')
+        | default('', true)
+      }}
+
+- name: Validate supported Python runtime
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_python_version_command.rc == 0
+      - librenms_runtime_python_series in librenms_supported_python_versions
+    fail_msg: >-
+      Python 3 runtime is unavailable or unsupported on {{ inventory_hostname }}.
+      Detected: {{ librenms_runtime_python_series | default('unknown') }}.
+      Supported versions: {{ librenms_supported_python_versions | join(', ') }}.
+
+- name: Detect RRDtool runtime version
+  ansible.builtin.command:
+    argv:
+      - rrdtool
+      - --version
+  register: librenms_runtime_rrdtool_version_command
+  changed_when: false
+  failed_when: false
+
+- name: Set detected RRDtool series
+  ansible.builtin.set_fact:
+    librenms_runtime_rrdtool_series: >-
+      {{
+        (
+          librenms_runtime_rrdtool_version_command.stdout
+          ~ ' '
+          ~ librenms_runtime_rrdtool_version_command.stderr
+        )
+        | regex_search('[0-9]+\\.[0-9]+')
+        | default('', true)
+      }}
+
+- name: Validate supported RRDtool runtime
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_rrdtool_version_command.rc == 0
+      - librenms_runtime_rrdtool_series in librenms_supported_rrdtool_series
+    fail_msg: >-
+      RRDtool is unavailable or unsupported on {{ inventory_hostname }}.
+      Detected: {{ librenms_runtime_rrdtool_series | default('unknown') }}.
+      Supported series: {{ librenms_supported_rrdtool_series | join(', ') }}.
+
+- name: Detect PHP runtime version on managed web nodes
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+  register: librenms_runtime_php_version_command
+  changed_when: false
+  failed_when: false
+  when: librenms_manage_php_fpm | bool
+
+- name: Validate supported PHP runtime on managed web nodes
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_php_version_command.rc == 0
+      - (librenms_runtime_php_version_command.stdout | trim) in librenms_supported_php_versions
+    fail_msg: >-
+      PHP is unavailable or unsupported on {{ inventory_hostname }}.
+      Detected: {{ librenms_runtime_php_version_command.stdout | trim | default('unknown') }}.
+      Supported versions: {{ librenms_supported_php_versions | join(', ') }}.
+  when: librenms_manage_php_fpm | bool
+
+- name: Detect nginx runtime version on managed web nodes
+  ansible.builtin.command:
+    argv:
+      - nginx
+      - -v
+  register: librenms_runtime_nginx_version_command
+  changed_when: false
+  failed_when: false
+  when: librenms_manage_nginx | bool
+
+- name: Set detected nginx series
+  ansible.builtin.set_fact:
+    librenms_runtime_nginx_series: >-
+      {{
+        (
+          librenms_runtime_nginx_version_command.stdout
+          ~ ' '
+          ~ librenms_runtime_nginx_version_command.stderr
+        )
+        | regex_search('[0-9]+\\.[0-9]+')
+        | default('', true)
+      }}
+  when: librenms_manage_nginx | bool
+
+- name: Validate supported nginx runtime on managed web nodes
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_nginx_version_command.rc == 0
+      - librenms_runtime_nginx_series in librenms_supported_nginx_series
+    fail_msg: >-
+      nginx is unavailable or unsupported on {{ inventory_hostname }}.
+      Detected: {{ librenms_runtime_nginx_series | default('unknown') }}.
+      Supported series: {{ librenms_supported_nginx_series | join(', ') }}.
+  when: librenms_manage_nginx | bool

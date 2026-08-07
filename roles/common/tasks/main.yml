@@ -189,6 +189,10 @@
     name: "{{ librenms_base_packages + librenms_common_extra_packages }}"
     state: present
 
+- name: Validate supported operating-system and runtime versions
+  include_tasks: runtime_support.yml
+  when: librenms_runtime_support_enabled | bool
+
 - name: Detect hardware clock utility
   ansible.builtin.stat:
     path: /usr/sbin/hwclock

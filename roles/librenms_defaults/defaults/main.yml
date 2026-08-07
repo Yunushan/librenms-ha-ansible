@@ -1,6 +1,62 @@
 ---
 librenms_repo_url: https://github.com/librenms/librenms.git
 librenms_version: latest-stable
+# Runtime versions are checked after the OS packages are installed. Keep this
+# policy explicit so a distro upgrade cannot silently move the deployment onto
+# an untested interpreter, web server, or RRDTool series.
+librenms_runtime_support_enabled: true
+librenms_supported_php_versions:
+  - "8.2"
+  - "8.3"
+  - "8.4"
+  - "8.5"
+librenms_supported_python_versions:
+  - "3.10"
+  - "3.11"
+  - "3.12"
+  - "3.13"
+  - "3.14"
+librenms_supported_nginx_series:
+  - "1.18"
+  - "1.20"
+  - "1.22"
+  - "1.24"
+  - "1.26"
+  - "1.28"
+  - "1.30"
+  - "1.31"
+librenms_supported_rrdtool_series:
+  - "1.7"
+  - "1.8"
+  - "1.9"
+  - "1.10"
+librenms_supported_laravel_major_versions:
+  - 12
+  - 13
+librenms_supported_distribution_major_versions:
+  Ubuntu:
+    - "22"
+    - "24"
+    - "26"
+  Debian:
+    - "12"
+    - "13"
+  RedHat:
+    - "8"
+    - "9"
+    - "10"
+  "Red Hat Enterprise Linux":
+    - "8"
+    - "9"
+    - "10"
+  Rocky:
+    - "8"
+    - "9"
+    - "10"
+  AlmaLinux:
+    - "8"
+    - "9"
+    - "10"
 # Set this only after the inventory has the reviewed security and recovery
 # controls required for a real production declaration. The live readiness gate
 # then fails closed when TLS or the host firewall policy is missing.
@@ -812,6 +868,7 @@ librenms_support_tier_map:
   Ubuntu: primary
   Debian: primary
   Linux Mint: primary-ish
+  RedHat: strong-best-effort
   AlmaLinux: strong-best-effort
   Rocky: strong-best-effort
   Fedora: strong-best-effort

@@ -7,26 +7,50 @@ operator decision.
 ## Distribution Tiers
 
 Upstream LibreNMS installation examples currently cover Ubuntu 24.04, Ubuntu
-22.04, Debian 12, Debian 13, and CentOS 8. This repository extends beyond that
-with family mappings and override-friendly variables.
+22.04, Debian 12, Debian 13, and CentOS 8. This repository also validates the
+following production-targeted release families: Ubuntu 22.04/24.04/26.04,
+Debian 12/13, and Red Hat Enterprise Linux, Rocky Linux, and AlmaLinux 8/9/10.
+The package stream and vendor repository still need to be validated on the
+exact target image before a production declaration.
 
 | Distro family | Tier | Expected state | Before production |
 | --- | --- | --- | --- |
-| Ubuntu LTS | Primary | Best fit with upstream LibreNMS examples and package names. | Run the full HA command sequence and one node-maintenance drill. |
+| Ubuntu LTS (22.04, 24.04, 26.04) | Primary | Best fit with upstream LibreNMS examples and package names. | Run the full HA command sequence and one node-maintenance drill. |
 | Debian stable | Primary | Best fit with upstream LibreNMS examples and package names. | Run the full HA command sequence and one node-maintenance drill. |
 | Linux Mint | Primary-ish | Uses Debian-family logic. | Validate package names, PHP-FPM service name, and firewall behavior in a lab. |
-| AlmaLinux | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
-| Rocky Linux | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
+| RHEL / Red Hat Enterprise Linux (8, 9, 10) | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
+| AlmaLinux (8, 9, 10) | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
+| Rocky Linux (8, 9, 10) | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
 | Fedora | Strong best-effort | RedHat-family mappings exist, but package cadence is faster. | Pin package sources or test every upgrade in a lab first. |
 | CentOS / CentOS Stream | Best-effort | Package availability can vary by stream and mirror. | Expect repo and PHP tuning. Validate before every production use. |
 | Arch Linux / Manjaro | Best-effort | Package names and service defaults can drift quickly. | Treat as lab-first. Expect overrides. |
 | Alpine Linux | Best-effort | Package and service model differs from systemd-first paths. | Expect OpenRC/service overrides and more manual validation. |
 | Gentoo | Best-effort | Package atoms and service behavior vary by profile. | Expect package and service overrides. |
 
-New major distro releases should start as lab-only until the full checklist
+The common role validates the selected major release and the installed runtime
+versions during convergence. Set `librenms_runtime_support_enabled: false` only
+for a deliberate lab or vendor-supported exception; disabling it does not make
+an unsupported combination production-ready.
+
+New major distro releases should still start as lab-only until the full checklist
 passes. For example, an Ubuntu 24.04 to 26.04 upgrade should be tested one node
 at a time with the major-upgrade workflow before being treated as production
 ready.
+
+## Application Runtime Versions
+
+The role checks the versions actually installed on each managed host. It does
+not replace the distribution or LibreNMS package resolver, and it does not
+override Composer constraints. For an exact newer package, configure the
+vendor-supported repository before running the playbook.
+
+| Runtime | Supported production series | Requested target | Verification |
+| --- | --- | --- | --- |
+| nginx | 1.18 through 1.31 | 1.31.x | `nginx -v` during common convergence; the HAProxy web integration uses nginx 1.31.3. |
+| PHP | 8.2 through 8.5 | 8.5 | The PHP CLI runtime used alongside PHP-FPM is detected on managed web nodes. |
+| Python | 3.10 through 3.14 | 3.14 | Managed hosts are checked during convergence; CI also installs the pinned controller toolchain on Python 3.14. |
+| Laravel | 12 and 13 | 13 | The resolved `laravel/framework` version is read from the installed Composer autoloader. |
+| RRDtool | 1.7 through 1.10 | 1.10.x | The installed `rrdtool --version` series is checked before service configuration. |
 
 ## MariaDB Series
 

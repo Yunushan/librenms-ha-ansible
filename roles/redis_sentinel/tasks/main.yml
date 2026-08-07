@@ -661,10 +661,30 @@
   set_fact:
     librenms_redis_sentinel_consensus_query_nodes: >-
       {{
-        groups.get('librenms_redis', [])
-        | difference(librenms_inactive_inventory_nodes | default([]))
+        librenms_active_redis_nodes
+        | default(
+            groups.get('librenms_redis', [])
+            | difference(librenms_inactive_inventory_nodes | default([]))
+          )
         | list
       }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == (librenms_active_redis_nodes | last)
+
+- name: Validate Redis Sentinel consensus query node quorum
+  assert:
+    that:
+      - >-
+        (librenms_redis_sentinel_consensus_query_nodes | length)
+        >= (librenms_redis_quorum | int)
+    fail_msg: >-
+      Redis Sentinel quorum cannot be checked safely. The active query-node set
+      contains {{ librenms_redis_sentinel_consensus_query_nodes | length }} node(s),
+      but quorum requires {{ librenms_redis_quorum }}. Query nodes:
+      {{ librenms_redis_sentinel_consensus_query_nodes | join(', ') }}.
+      Check the librenms_redis inventory group and remove unintended entries
+      from maintenance_nodes or decommission_nodes.
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)
@@ -687,6 +707,13 @@
   register: librenms_redis_sentinel_consensus_queries
   changed_when: false
   failed_when: false
+  until:
+    - (librenms_redis_sentinel_consensus_queries.rc | default(1) | int) == 0
+    - >-
+      (librenms_redis_sentinel_consensus_queries.stdout_lines | default([]) | length)
+      >= 2
+  retries: "{{ librenms_redis_sentinel_consensus_retries | int }}"
+  delay: "{{ librenms_redis_sentinel_consensus_delay | int }}"
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == (librenms_active_redis_nodes | last)

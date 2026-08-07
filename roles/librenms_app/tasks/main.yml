@@ -1106,6 +1106,34 @@
   register: librenms_composer
   changed_when: "'Nothing to install' not in (librenms_composer.stdout | default(''))"
 
+- name: Detect resolved Laravel framework version
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - >-
+        require 'vendor/autoload.php';
+        echo \Illuminate\Foundation\Application::VERSION;
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_laravel_version_command
+  changed_when: false
+  failed_when: false
+
+- name: Validate resolved Laravel framework version
+  ansible.builtin.assert:
+    that:
+      - librenms_laravel_version_command.rc == 0
+      - >-
+        (librenms_laravel_version_command.stdout | trim | regex_search('^[0-9]+') | default('0', true) | int)
+        in librenms_supported_laravel_major_versions
+    fail_msg: >-
+      The resolved Laravel framework is unavailable or unsupported.
+      Detected: {{ librenms_laravel_version_command.stdout | trim | default('unknown') }}.
+      Supported major versions: {{ librenms_supported_laravel_major_versions | join(', ') }}.
+
 - name: Set PHP timezone
   lineinfile:
     path: "{{ item }}"

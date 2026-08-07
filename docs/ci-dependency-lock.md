@@ -11,7 +11,9 @@ lock that is missing hashes or no longer matches the direct pins.
 ## Refreshing the lock
 
 Use a disposable Python 3.12 virtual environment, review the resulting diff,
-then run the full quality gate:
+then run the full quality gate. The dedicated CI compatibility job also
+installs this lock on Python 3.14, so a refresh must remain installable on both
+controller runtimes:
 
 ```bash
 python3.12 -m venv .venv-lock
