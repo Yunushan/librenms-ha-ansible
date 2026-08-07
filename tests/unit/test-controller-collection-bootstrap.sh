@@ -6,6 +6,8 @@ launcher="${repo_root}/scripts/ansible-playbook.sh"
 ansible_config="${repo_root}/ansible.cfg"
 collection_requirements="${repo_root}/requirements.yml"
 collection_state_checker="${repo_root}/scripts/ansible-collection-state.py"
+controller_bootstrap="${repo_root}/scripts/bootstrap-controller.sh"
+controller_requirements="${repo_root}/requirements-ci.txt"
 python_bin="${PYTHON_BIN:-python3}"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "${temporary_dir}"' EXIT
@@ -32,6 +34,9 @@ fi
 
 grep -A1 -F -- '- name: community.general' "${collection_requirements}" \
     | grep -Eq 'version:[[:space:]]*11\.4\.8[[:space:]]*$'
+grep -Eq '^ansible-core==2\.21\.2[[:space:]\\]*$' "${controller_requirements}"
+grep -Fq 'Python 3.12 through 3.14 is required' "${controller_bootstrap}"
+grep -Fq -- '--require-hashes' "${controller_bootstrap}"
 
 fake_bin="${temporary_dir}/bin"
 call_log="${temporary_dir}/calls.log"
@@ -69,6 +74,11 @@ EOF
 
 cat > "${fake_bin}/ansible-playbook" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+    printf 'ansible-playbook [core %s]\n' "${FAKE_ANSIBLE_CORE_VERSION:-2.21.2}"
+    exit 0
+fi
+
 printf 'playbook' >> "${CALL_LOG}"
 printf ' <%s>' "$@" >> "${CALL_LOG}"
 printf '\nconfig <%s>\ncollections <%s>\n' \
@@ -149,6 +159,30 @@ fi
 
 if grep -Fq 'playbook' "${call_log}"; then
     echo "The launcher started a playbook after collection installation failed." >&2
+    exit 1
+fi
+
+: > "${call_log}"
+old_core_output="${temporary_dir}/old-core.out"
+set +e
+PATH="${fake_bin}:${PATH}" \
+FAKE_ANSIBLE_CORE_VERSION=2.19.7 \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml \
+    >"${old_core_output}" 2>&1
+launcher_rc=$?
+set -e
+
+if [ "${launcher_rc}" -eq 0 ]; then
+    echo "Expected the launcher to reject ansible-core older than 2.20." >&2
+    exit 1
+fi
+
+grep -Fq 'ansible-core 2.20.0+ is required' "${old_core_output}"
+if [ -s "${call_log}" ]; then
+    echo "The launcher performed work after rejecting an old ansible-core." >&2
     exit 1
 fi
 

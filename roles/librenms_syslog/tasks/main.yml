@@ -66,12 +66,16 @@
     - librenms_syslog_ufw_status is defined
     - librenms_syslog_ufw_status.rc == 0
 
-- name: Allow LibreNMS syslog UDP port with firewalld when active
-  ansible.posix.firewalld:
-    port: "{{ librenms_syslog_udp_port }}/udp"
-    permanent: true
-    immediate: true
-    state: enabled
+- name: Query LibreNMS syslog UDP port in persistent firewalld policy # noqa command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - "--query-port={{ librenms_syslog_udp_port }}/udp"
+  register: librenms_syslog_firewalld_udp_query
+  changed_when: false
+  failed_when: librenms_syslog_firewalld_udp_query.rc not in [0, 1]
   when:
     - librenms_syslog_manage_firewall | bool
     - librenms_syslog_listen_udp | bool
@@ -79,18 +83,46 @@
     - "'firewalld.service' in ansible_facts.services"
     - ansible_facts.services['firewalld.service'].state == 'running'
 
-- name: Allow LibreNMS syslog TCP port with firewalld when active
-  ansible.posix.firewalld:
-    port: "{{ librenms_syslog_tcp_port }}/tcp"
-    permanent: true
-    immediate: true
-    state: enabled
+- name: Allow LibreNMS syslog UDP port with firewalld when active # noqa command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - "--add-port={{ librenms_syslog_udp_port }}/udp"
+  when:
+    - librenms_syslog_firewalld_udp_query is not skipped
+    - librenms_syslog_firewalld_udp_query.rc == 1
+  notify: Reload firewalld
+
+- name: Query LibreNMS syslog TCP port in persistent firewalld policy # noqa command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - "--query-port={{ librenms_syslog_tcp_port }}/tcp"
+  register: librenms_syslog_firewalld_tcp_query
+  changed_when: false
+  failed_when: librenms_syslog_firewalld_tcp_query.rc not in [0, 1]
   when:
     - librenms_syslog_manage_firewall | bool
     - librenms_syslog_listen_tcp | bool
     - ansible_os_family == 'RedHat'
     - "'firewalld.service' in ansible_facts.services"
     - ansible_facts.services['firewalld.service'].state == 'running'
+
+- name: Allow LibreNMS syslog TCP port with firewalld when active # noqa command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - "--add-port={{ librenms_syslog_tcp_port }}/tcp"
+  when:
+    - librenms_syslog_firewalld_tcp_query is not skipped
+    - librenms_syslog_firewalld_tcp_query.rc == 1
+  notify: Reload firewalld
 
 - name: Check rsyslog runtime user
   getent:
@@ -153,6 +185,88 @@
       {{ librenms_syslog_php_binary }} does not exist.
       Set librenms_syslog_php_binary to the PHP CLI path on this host.
   when: not (librenms_syslog_php_binary_stat.stat.exists | default(false))
+
+- name: Ensure the SELinux-compatible rsyslog helper directory exists
+  file:
+    path: "{{ librenms_syslog_selinux_wrapper_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: librenms_syslog_manage_selinux | bool
+
+- name: Deploy the SELinux-compatible LibreNMS syslog helper
+  template:
+    src: librenms-syslog-wrapper.sh.j2
+    dest: "{{ librenms_syslog_selinux_wrapper_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart rsyslog
+  when: librenms_syslog_manage_selinux | bool
+
+- name: Restore the vendor SELinux context on the LibreNMS syslog helper
+  command:
+    argv:
+      - restorecon
+      - -F
+      - "{{ librenms_syslog_selinux_wrapper_path }}"
+  register: librenms_syslog_selinux_wrapper_restorecon
+  changed_when: >-
+    (librenms_syslog_selinux_wrapper_restorecon.stdout | default('') | trim | length) > 0
+  when: librenms_syslog_manage_selinux | bool
+
+- name: Verify the LibreNMS syslog helper has the vendor SELinux context
+  command:
+    argv:
+      - matchpathcon
+      - -V
+      - "{{ librenms_syslog_selinux_wrapper_path }}"
+  changed_when: false
+  when: librenms_syslog_manage_selinux | bool
+
+- name: Persist the SELinux context for the rsyslog queue # noqa command-instead-of-module
+  ansible.builtin.shell: |
+    set -eu
+    target={{ (librenms_syslog_action_queue_spool_dir ~ '(/.*)?') | quote }}
+    setype=syslogd_var_lib_t
+    current="$(
+      semanage fcontext -l -C |
+        awk -v target="${target}" '$1 == target { print $NF; exit }'
+    )"
+
+    case "${current}" in
+      *:"${setype}":*) exit 0 ;;
+    esac
+
+    if [ -n "${current}" ]; then
+      semanage fcontext -m -t "${setype}" "${target}"
+    else
+      semanage fcontext -a -t "${setype}" "${target}"
+    fi
+    printf '%s\n' LIBRENMS_SELINUX_FCONTEXT_CHANGED=1
+  args:
+    executable: /bin/bash
+  register: librenms_syslog_queue_fcontext
+  changed_when: >-
+    'LIBRENMS_SELINUX_FCONTEXT_CHANGED=1'
+    in (librenms_syslog_queue_fcontext.stdout | default(''))
+  when:
+    - librenms_syslog_manage_selinux | bool
+    - librenms_syslog_action_queue_enabled | bool
+
+- name: Apply the SELinux context to the rsyslog queue
+  command:
+    argv:
+      - restorecon
+      - -RF
+      - "{{ librenms_syslog_action_queue_spool_dir }}"
+  register: librenms_syslog_queue_restorecon
+  changed_when: >-
+    (librenms_syslog_queue_restorecon.stdout | default('') | trim | length) > 0
+  when:
+    - librenms_syslog_manage_selinux | bool
+    - librenms_syslog_action_queue_enabled | bool
 
 - name: Check rsyslog AppArmor profile exists
   stat:

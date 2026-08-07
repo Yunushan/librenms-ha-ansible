@@ -345,7 +345,7 @@
 - name: Query local Redis replication state
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 6379 INFO replication
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379 INFO replication
   environment:
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
   register: librenms_redis_replication_state
@@ -357,7 +357,7 @@
 - name: Promote configured Redis master when needed
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 6379 REPLICAOF NO ONE
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379 REPLICAOF NO ONE
   environment:
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
   register: librenms_redis_promote_configured_master
@@ -371,7 +371,7 @@
 - name: Point Redis replicas at the configured master
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 6379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379
     REPLICAOF {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) | quote }} 6379
   environment:
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
@@ -391,7 +391,7 @@
 - name: Verify Redis server can persist replication configuration changes
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 6379 CONFIG REWRITE
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379 CONFIG REWRITE
   environment:
     REDISCLI_AUTH: "{{ librenms_redis_password }}"
   register: librenms_redis_config_rewrite
@@ -522,7 +522,7 @@
 - name: Verify Redis Sentinel can persist configuration changes
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 26379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -542,7 +542,7 @@
 - name: Reset Redis Sentinel state for the managed service
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 26379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -559,7 +559,7 @@
 - name: Query Redis Sentinel for the current master endpoint
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 26379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -605,7 +605,7 @@
 
     while [ "${attempt}" -le "${attempts}" ]; do
       result=$(
-        redis-cli \
+        {{ librenms_redis_cli_binary }} \
           -h {{ librenms_redis_sentinel_master_host_effective | quote }} \
           -p {{ librenms_redis_sentinel_master_port_effective | quote }} \
         {% if librenms_redis_username | length > 0 %}
@@ -661,16 +661,21 @@
   set_fact:
     librenms_redis_sentinel_consensus_query_nodes: >-
       {{
-        librenms_active_redis_nodes
-        | default(
-            groups.get('librenms_redis', [])
-            | difference(librenms_inactive_inventory_nodes | default([]))
-          )
+        groups.get('librenms_redis', [])
+        | difference(librenms_inactive_inventory_nodes | default([]))
         | list
+      }}
+    librenms_redis_sentinel_consensus_controller_host: >-
+      {{
+        (
+          groups.get('librenms_redis', [])
+          | difference(librenms_inactive_inventory_nodes | default([]))
+          | list
+        )
+        | last
       }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
 
 - name: Validate Redis Sentinel consensus query node quorum
   assert:
@@ -687,12 +692,12 @@
       from maintenance_nodes or decommission_nodes.
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Query reachable Redis Sentinels for a shared master endpoint
   no_log: true
   command: >-
-    redis-cli
+    {{ librenms_redis_cli_binary }}
     -h 127.0.0.1
     -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
@@ -716,7 +721,7 @@
   delay: "{{ librenms_redis_sentinel_consensus_delay | int }}"
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Initialize Redis Sentinel consensus reports
   set_fact:
@@ -724,7 +729,7 @@
     librenms_redis_sentinel_consensus_query_failures: []
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Collect reachable Redis Sentinel consensus reports
   set_fact:
@@ -736,7 +741,7 @@
   loop: "{{ librenms_redis_sentinel_consensus_queries.results | default([]) }}"
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - item.rc == 0
     - (item.stdout_lines | default([]) | length) >= 2
 
@@ -758,7 +763,7 @@
   loop: "{{ librenms_redis_sentinel_consensus_queries.results | default([]) }}"
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - >-
       (
         (item.rc | default(1)) != 0
@@ -775,7 +780,7 @@
       }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Verify Redis Sentinels agree on one master
   assert:
@@ -797,7 +802,7 @@
       {{ librenms_redis_sentinel_consensus_query_failures | default([]) }}.
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Set Redis Sentinel consensus endpoint
   set_fact:
@@ -807,7 +812,7 @@
       {{ (librenms_redis_sentinel_consensus_masters | first).split(':')[1] }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Verify Redis Sentinel consensus master accepts cache writes
   no_log: true
@@ -820,7 +825,7 @@
 
     while [ "${attempt}" -le "${attempts}" ]; do
       result=$(
-        redis-cli \
+        {{ librenms_redis_cli_binary }} \
           -h {{ librenms_redis_sentinel_consensus_master_host | quote }} \
           -p {{ librenms_redis_sentinel_consensus_master_port | quote }} \
         {% if librenms_redis_username | length > 0 %}
@@ -850,7 +855,7 @@
   failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Initialize Redis Sentinel consensus repair state
   set_fact:
@@ -859,7 +864,7 @@
     librenms_redis_sentinel_repair_write_ok: false
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
 - name: Set Redis Sentinel configured repair endpoint
   set_fact:
@@ -870,33 +875,41 @@
     librenms_redis_sentinel_repair_master_port: "6379"
     librenms_redis_sentinel_repair_expected_master: >-
       {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }}:6379
-    librenms_redis_sentinel_repair_non_master_nodes: "{{ librenms_active_redis_nodes | difference([librenms_redis_master_host]) }}"
+    librenms_redis_sentinel_repair_non_master_nodes: >-
+      {{
+        librenms_redis_sentinel_consensus_query_nodes
+        | difference([librenms_redis_master_host])
+      }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
     - librenms_redis_sentinel_enforce_configured_master | bool
 
 - name: Set Redis Sentinel repair replica nodes
   set_fact:
-    librenms_redis_sentinel_repair_replica_nodes: "{{ librenms_redis_sentinel_repair_non_master_nodes | intersect(ansible_play_hosts_all) }}"
+    librenms_redis_sentinel_repair_replica_nodes: >-
+      {{
+        librenms_redis_sentinel_repair_non_master_nodes
+        | intersect(ansible_play_hosts_all)
+      }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
     - librenms_redis_sentinel_enforce_configured_master | bool
 
 - name: Repair Redis Sentinel consensus master after failed write check
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
     - librenms_redis_sentinel_enforce_configured_master | bool
   block:
     - name: Promote configured Redis master after failed consensus write
       no_log: true
       command: >-
-        redis-cli -h 127.0.0.1 -p 6379
+        {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379
         REPLICAOF NO ONE
       environment:
         REDISCLI_AUTH: "{{ librenms_redis_password }}"
@@ -910,7 +923,7 @@
     - name: Point Redis replicas at configured master after failed consensus write
       no_log: true
       command: >-
-        redis-cli -h 127.0.0.1 -p 6379
+        {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379
         REPLICAOF {{ librenms_redis_sentinel_repair_master_addr | quote }}
         {{ librenms_redis_sentinel_repair_master_port | quote }}
       environment:
@@ -927,7 +940,7 @@
     - name: Reset Redis Sentinel state after failed consensus write
       no_log: true
       command: >-
-        redis-cli -h 127.0.0.1 -p 26379
+        {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
         {% if librenms_redis_sentinel_username | length > 0 %}
         --user {{ librenms_redis_sentinel_username | quote }}
         {% endif %}
@@ -945,7 +958,7 @@
     - name: Flush Redis Sentinel config after failed consensus write
       no_log: true
       command: >-
-        redis-cli -h 127.0.0.1 -p 26379
+        {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
         {% if librenms_redis_sentinel_username | length > 0 %}
         --user {{ librenms_redis_sentinel_username | quote }}
         {% endif %}
@@ -972,7 +985,7 @@
 
         while [ "${attempt}" -le "${attempts}" ]; do
           mapfile -t lines < <(
-            redis-cli \
+            {{ librenms_redis_cli_binary }} \
               -h 127.0.0.1 \
               -p 26379 \
         {% if librenms_redis_sentinel_username | length > 0 %}
@@ -1018,7 +1031,7 @@
 
         while [ "${attempt}" -le "${attempts}" ]; do
           result=$(
-            redis-cli \
+            {{ librenms_redis_cli_binary }} \
               -h {{ librenms_redis_sentinel_repair_master_addr | quote }} \
               -p {{ librenms_redis_sentinel_repair_master_port | quote }} \
         {% if librenms_redis_username | length > 0 %}
@@ -1070,7 +1083,7 @@
       {{ librenms_redis_sentinel_repair_master_port }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - librenms_redis_sentinel_repair_consensus_ok | default(false) | bool
     - librenms_redis_sentinel_repair_write_ok | default(false) | bool
 
@@ -1099,7 +1112,7 @@
       LibreNMS app role will also re-enable and start librenms-scheduler.timer.
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
     - >-
       not (
@@ -1115,7 +1128,7 @@
       librenms_redis_sentinel_consensus_master_port }}.
   when:
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname == (librenms_active_redis_nodes | last)
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
     - >-
       (librenms_redis_sentinel_consensus_write_check.rc | default(1) | int) == 0
       or

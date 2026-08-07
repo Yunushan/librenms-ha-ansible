@@ -281,14 +281,14 @@
     set +e
     {
       echo "$ redis PING"
-      redis-cli -h 127.0.0.1 -p 6379 \
+      {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379 \
       {% if librenms_redis_username | length > 0 %}
         --user {{ librenms_redis_username | quote }} \
       {% endif %}
         PING || true
       echo
       echo "$ redis INFO replication"
-      redis-cli -h 127.0.0.1 -p 6379 \
+      {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 6379 \
       {% if librenms_redis_username | length > 0 %}
         --user {{ librenms_redis_username | quote }} \
       {% endif %}
@@ -310,7 +310,7 @@
     {
       echo
       echo "$ sentinel master"
-      redis-cli -h 127.0.0.1 -p 26379 \
+      {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379 \
       {% if librenms_redis_sentinel_username | length > 0 %}
         --user {{ librenms_redis_sentinel_username | quote }} \
       {% endif %}
@@ -318,7 +318,7 @@
         {{ librenms_redis_sentinel_service | quote }} || true
       echo
       echo "$ sentinel sentinels"
-      redis-cli -h 127.0.0.1 -p 26379 \
+      {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379 \
       {% if librenms_redis_sentinel_username | length > 0 %}
         --user {{ librenms_redis_sentinel_username | quote }} \
       {% endif %}
@@ -326,7 +326,7 @@
         {{ librenms_redis_sentinel_service | quote }} || true
       echo
       echo "$ sentinel replicas"
-      redis-cli -h 127.0.0.1 -p 26379 \
+      {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379 \
       {% if librenms_redis_sentinel_username | length > 0 %}
         --user {{ librenms_redis_sentinel_username | quote }} \
       {% endif %}

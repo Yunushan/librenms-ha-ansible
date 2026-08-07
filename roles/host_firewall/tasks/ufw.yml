@@ -1,0 +1,109 @@
+---
+- name: Install UFW for the managed host-firewall policy
+  ansible.builtin.package:
+    name: ufw
+    state: present
+
+- name: Allow management SSH before enabling UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item }}"
+    to_port: "{{ librenms_host_firewall_ssh_port }}"
+    proto: tcp
+    comment: LibreNMS HA management SSH
+  loop: "{{ librenms_host_firewall_management_sources }}"
+
+- name: Allow trusted cluster CIDRs before enabling UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item }}"
+    comment: LibreNMS HA trusted cluster network
+  loop: "{{ librenms_host_firewall_cluster_sources }}"
+
+- name: Allow LibreNMS web access to load-balancer hosts with UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item.0 }}"
+    to_port: "{{ item.1 }}"
+    proto: tcp
+    comment: LibreNMS web access
+  loop: >-
+    {{
+      librenms_host_firewall_web_sources
+      | product(
+          [librenms_haproxy_web_port]
+          + ([librenms_haproxy_https_port] if librenms_haproxy_tls_enabled | bool else [])
+        )
+      | list
+    }}
+  when: inventory_hostname in groups.get('lb_nodes', [])
+
+- name: Allow VRRP from trusted cluster CIDRs with UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item }}"
+    proto: vrrp
+    comment: LibreNMS HA VRRP
+  loop: "{{ librenms_host_firewall_cluster_sources }}"
+  when:
+    - inventory_hostname in groups.get('lb_nodes', [])
+    - librenms_vip_enabled | bool
+
+- name: Allow network-device syslog UDP sources with UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item }}"
+    to_port: "{{ librenms_syslog_udp_port }}"
+    proto: udp
+    comment: LibreNMS syslog UDP
+  loop: "{{ librenms_host_firewall_syslog_sources }}"
+  when:
+    - librenms_syslog_enabled | bool
+    - librenms_syslog_listen_udp | bool
+
+- name: Allow network-device syslog TCP sources with UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item }}"
+    to_port: "{{ librenms_syslog_tcp_port }}"
+    proto: tcp
+    comment: LibreNMS syslog TCP
+  loop: "{{ librenms_host_firewall_syslog_sources }}"
+  when:
+    - librenms_syslog_enabled | bool
+    - librenms_syslog_listen_tcp | bool
+
+- name: Allow SNMP sources for managed local agents with UFW
+  community.general.ufw:
+    rule: allow
+    direction: in
+    from_ip: "{{ item }}"
+    to_port: "161"
+    proto: udp
+    comment: LibreNMS local SNMP agent
+  loop: "{{ librenms_host_firewall_snmp_sources }}"
+  when: librenms_manage_local_snmpd | bool
+
+- name: Set UFW default incoming policy to deny
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
+- name: Set UFW default outgoing policy to allow
+  community.general.ufw:
+    default: allow
+    direction: outgoing
+
+- name: Set UFW logging level
+  community.general.ufw:
+    logging: "{{ librenms_host_firewall_logging }}"
+
+- name: Enable source-restricted UFW policy
+  community.general.ufw:
+    state: enabled

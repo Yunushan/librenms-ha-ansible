@@ -226,17 +226,29 @@
     - librenms_mode == 'ha'
     - librenms_production_readiness_require_recent_failover_evidence | bool
 
+- name: Resolve production host-firewall backend
+  ansible.builtin.set_fact:
+    librenms_production_host_firewall_backend: >-
+      {{
+        ('ufw' if ansible_os_family == 'Debian' else 'firewalld')
+        if librenms_host_firewall_backend == 'auto'
+        else librenms_host_firewall_backend
+      }}
+  when: librenms_production_readiness_require_host_firewall | bool
+
 - name: Inspect UFW state for the managed host-firewall policy
-  command:
+  ansible.builtin.command:
     argv:
       - ufw
       - status
   register: librenms_production_ufw_status
   changed_when: false
-  when: librenms_production_readiness_require_host_firewall | bool
+  when:
+    - librenms_production_readiness_require_host_firewall | bool
+    - librenms_production_host_firewall_backend == 'ufw'
 
 - name: Require active UFW when the managed host-firewall policy is enabled
-  assert:
+  ansible.builtin.assert:
     that:
       - librenms_production_ufw_status.rc == 0
       - librenms_production_ufw_status.stdout is search('Status: active')
@@ -245,7 +257,34 @@
       librenms_manage_host_firewall is enabled. Run playbooks/firewall.yml
       after reviewing the explicit management, cluster, web, syslog, and SNMP
       source CIDRs.
-  when: librenms_production_readiness_require_host_firewall | bool
+  when:
+    - librenms_production_readiness_require_host_firewall | bool
+    - librenms_production_host_firewall_backend == 'ufw'
+
+- name: Inspect firewalld state for the managed host-firewall policy
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --state
+  register: librenms_production_firewalld_status
+  changed_when: false
+  when:
+    - librenms_production_readiness_require_host_firewall | bool
+    - librenms_production_host_firewall_backend == 'firewalld'
+
+- name: Require active firewalld when the managed host-firewall policy is enabled
+  ansible.builtin.assert:
+    that:
+      - librenms_production_firewalld_status.rc == 0
+      - librenms_production_firewalld_status.stdout | trim == 'running'
+    fail_msg: >-
+      firewalld is not active on {{ inventory_hostname }} although
+      librenms_manage_host_firewall is enabled. Run playbooks/firewall.yml
+      after reviewing the explicit management, cluster, web, syslog, and SNMP
+      source CIDRs.
+  when:
+    - librenms_production_readiness_require_host_firewall | bool
+    - librenms_production_host_firewall_backend == 'firewalld'
 
 - name: Inspect scheduled daily backup timer health
   command:
@@ -524,20 +563,30 @@
     - librenms_mode == 'ha'
     - librenms_daily_global_lock_backend == 'shared_file'
 
-- name: Require a GlusterFS-backed HA maintenance lock
+- name: Require a shared-filesystem-backed HA maintenance lock
   assert:
     that:
-      - librenms_production_shared_lock_filesystem.stdout | trim == 'fuse.glusterfs'
+      - >-
+        (
+          librenms_rrd_mode == 'glusterfs'
+          and librenms_production_shared_lock_filesystem.stdout | trim == 'fuse.glusterfs'
+        )
+        or
+        (
+          librenms_rrd_mode == 'external'
+          and librenms_production_shared_lock_filesystem.stdout | trim in ['nfs', 'nfs4']
+        )
     fail_msg: >-
-      The HA maintenance lock must live on the shared GlusterFS mount. It is
-      currently on {{ librenms_production_shared_lock_filesystem.stdout | trim
+      The HA maintenance lock must live on the configured shared RRD
+      filesystem. Mode {{ librenms_rrd_mode }} currently reports
+      {{ librenms_production_shared_lock_filesystem.stdout | trim
       | default('an unavailable filesystem', true) }}.
   run_once: true
   when:
     - librenms_mode == 'ha'
     - librenms_daily_global_lock_backend == 'shared_file'
 
-- name: Verify daily-update canary state uses the shared GlusterFS mount
+- name: Verify daily-update canary state uses the shared RRD mount
   command:
     argv:
       - findmnt
@@ -553,20 +602,30 @@
     - librenms_mode == 'ha'
     - librenms_daily_canary_enabled | bool
 
-- name: Require a GlusterFS-backed daily-update canary state
+- name: Require a shared-filesystem-backed daily-update canary state
   assert:
     that:
-      - librenms_production_canary_state_filesystem.stdout | trim == 'fuse.glusterfs'
+      - >-
+        (
+          librenms_rrd_mode == 'glusterfs'
+          and librenms_production_canary_state_filesystem.stdout | trim == 'fuse.glusterfs'
+        )
+        or
+        (
+          librenms_rrd_mode == 'external'
+          and librenms_production_canary_state_filesystem.stdout | trim in ['nfs', 'nfs4']
+        )
     fail_msg: >-
-      The daily-update canary state must live on the shared GlusterFS mount.
-      It is currently on {{ librenms_production_canary_state_filesystem.stdout
-      | trim | default('an unavailable filesystem', true) }}.
+      The daily-update canary state must live on the configured shared RRD
+      filesystem. Mode {{ librenms_rrd_mode }} currently reports
+      {{ librenms_production_canary_state_filesystem.stdout | trim
+      | default('an unavailable filesystem', true) }}.
   run_once: true
   when:
     - librenms_mode == 'ha'
     - librenms_daily_canary_enabled | bool
 
-- name: Verify each HA web node has a GlusterFS-backed RRD directory
+- name: Verify each HA web node has a shared-filesystem-backed RRD directory
   command:
     argv:
       - findmnt
@@ -574,26 +633,36 @@
       - -o
       - FSTYPE
       - --target
-      - "{{ librenms_gluster_mountpoint }}"
+      - "{{ librenms_install_dir }}/rrd"
   register: librenms_production_rrd_filesystem
   changed_when: false
   when:
     - librenms_mode == 'ha'
-    - librenms_rrd_mode == 'glusterfs'
+    - librenms_rrd_mode in ['glusterfs', 'external']
     - inventory_hostname in librenms_production_active_web_nodes
 
-- name: Require a GlusterFS-backed RRD directory on every HA web node
+- name: Require a shared-filesystem-backed RRD directory on every HA web node
   assert:
     that:
-      - librenms_production_rrd_filesystem.stdout | trim == 'fuse.glusterfs'
+      - >-
+        (
+          librenms_rrd_mode == 'glusterfs'
+          and librenms_production_rrd_filesystem.stdout | trim == 'fuse.glusterfs'
+        )
+        or
+        (
+          librenms_rrd_mode == 'external'
+          and librenms_production_rrd_filesystem.stdout | trim in ['nfs', 'nfs4']
+        )
     fail_msg: >-
       The LibreNMS RRD directory on {{ inventory_hostname }} must be mounted
-      from GlusterFS. {{ librenms_gluster_mountpoint }} currently reports
+      from the configured shared storage. {{ librenms_install_dir }}/rrd
+      in mode {{ librenms_rrd_mode }} currently reports
       {{ librenms_production_rrd_filesystem.stdout | trim
       | default('an unavailable filesystem', true) }}.
   when:
     - librenms_mode == 'ha'
-    - librenms_rrd_mode == 'glusterfs'
+    - librenms_rrd_mode in ['glusterfs', 'external']
     - inventory_hostname in librenms_production_active_web_nodes
 
 - name: Schedule a simultaneous shared maintenance lock probe
@@ -834,7 +903,7 @@
 - name: Query every Redis Sentinel for its master endpoint
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 26379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -912,7 +981,7 @@
 - name: Require Redis Sentinel consensus master to accept a cache write
   no_log: true
   command: >-
-    redis-cli -h {{ librenms_production_redis_master_host | quote }}
+    {{ librenms_redis_cli_binary }} -h {{ librenms_production_redis_master_host | quote }}
     -p {{ librenms_production_redis_master_port | quote }}
     {% if librenms_redis_username | length > 0 %}
     --user {{ librenms_redis_username | quote }}

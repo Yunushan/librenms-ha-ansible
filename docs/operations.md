@@ -1106,10 +1106,10 @@ librenms_db_mode: local
 librenms_mariadb_upstream_series: "12.3"
 ```
 
-The upstream repository mode is Debian-family only. On RedHat, Arch, Alpine,
-Gentoo, and other best-effort families, use the distribution package mapping or
-provide a tested site-specific package/repository override; this role does not
-pretend that MariaDB Community's Debian repository applies to those systems.
+The upstream repository mode is Debian-family only. On RedHat and other
+non-Debian families, use the distribution package mapping or provide a tested
+site-specific package/repository override; this role does not pretend that
+MariaDB Community's Debian repository applies to those systems.
 
 Do not use `12.3` as an in-place Galera major upgrade. For any major-series
 change, take an off-cluster backup, test restore, drain the affected node, and

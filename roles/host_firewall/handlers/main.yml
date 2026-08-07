@@ -1,9 +1,4 @@
 ---
-- name: Restart rsyslog
-  service:
-    name: "{{ librenms_syslog_service_name }}"
-    state: restarted
-
 - name: Reload firewalld
   ansible.builtin.command:
     argv:

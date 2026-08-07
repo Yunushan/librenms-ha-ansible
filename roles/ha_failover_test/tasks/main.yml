@@ -595,7 +595,7 @@
 - name: Query Redis Sentinel master before Redis master failover
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 26379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -661,7 +661,7 @@
     - name: Wait for Redis Sentinel to report a new master
       no_log: true
       command: >-
-        redis-cli -h 127.0.0.1 -p 26379
+        {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
         {% if librenms_redis_sentinel_username | length > 0 %}
         --user {{ librenms_redis_sentinel_username | quote }}
         {% endif %}
@@ -692,7 +692,7 @@
     - name: Query every Redis Sentinel after master failover
       no_log: true
       command: >-
-        redis-cli -h 127.0.0.1 -p 26379
+        {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
         {% if librenms_redis_sentinel_username | length > 0 %}
         --user {{ librenms_redis_sentinel_username | quote }}
         {% endif %}
@@ -773,7 +773,7 @@
     - name: Verify new Redis master accepts writes
       no_log: true
       command: >-
-        redis-cli
+        {{ librenms_redis_cli_binary }}
         -h {{ librenms_failover_test_redis_new_master_host | quote }}
         -p {{ librenms_failover_test_redis_new_master_port | quote }}
         {% if librenms_redis_username | length > 0 %}
@@ -815,7 +815,7 @@
     - name: Require restored Redis node to accept connections
       no_log: true
       command: >-
-        redis-cli -h {{ (hostvars[librenms_failover_test_redis_master_inventory_host].ansible_host
+        {{ librenms_redis_cli_binary }} -h {{ (hostvars[librenms_failover_test_redis_master_inventory_host].ansible_host
         | default(librenms_failover_test_redis_master_inventory_host)) | quote }}
         -p 6379
         {% if librenms_redis_username | length > 0 %}

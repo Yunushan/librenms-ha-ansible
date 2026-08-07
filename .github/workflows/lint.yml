@@ -9,6 +9,40 @@ permissions:
   contents: read
 
 jobs:
+  platform-package-matrix:
+    name: platform-packages (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-26.04
+            image: ubuntu:26.04
+          - name: rocky-8
+            image: rockylinux/rockylinux:8
+          - name: rocky-9
+            image: rockylinux/rockylinux:9
+          - name: rocky-10
+            image: rockylinux/rockylinux:10
+          - name: almalinux-8
+            image: almalinux:8
+          - name: almalinux-9
+            image: almalinux:9
+          - name: almalinux-10
+            image: almalinux:10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Resolve supported platform package set
+        run: >-
+          docker run --rm
+          -v "$PWD:/workspace:ro"
+          "${{ matrix.image }}"
+          bash /workspace/tests/platform/package-smoke.sh
+
   python-314-runtime:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -74,6 +108,9 @@ jobs:
       - name: Test runtime support guardrails
         run: make test-runtime-support-guardrails
 
+      - name: Test platform support guardrails
+        run: make test-platform-support-guardrails
+
       - name: Test daily maintenance drain guardrails
         run: make test-daily-maintenance-guardrails
 
@@ -103,7 +140,7 @@ jobs:
 
   controller-image:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -114,6 +151,12 @@ jobs:
 
       - name: Run quality gates in controller image
         run: docker compose run --rm --no-deps ansible make ci
+
+      - name: Exercise managed-host runtime compatibility
+        run: |
+          bash tests/platform/managed-runtime-smoke.sh ubuntu:26.04 3.14 ubuntu-26
+          bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:8 3.11 rocky-8
+          bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:10 3.12 rocky-10
 
   haproxy-web-failover:
     runs-on: ubuntu-24.04

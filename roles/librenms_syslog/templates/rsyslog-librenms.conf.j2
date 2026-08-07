@@ -47,7 +47,7 @@ template(name="librenms" type="list") {
 ruleset(name="librenms_remote") {
     action(
         type="omprog"
-        binary="{{ librenms_syslog_php_binary }} {{ librenms_install_dir }}/syslog.php"
+        binary="{{ librenms_syslog_omprog_binary }}"
         template="librenms"
 {% if librenms_syslog_action_queue_enabled | bool %}
         queue.type="{{ librenms_syslog_action_queue_type }}"

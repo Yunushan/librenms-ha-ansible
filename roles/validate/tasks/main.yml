@@ -57,7 +57,7 @@
 - name: Check Redis Sentinel master endpoint
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 26379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -82,7 +82,7 @@
 - name: Check Redis Sentinel master write path
   no_log: true
   command: >-
-    redis-cli
+    {{ librenms_redis_cli_binary }}
     -h {{ redis_sentinel_master_host | quote }}
     -p {{ redis_sentinel_master_port | quote }}
     {% if librenms_redis_username | length > 0 %}

@@ -1,6 +1,6 @@
 [Unit]
 Wants=network-online.target remote-fs.target
-After=network-online.target remote-fs.target glusterd.service
+After=network-online.target remote-fs.target{% if librenms_rrd_mode == 'glusterfs' %} glusterd.service{% endif %}
 RequiresMountsFor={{ librenms_rrdcached_base_path }}
 StartLimitIntervalSec=300
 StartLimitBurst=6

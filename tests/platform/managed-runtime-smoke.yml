@@ -1,0 +1,43 @@
+---
+- name: Bootstrap the supported managed-host Python runtime
+  ansible.builtin.import_playbook: ../../playbooks/platform-bootstrap.yml
+
+- name: Verify the managed-host runtime and package manager
+  hosts: librenms_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Verify Ansible uses the managed Python runtime
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.python.executable == '/opt/librenms-ha-ansible/python/bin/python'
+          - >-
+            (
+              (ansible_facts.python.version.major | string)
+              ~ '.'
+              ~ (ansible_facts.python.version.minor | string)
+            ) == (librenms_platform_expected_python | string)
+        fail_msg: >-
+          Expected managed Python {{ librenms_platform_expected_python }} at
+          /opt/librenms-ha-ansible/python/bin/python, but Ansible reported
+          {{ ansible_facts.python }}.
+
+    - name: Exercise the target package manager through the managed runtime
+      ansible.builtin.package:
+        name: tree
+        state: present
+
+    - name: Verify managed Python dependencies
+      ansible.builtin.command:
+        argv:
+          - /opt/librenms-ha-ansible/python/bin/python
+          - -c
+          - import pymysql, redis
+      changed_when: false
+
+    - name: Verify the package-manager smoke package
+      ansible.builtin.command:
+        argv:
+          - tree
+          - --version
+      changed_when: false

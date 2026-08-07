@@ -870,12 +870,12 @@ def main() -> int:
         "Production hardening must be an explicit inventory declaration",
     )
     failures += require(
-        "roles/host_firewall/tasks/main.yml",
+        "roles/host_firewall/tasks/ufw.yml",
         "Allow management SSH before enabling UFW",
         "Host firewall policy must preserve management SSH before enabling UFW",
     )
     failures += require(
-        "roles/host_firewall/tasks/main.yml",
+        "roles/host_firewall/tasks/ufw.yml",
         "Set UFW default incoming policy to deny",
         "Host firewall policy must deny unapproved inbound traffic",
     )
@@ -883,6 +883,21 @@ def main() -> int:
         "roles/production_readiness/tasks/main.yml",
         "Require active UFW when the managed host-firewall policy is enabled",
         "Production readiness must verify an enabled host firewall remains active",
+    )
+    failures += require(
+        "roles/host_firewall/tasks/firewalld.yml",
+        "Allow management SSH before restricting firewalld",
+        "firewalld policy must preserve management SSH before restricting ingress",
+    )
+    failures += require(
+        "roles/host_firewall/tasks/firewalld.yml",
+        "Set firewalld zone target to DROP after allow rules exist",
+        "firewalld policy must deny unapproved inbound traffic",
+    )
+    failures += require(
+        "roles/production_readiness/tasks/main.yml",
+        "Require active firewalld when the managed host-firewall policy is enabled",
+        "Production readiness must verify managed firewalld remains active",
     )
     failures += require(
         "roles/production_readiness/tasks/main.yml",

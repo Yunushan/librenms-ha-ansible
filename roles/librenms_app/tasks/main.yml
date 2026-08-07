@@ -1061,7 +1061,18 @@
     - "{{ librenms_install_dir }}/bootstrap/cache"
     - "{{ librenms_install_dir }}/storage"
   when:
-    - not (librenms_rrd_mode == 'glusterfs' and item == (librenms_install_dir ~ '/rrd'))
+    - >-
+      not (
+        librenms_rrd_mode in ['glusterfs', 'external']
+        and item == (librenms_install_dir ~ '/rrd')
+      )
+
+- name: Apply persistent SELinux policy for LibreNMS
+  ansible.builtin.include_tasks: selinux.yml
+  when:
+    - ansible_os_family == 'RedHat'
+    - librenms_redhat_manage_selinux | bool
+    - ansible_selinux.status | default('disabled') == 'enabled'
 
 - name: Deploy LibreNMS HA RRD permission repair script
   template:
@@ -1991,7 +2002,7 @@
     mode: "0644"
   when: librenms_manage_logrotate | bool
 
-- name: Ensure rrdcached journal directory exists on Debian-family systems
+- name: Ensure rrdcached journal directory exists
   file:
     path: "{{ librenms_rrdcached_journal_path }}"
     state: directory
@@ -2000,7 +2011,6 @@
     mode: "0755"
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
 - name: Deploy rrdcached defaults on Debian-family systems
@@ -2027,7 +2037,6 @@
   when:
     - librenms_manage_rrdcached | bool
     - librenms_manage_rrdcached_systemd_override | bool
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
 - name: Deploy rrdcached systemd override
@@ -2042,7 +2051,6 @@
   when:
     - librenms_manage_rrdcached | bool
     - librenms_manage_rrdcached_systemd_override | bool
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
 - name: Reload systemd after rrdcached override change
@@ -2051,7 +2059,6 @@
   when:
     - librenms_manage_rrdcached | bool
     - librenms_manage_rrdcached_systemd_override | bool
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
     - librenms_rrdcached_systemd_override_deploy.changed | default(false)
 
@@ -2062,7 +2069,6 @@
     enabled: true
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
 - name: Restart rrdcached after managed config changes
@@ -2071,7 +2077,6 @@
     state: restarted
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
     - >-
       (librenms_rrdcached_defaults_deploy.changed | default(false))
@@ -2094,7 +2099,6 @@
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
     - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
 - name: Restart rrdcached when wildcard listener would block HAProxy VIP bind
@@ -2105,7 +2109,6 @@
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
     - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
     - librenms_rrdcached_wildcard_listener.rc | default(1) == 0
 
@@ -2125,7 +2128,6 @@
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
     - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
 - name: Validate rrdcached is not wildcard-bound in VIP mode
@@ -2141,10 +2143,9 @@
     - librenms_manage_rrdcached | bool
     - librenms_haproxy_rrdcached_enabled | bool
     - librenms_haproxy_rrdcached_port | int == librenms_rrdcached_bind_port | int
-    - ansible_os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
-- name: Disable rrdcached on ineligible Debian-family nodes
+- name: Disable rrdcached on ineligible nodes
   service:
     name: "{{ librenms_rrdcached_service_name }}"
     state: stopped
@@ -2152,7 +2153,6 @@
   failed_when: false
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - not (librenms_rrdcached_runs_on_host | bool)
 
 - name: Enable nginx

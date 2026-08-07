@@ -8,6 +8,7 @@ syntax gate that also handles custom YAML tags such as Ansible Vault tags.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,18 +39,19 @@ def construct_unknown(loader: IgnoreUnknownTagsLoader, node: yaml.Node) -> Any:
 IgnoreUnknownTagsLoader.add_constructor(None, construct_unknown)
 
 
-def should_skip(path: Path, exclude_dirs: set[str]) -> bool:
-    return any(part in exclude_dirs for part in path.parts)
-
-
 def iter_yaml_files(root: Path, exclude_dirs: set[str]) -> list[Path]:
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file()
-        and path.suffix in {".yml", ".yaml"}
-        and not should_skip(path.relative_to(root), exclude_dirs)
-    )
+    yaml_files: list[Path] = []
+
+    for current_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(name for name in dirnames if name not in exclude_dirs)
+        current_path = Path(current_root)
+        yaml_files.extend(
+            current_path / filename
+            for filename in filenames
+            if Path(filename).suffix in {".yml", ".yaml"}
+        )
+
+    return sorted(yaml_files)
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,8 +71,9 @@ def main() -> int:
     root = args.root.resolve()
     exclude_dirs = DEFAULT_EXCLUDE_DIRS | set(args.exclude_dir)
     failures: list[str] = []
+    yaml_files = iter_yaml_files(root, exclude_dirs)
 
-    for path in iter_yaml_files(root, exclude_dirs):
+    for path in yaml_files:
         try:
             with path.open("r", encoding="utf-8") as handle:
                 yaml.load(handle, Loader=IgnoreUnknownTagsLoader)
@@ -83,7 +86,7 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print(f"Parsed {len(iter_yaml_files(root, exclude_dirs))} YAML files successfully.")
+    print(f"Parsed {len(yaml_files)} YAML files successfully.")
     return 0
 
 

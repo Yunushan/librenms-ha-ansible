@@ -221,6 +221,20 @@
     - librenms_status_writable_path_drift_enabled | bool
     - inventory_hostname in librenms_status_active_nodes
 
+- name: Check shared RRD mount type and write access
+  ansible.builtin.shell: |
+    set -eu
+    findmnt -n -o FSTYPE --target {{ (librenms_install_dir ~ '/rrd') | quote }}
+    runuser -u {{ librenms_user | quote }} -- test -w {{ (librenms_install_dir ~ '/rrd') | quote }}
+  args:
+    executable: /bin/sh
+  register: librenms_status_shared_rrd_mount
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode in ['glusterfs', 'external']
+    - inventory_hostname in librenms_status_active_web_nodes
+
 - name: Probe maintenance node service activity
   command:
     argv:
@@ -647,7 +661,7 @@
 - name: Query Redis Sentinel master
   no_log: true
   command: >-
-    redis-cli -h 127.0.0.1 -p 26379
+    {{ librenms_redis_cli_binary }} -h 127.0.0.1 -p 26379
     {% if librenms_redis_sentinel_username | length > 0 %}
     --user {{ librenms_redis_sentinel_username | quote }}
     {% endif %}
@@ -755,6 +769,58 @@
         | default([])
         | length
       ) > 0
+  run_once: true
+
+- name: Record shared RRD mount degradation
+  set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' does not have a writable ' ~ librenms_rrd_mode
+            ~ ' RRD mount at ' ~ librenms_install_dir ~ '/rrd'
+            ~ ' (filesystem='
+            ~ (
+              hostvars[item].librenms_status_shared_rrd_mount.stdout
+              | default('unavailable', true)
+              | trim
+            )
+            ~ ', rc='
+            ~ (
+              hostvars[item].librenms_status_shared_rrd_mount.rc
+              | default(1)
+              | string
+            )
+            ~ ').'
+          ]
+      }}
+  loop: "{{ librenms_status_active_web_nodes }}"
+  when:
+    - librenms_rrd_mode in ['glusterfs', 'external']
+    - >-
+      (
+        hostvars[item].librenms_status_shared_rrd_mount.rc
+        | default(1)
+        | int
+      ) != 0
+      or
+      (
+        librenms_rrd_mode == 'glusterfs'
+        and (
+          hostvars[item].librenms_status_shared_rrd_mount.stdout
+          | default('')
+          | trim
+        ) != 'fuse.glusterfs'
+      )
+      or
+      (
+        librenms_rrd_mode == 'external'
+        and (
+          hostvars[item].librenms_status_shared_rrd_mount.stdout
+          | default('')
+          | trim
+        ) not in ['nfs', 'nfs4']
+      )
   run_once: true
 
 - name: Record maintenance node service activity degradation
@@ -1078,6 +1144,7 @@
       drift:
         checked_units: "{{ librenms_status_unit_drift_enabled | bool }}"
         checked_writable_paths: "{{ librenms_status_writable_path_drift_enabled | bool }}"
+        checked_shared_rrd_mount: "{{ librenms_rrd_mode in ['glusterfs', 'external'] }}"
         checked_maintenance_nodes: "{{ librenms_status_maintenance_drift_enabled | bool }}"
         maintenance_nodes: "{{ librenms_status_maintenance_nodes | default([]) }}"
       dispatcher_rows: "{{ librenms_status_dispatcher_db_rows | default([]) }}"
@@ -1128,6 +1195,13 @@
               | join('; ')
               | default('none', true)
             }}
+      {% endfor %}
+
+      Shared RRD mount:
+      {% for host in librenms_status_active_web_nodes %}
+        - {{ host }}:
+            filesystem: {{ hostvars[host].librenms_status_shared_rrd_mount.stdout | default('not-checked', true) | trim }}
+            writable_probe_rc: {{ hostvars[host].librenms_status_shared_rrd_mount.rc | default('not-checked') }}
       {% endfor %}
 
       Maintenance nodes:

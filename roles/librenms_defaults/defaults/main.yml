@@ -11,6 +11,7 @@ librenms_supported_php_versions:
   - "8.4"
   - "8.5"
 librenms_supported_python_versions:
+  - "3.9"
   - "3.10"
   - "3.11"
   - "3.12"
@@ -30,6 +31,8 @@ librenms_supported_rrdtool_series:
   - "1.8"
   - "1.9"
   - "1.10"
+librenms_supported_architectures:
+  - x86_64
 librenms_supported_laravel_major_versions:
   - 12
   - 13
@@ -57,6 +60,32 @@ librenms_supported_distribution_major_versions:
     - "8"
     - "9"
     - "10"
+librenms_supported_distribution_min_versions:
+  Ubuntu:
+    "22": "22.04"
+    "24": "24.04"
+    "26": "26.04"
+  RedHat:
+    "8": "8.10"
+    "9": "9.4"
+    "10": "10.0"
+  "Red Hat Enterprise Linux":
+    "8": "8.10"
+    "9": "9.4"
+    "10": "10.0"
+  Rocky:
+    "8": "8.10"
+    "9": "9.4"
+    "10": "10.0"
+  AlmaLinux:
+    "8": "8.10"
+    "9": "9.4"
+    "10": "10.0"
+librenms_managed_python_root: /opt/librenms-ha-ansible/python
+librenms_managed_python_binary: "{{ librenms_managed_python_root }}/bin/python"
+librenms_runtime_python_executable: "{{ librenms_managed_python_binary }}"
+librenms_managed_python_pymysql_version: "1.1.2"
+librenms_managed_python_redis_version: "5.0.7"
 # Set this only after the inventory has the reviewed security and recovery
 # controls required for a real production declaration. The live readiness gate
 # then fails closed when TLS or the host firewall policy is missing.
@@ -88,13 +117,17 @@ librenms_daily_global_lock_name: librenms_daily_maintenance
 librenms_daily_global_lock_timeout: 7200
 librenms_daily_global_lock_path: /usr/local/lib/librenms-ha/daily-global-lock.php
 # MariaDB named locks are local to a Galera member, so HA mode uses the shared
-# GlusterFS mount as the authoritative maintenance lock. The PHP helper keeps a
+# RRD filesystem as the authoritative maintenance lock. The PHP helper keeps a
 # per-database lock as a secondary guard for direct/manual invocations.
 librenms_daily_global_lock_backend: >-
-  {{ 'shared_file' if librenms_mode == 'ha' and librenms_rrd_mode == 'glusterfs' else 'database' }}
+  {{
+    'shared_file'
+    if librenms_mode == 'ha' and librenms_rrd_mode in ['glusterfs', 'external']
+    else 'database'
+  }}
 librenms_daily_global_lock_shared_file: >-
-  {{ librenms_gluster_mountpoint }}/.librenms-daily-maintenance.lock
-# In HA with shared GlusterFS storage, only the selected canary starts the
+  {{ librenms_install_dir }}/rrd/.librenms-daily-maintenance.lock
+# In HA with shared RRD storage, only the selected canary starts the
 # unattended update. Followers wait for the canary's same-day healthy marker
 # before they contend for the shared maintenance lock.
 librenms_daily_canary_enabled: >-
@@ -102,7 +135,7 @@ librenms_daily_canary_enabled: >-
 librenms_daily_canary_host: >-
   {{ (librenms_active_web_nodes | default([]) | first) | default('') }}
 librenms_daily_canary_state_path: >-
-  {{ librenms_gluster_mountpoint }}/.librenms-daily-canary-state
+  {{ librenms_install_dir }}/rrd/.librenms-daily-canary-state
 librenms_daily_canary_stabilization_seconds: 300
 librenms_daily_canary_wait_timeout: 7200
 librenms_daily_canary_wait_delay: 15
@@ -113,7 +146,8 @@ librenms_daily_ha_drain_delay: 15
 # explicit management and trusted-cluster CIDRs below fails before any UFW
 # policy change is made, which prevents accidental SSH lockout.
 librenms_manage_host_firewall: false
-librenms_host_firewall_backend: ufw
+librenms_host_firewall_backend: auto
+librenms_host_firewall_firewalld_zone: public
 librenms_host_firewall_management_sources: []
 librenms_host_firewall_cluster_sources: []
 librenms_host_firewall_web_sources: "{{ librenms_host_firewall_management_sources }}"
@@ -221,7 +255,15 @@ librenms_syslog_packages:
 librenms_syslog_service_name: rsyslog
 librenms_syslog_conf_path: /etc/rsyslog.d/30-librenms.conf
 librenms_syslog_php_binary: /usr/bin/php
+librenms_syslog_selinux_wrapper_path: /usr/libexec/rsyslog/librenms-syslog
+librenms_syslog_omprog_binary: >-
+  {{
+    librenms_syslog_selinux_wrapper_path
+    if ansible_os_family == 'RedHat'
+    else librenms_syslog_php_binary ~ ' ' ~ librenms_install_dir ~ '/syslog.php'
+  }}
 librenms_syslog_manage_apparmor: "{{ ansible_os_family == 'Debian' }}"
+librenms_syslog_manage_selinux: "{{ ansible_os_family == 'RedHat' }}"
 librenms_syslog_apparmor_profile_path: /etc/apparmor.d/usr.sbin.rsyslogd
 librenms_syslog_apparmor_local_path: /etc/apparmor.d/local/usr.sbin.rsyslogd
 librenms_syslog_runtime_user: syslog
@@ -383,6 +425,13 @@ librenms_redis_runtime_user: redis
 librenms_redis_runtime_group: redis
 librenms_redis_data_dir: /var/lib/redis
 librenms_redis_server_binary: /usr/bin/redis-server
+librenms_redis_cli_binary: >-
+  {{
+    '/usr/bin/valkey-cli'
+    if ansible_os_family == 'RedHat'
+    and (ansible_distribution_major_version | int) >= 10
+    else '/usr/bin/redis-cli'
+  }}
 librenms_redis_restart_sec: 3
 librenms_redis_systemd_timeout_start_sec: 30
 librenms_redis_systemd_timeout_stop_sec: 30
@@ -458,6 +507,15 @@ librenms_redis_sentinel_flushconfig_retries: 6
 librenms_redis_sentinel_flushconfig_delay: 5
 
 librenms_rrd_mode: local
+librenms_external_rrd_source: ""
+librenms_external_rrd_fstype: nfs4
+librenms_external_rrd_mount_options:
+  - rw
+  - hard
+  - noatime
+  - _netdev
+librenms_external_rrd_mountpoint: /opt/librenms/rrd
+librenms_external_rrd_manage_firewall: false
 librenms_gluster_bootstrap_host: "{{ (groups.get('gluster_nodes', [inventory_hostname]) | first) }}"
 librenms_gluster_volume_name: librenms-rrd
 librenms_gluster_brick_path: /gluster/brick1/librenms-rrd
@@ -810,7 +868,7 @@ librenms_rrdcached_endpoint_strategy: >-
   {{
     'vip_tcp'
     if (
-      librenms_rrd_mode == 'glusterfs'
+      librenms_rrd_mode in ['glusterfs', 'external']
       and librenms_vip_enabled | bool
       and librenms_vip_ip | length > 0
     )
@@ -851,7 +909,14 @@ librenms_manage_lnms_symlink: true
 librenms_enable_extra_repos: true
 librenms_redhat_enable_epel: true
 librenms_redhat_enable_remi: false
-librenms_redhat_php_stream: "remi-8.2"
+librenms_redhat_php_stream: "8.2"
+librenms_redhat_mariadb_stream: "10.11"
+librenms_redhat_enable_builder_repository: true
+librenms_redhat_remi_release_url: ""
+librenms_redhat_manage_selinux: true
+librenms_redhat_selinux_web_booleans:
+  - httpd_can_network_connect
+  - httpd_can_network_connect_db
 librenms_common_extra_packages: []
 
 librenms_remove_install_dir: false
@@ -868,9 +933,10 @@ librenms_support_tier_map:
   Ubuntu: primary
   Debian: primary
   Linux Mint: primary-ish
-  RedHat: strong-best-effort
-  AlmaLinux: strong-best-effort
-  Rocky: strong-best-effort
+  RedHat: primary
+  "Red Hat Enterprise Linux": primary
+  AlmaLinux: primary
+  Rocky: primary
   Fedora: strong-best-effort
   CentOS: best-effort
   Archlinux: best-effort

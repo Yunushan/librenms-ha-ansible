@@ -1,0 +1,2 @@
+#!/bin/sh
+exec {{ librenms_syslog_php_binary | quote }} {{ (librenms_install_dir ~ '/syslog.php') | quote }}

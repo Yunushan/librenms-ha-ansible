@@ -1,6 +1,7 @@
 ---
 librenms_mode: standalone
 librenms_install_profile: full
+ansible_python_interpreter: /opt/librenms-ha-ansible/python/bin/python
 
 librenms_fqdn: librenms.example.com
 librenms_timezone: Etc/UTC

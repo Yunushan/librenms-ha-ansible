@@ -1,0 +1,75 @@
+---
+- name: Validate external shared RRD storage settings
+  ansible.builtin.assert:
+    that:
+      - librenms_external_rrd_source | length > 0
+      - librenms_external_rrd_fstype in ['nfs', 'nfs4']
+      - librenms_external_rrd_mountpoint == (librenms_install_dir ~ '/rrd')
+      - librenms_uid | string | length > 0
+      - librenms_gid | string | length > 0
+      - librenms_uid | int > 0
+      - librenms_gid | int > 0
+    fail_msg: >-
+      External RRD mode requires an NFS/NFSv4 source, the standard LibreNMS RRD
+      mountpoint, and explicit shared librenms_uid/librenms_gid values. The NFS
+      export must use those IDs and permit the service account to write.
+
+- name: Install external NFS client package
+  ansible.builtin.package:
+    name: "{{ 'nfs-common' if ansible_os_family == 'Debian' else 'nfs-utils' }}"
+    state: present
+
+- name: Create fixed LibreNMS group for shared RRD ownership
+  ansible.builtin.group:
+    name: "{{ librenms_group }}"
+    gid: "{{ librenms_gid }}"
+    system: true
+    state: present
+
+- name: Create fixed LibreNMS user for shared RRD ownership
+  ansible.builtin.user:
+    name: "{{ librenms_user }}"
+    uid: "{{ librenms_uid }}"
+    group: "{{ librenms_group }}"
+    system: true
+    home: "{{ librenms_install_dir }}"
+    create_home: false
+    shell: /bin/bash
+    state: present
+
+- name: Ensure external RRD mountpoint exists
+  ansible.builtin.file:
+    path: "{{ librenms_external_rrd_mountpoint }}"
+    state: directory
+    owner: "{{ librenms_user }}"
+    group: "{{ librenms_group }}"
+    mode: "0775"
+
+- name: Mount external shared RRD storage
+  ansible.posix.mount:
+    path: "{{ librenms_external_rrd_mountpoint }}"
+    src: "{{ librenms_external_rrd_source }}"
+    fstype: "{{ librenms_external_rrd_fstype }}"
+    opts: "{{ librenms_external_rrd_mount_options | join(',') }}"
+    state: mounted
+
+- name: Verify external RRD storage is writable by LibreNMS
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ librenms_user }}"
+      - --
+      - test
+      - -w
+      - "{{ librenms_external_rrd_mountpoint }}"
+  changed_when: false
+
+- name: Verify external RRD storage is a real mount
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - "{{ librenms_external_rrd_mountpoint }}"
+      - --noheadings
+  changed_when: false

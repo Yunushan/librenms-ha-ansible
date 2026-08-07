@@ -6,9 +6,18 @@ repo_root="$(cd -- "${script_dir}/.." && pwd)"
 requirements_file="${LIBRENMS_ANSIBLE_REQUIREMENTS_FILE:-${repo_root}/requirements.yml}"
 collections_path="${LIBRENMS_ANSIBLE_COLLECTIONS_PATH:-${repo_root}/.ansible/collections}"
 collection_state_checker="${repo_root}/scripts/ansible-collection-state.py"
-galaxy_bin="${ANSIBLE_GALAXY_BIN:-ansible-galaxy}"
-playbook_bin="${ANSIBLE_PLAYBOOK_BIN:-ansible-playbook}"
-python_bin="${PYTHON_BIN:-python3}"
+controller_venv="${LIBRENMS_ANSIBLE_CONTROLLER_VENV:-${repo_root}/.ansible/controller-venv}"
+minimum_ansible_core_version="${LIBRENMS_MINIMUM_ANSIBLE_CORE_VERSION:-2.20.0}"
+
+if [ -x "${controller_venv}/bin/ansible-playbook" ]; then
+    galaxy_bin="${ANSIBLE_GALAXY_BIN:-${controller_venv}/bin/ansible-galaxy}"
+    playbook_bin="${ANSIBLE_PLAYBOOK_BIN:-${controller_venv}/bin/ansible-playbook}"
+    python_bin="${PYTHON_BIN:-${controller_venv}/bin/python}"
+else
+    galaxy_bin="${ANSIBLE_GALAXY_BIN:-ansible-galaxy}"
+    playbook_bin="${ANSIBLE_PLAYBOOK_BIN:-ansible-playbook}"
+    python_bin="${PYTHON_BIN:-python3}"
+fi
 
 fail() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -20,6 +29,34 @@ fail() {
 command -v "${galaxy_bin}" >/dev/null 2>&1 || fail "Required command not found: ${galaxy_bin}"
 command -v "${playbook_bin}" >/dev/null 2>&1 || fail "Required command not found: ${playbook_bin}"
 command -v "${python_bin}" >/dev/null 2>&1 || fail "Required command not found: ${python_bin}"
+
+ansible_version_output="$("${playbook_bin}" --version 2>&1)" || \
+    fail "Unable to read the ansible-core version from ${playbook_bin}."
+ansible_core_version="$(
+    printf '%s\n' "${ansible_version_output}" \
+        | sed -n '1s/^ansible-playbook \[core \([^]]*\)\].*/\1/p'
+)"
+[ -n "${ansible_core_version}" ] || \
+    fail "Unable to parse ansible-core version from: $(printf '%s\n' "${ansible_version_output}" | sed -n '1p')"
+
+ansible_core_major="${ansible_core_version%%.*}"
+ansible_core_remainder="${ansible_core_version#*.}"
+ansible_core_minor="${ansible_core_remainder%%.*}"
+minimum_ansible_core_major="${minimum_ansible_core_version%%.*}"
+minimum_ansible_core_remainder="${minimum_ansible_core_version#*.}"
+minimum_ansible_core_minor="${minimum_ansible_core_remainder%%.*}"
+
+case "${ansible_core_major}:${ansible_core_minor}:${minimum_ansible_core_major}:${minimum_ansible_core_minor}" in
+    *[!0-9:]*|'')
+        fail "Invalid ansible-core version comparison: ${ansible_core_version} versus ${minimum_ansible_core_version}."
+        ;;
+esac
+
+if [ "${ansible_core_major}" -lt "${minimum_ansible_core_major}" ] \
+    || { [ "${ansible_core_major}" -eq "${minimum_ansible_core_major}" ] \
+        && [ "${ansible_core_minor}" -lt "${minimum_ansible_core_minor}" ]; }; then
+    fail "ansible-core ${minimum_ansible_core_version}+ is required (found ${ansible_core_version}). Run 'make controller-bootstrap' or use the pinned controller image."
+fi
 
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${repo_root}/ansible.cfg}"
 if [ -n "${ANSIBLE_COLLECTIONS_PATH:-}" ]; then

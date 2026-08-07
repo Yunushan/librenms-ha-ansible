@@ -2,11 +2,14 @@
 Description=LibreNMS HA startup repair
 Wants=network-online.target remote-fs.target
 After=network-online.target remote-fs.target
+{% if librenms_rrd_mode == 'glusterfs' %}
 After={{ librenms_glusterd_service_name }}.service
+{% endif %}
 After={{ librenms_mariadb_service_name }}.service
 After={{ librenms_haproxy_service_name }}.service
 After={{ librenms_redis_service_name }}.service
 After={{ librenms_redis_sentinel_service_name_effective }}.service
+RequiresMountsFor={{ librenms_install_dir }}{% if librenms_rrd_mode in ['glusterfs', 'external'] %} {{ librenms_install_dir }}/rrd{% endif %}
 
 [Service]
 Type=oneshot

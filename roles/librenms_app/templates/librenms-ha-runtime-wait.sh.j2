@@ -43,20 +43,20 @@ redis_cli() {
   shift
 
   if [ -n "${auth}" ]; then
-    REDISCLI_AUTH="${auth}" timeout "${COMMAND_TIMEOUT}" redis-cli "$@"
+    REDISCLI_AUTH="${auth}" timeout "${COMMAND_TIMEOUT}" {{ librenms_redis_cli_binary }} "$@"
   else
-    timeout "${COMMAND_TIMEOUT}" redis-cli "$@"
+    timeout "${COMMAND_TIMEOUT}" {{ librenms_redis_cli_binary }} "$@"
   fi
 }
 
 check_rrd_mount() {
   [ "${WAIT_RRD}" = "1" ] || return 0
-  [ "${RRD_MODE}" = "glusterfs" ] || return 0
+  [ "${RRD_MODE}" = "glusterfs" ] || [ "${RRD_MODE}" = "external" ] || return 0
 
   if findmnt --noheadings --output TARGET --nocanonicalize \
       --mountpoint "${RRD_PATH}" >/dev/null 2>&1; then
     timeout "${COMMAND_TIMEOUT}" stat --dereference --format=%F -- \
-      "${RRD_PATH}" >/dev/null 2>&1
+      "${RRD_PATH}" >/dev/null 2>&1 && test -w "${RRD_PATH}"
     return $?
   fi
 
@@ -64,7 +64,7 @@ check_rrd_mount() {
   findmnt --noheadings --output TARGET --nocanonicalize \
     --mountpoint "${RRD_PATH}" >/dev/null 2>&1 && \
     timeout "${COMMAND_TIMEOUT}" stat --dereference --format=%F -- \
-      "${RRD_PATH}" >/dev/null 2>&1
+      "${RRD_PATH}" >/dev/null 2>&1 && test -w "${RRD_PATH}"
 }
 
 check_database() {

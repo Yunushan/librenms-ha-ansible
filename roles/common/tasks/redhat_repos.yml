@@ -1,23 +1,94 @@
 ---
-- name: Install EPEL on RedHat-family systems
-  package:
+- name: Install DNF repository management tooling
+  ansible.builtin.package:
+    name: dnf-plugins-core
+    state: present
+  when: ansible_distribution != 'Fedora'
+
+- name: Determine RedHat-family builder repository name
+  ansible.builtin.set_fact:
+    librenms_redhat_builder_repository: >-
+      {{
+        'powertools'
+        if (ansible_distribution_major_version | int) == 8
+        else 'crb'
+      }}
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['Rocky', 'AlmaLinux', 'CentOS']
+
+- name: Check community rebuild builder repository state
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -q
+      - repolist
+      - --enabled
+  register: librenms_redhat_builder_repository_probe
+  changed_when: false
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['Rocky', 'AlmaLinux', 'CentOS']
+
+- name: Enable community rebuild builder repository
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - config-manager
+      - --set-enabled
+      - "{{ librenms_redhat_builder_repository }}"
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['Rocky', 'AlmaLinux', 'CentOS']
+    - >-
+      librenms_redhat_builder_repository
+      not in (librenms_redhat_builder_repository_probe.stdout | default(''))
+
+- name: Enable RHEL CodeReady Builder repository
+  community.general.rhsm_repository:
+    name: >-
+      codeready-builder-for-rhel-{{ ansible_distribution_major_version }}-{{ ansible_architecture }}-rpms
+    state: enabled
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
+
+- name: Install EPEL on community RedHat-family systems
+  ansible.builtin.package:
     name: epel-release
     state: present
   when:
     - librenms_redhat_enable_epel | bool
-    - ansible_distribution != 'Fedora'
+    - ansible_distribution in ['Rocky', 'AlmaLinux', 'CentOS']
 
-- name: Install Remi repository package when requested
-  package:
-    name: "https://rpms.remirepo.net/enterprise/remi-release-{{ ansible_distribution_major_version }}.rpm"
+- name: Install signed EPEL release package on RHEL
+  ansible.builtin.dnf:
+    name: >-
+      https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm
     state: present
-    disable_gpg_check: true
   when:
-    - librenms_redhat_enable_remi | bool
-    - ansible_distribution != 'Fedora'
+    - librenms_redhat_enable_epel | bool
+    - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
 
-- name: Reset PHP module when using Remi on EL8-style systems
-  command:
+- name: Validate optional Remi repository settings
+  ansible.builtin.assert:
+    that:
+      - (ansible_distribution_major_version | int) < 10
+      - librenms_redhat_remi_release_url | length > 0
+    fail_msg: >-
+      Remi is disabled by default. When explicitly enabled, provide a reviewed
+      HTTPS release RPM in librenms_redhat_remi_release_url. RHEL-family 10
+      uses its native PHP packages and does not use this compatibility path.
+  when: librenms_redhat_enable_remi | bool
+
+- name: Install optional signed Remi repository package
+  ansible.builtin.dnf:
+    name: "{{ librenms_redhat_remi_release_url }}"
+    state: present
+  when: librenms_redhat_enable_remi | bool
+
+- name: Reset PHP module before selecting the supported stream
+  ansible.builtin.command:
     argv:
       - dnf
       - -y
@@ -26,20 +97,49 @@
       - php
   changed_when: false
   when:
-    - librenms_redhat_enable_remi | bool
     - ansible_distribution != 'Fedora'
-    - (ansible_distribution_major_version | int) <= 8
+    - (ansible_distribution_major_version | int) < 10
 
-- name: Enable PHP stream when using Remi on EL8-style systems
-  command:
+- name: Enable supported PHP module stream
+  ansible.builtin.command:
     argv:
       - dnf
       - -y
       - module
       - enable
-      - "php:{{ librenms_redhat_php_stream }}"
+      - >-
+        php:{{
+          ('remi-' ~ librenms_redhat_php_stream)
+          if librenms_redhat_enable_remi | bool
+          else librenms_redhat_php_stream
+        }}
   changed_when: false
   when:
-    - librenms_redhat_enable_remi | bool
     - ansible_distribution != 'Fedora'
-    - (ansible_distribution_major_version | int) <= 8
+    - (ansible_distribution_major_version | int) < 10
+
+- name: Reset MariaDB module before selecting the supported stream
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - module
+      - reset
+      - mariadb
+  changed_when: false
+  when:
+    - ansible_distribution != 'Fedora'
+    - (ansible_distribution_major_version | int) < 10
+
+- name: Enable supported MariaDB module stream
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - module
+      - enable
+      - "mariadb:{{ librenms_redhat_mariadb_stream }}"
+  changed_when: false
+  when:
+    - ansible_distribution != 'Fedora'
+    - (ansible_distribution_major_version | int) < 10

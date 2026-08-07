@@ -1,4 +1,15 @@
 ---
+- name: Reject unsupported in-node Gluster server deployment on RHEL-family hosts
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family != 'RedHat'
+    fail_msg: >-
+      The supported RHEL-family 8, 9, and 10 repositories managed by this
+      project do not provide a production-supported glusterfs-server package.
+      Set librenms_rrd_mode=external and configure a reviewed NFS/NFSv4 source,
+      or provide shared storage outside this role set.
+  when: librenms_rrd_mode == 'glusterfs'
+
 - name: Install GlusterFS packages
   package:
     name: "{{ librenms_gluster_packages }}"
@@ -279,24 +290,6 @@
     - ansible_os_family == 'Debian'
     - gluster_ufw_status is defined
     - gluster_ufw_status.rc == 0
-
-- name: Allow Gluster TCP ports with firewalld when active
-  ansible.posix.firewalld:
-    port: "{{ item }}"
-    permanent: true
-    immediate: true
-    state: enabled
-  loop:
-    - 24007/tcp
-    - 24008/tcp
-    - 24009/tcp
-    - 49152-49251/tcp
-  when:
-    - librenms_rrd_mode == 'glusterfs'
-    - librenms_gluster_manage_firewall | bool
-    - ansible_os_family == 'RedHat'
-    - "'firewalld.service' in ansible_facts.services"
-    - ansible_facts.services['firewalld.service'].state == 'running'
 
 - name: Wait for Gluster management port on peer nodes from bootstrap host
   wait_for:

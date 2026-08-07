@@ -1,7 +1,7 @@
 [Unit]
 Wants=network-online.target remote-fs.target
-After=network-online.target remote-fs.target glusterd.service mariadb.service haproxy.service redis-server.service redis-sentinel.service
-RequiresMountsFor={{ librenms_install_dir }}{% if librenms_rrd_mode == 'glusterfs' %} {{ librenms_install_dir }}/rrd{% endif %}
+After=network-online.target remote-fs.target glusterd.service mariadb.service haproxy.service {{ librenms_redis_service_name }}.service {{ librenms_redis_sentinel_service_name_effective }}.service
+RequiresMountsFor={{ librenms_install_dir }}{% if librenms_rrd_mode in ['glusterfs', 'external'] %} {{ librenms_install_dir }}/rrd{% endif %}
 StartLimitIntervalSec=0
 
 [Service]

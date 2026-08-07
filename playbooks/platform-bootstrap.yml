@@ -1,0 +1,134 @@
+---
+- name: Bootstrap a supported Python runtime on managed hosts
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:new_nodes:decommission_nodes:!maintenance_nodes
+  become: true
+  gather_facts: false
+  vars:
+    librenms_platform_python_root: >-
+      {{ librenms_managed_python_root | default('/opt/librenms-ha-ansible/python') }}
+    librenms_platform_python_binary: "{{ librenms_platform_python_root }}/bin/python"
+    librenms_platform_pymysql_version: >-
+      {{ librenms_managed_python_pymysql_version | default('1.1.2') }}
+    librenms_platform_redis_version: >-
+      {{ librenms_managed_python_redis_version | default('5.0.7') }}
+  tasks:
+    - name: Install and prepare the managed target Python runtime
+      ansible.builtin.raw: |
+        set -eu
+
+        root={{ librenms_platform_python_root | quote }}
+        python_bin={{ librenms_platform_python_binary | quote }}
+        changed=0
+
+        if [ ! -r /etc/os-release ]; then
+          echo "Unsupported host: /etc/os-release is missing" >&2
+          exit 1
+        fi
+
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        os_id="${ID:-}"
+        os_like="${ID_LIKE:-}"
+        os_version="${VERSION_ID:-}"
+        os_major="${os_version%%.*}"
+        target_python=""
+        ansible_python=""
+
+        case "${os_id}:${os_like}" in
+          ubuntu:*|debian:*)
+            target_python=/usr/bin/python3
+            ansible_python="${python_bin}"
+            ;;
+          rhel:*|rocky:*|almalinux:*|centos:*|*:*rhel*|*:*fedora*)
+            if [ "${os_major}" = "8" ]; then
+              target_python=/usr/bin/python3.11
+            else
+              target_python=/usr/bin/python3
+            fi
+            # ansible-core 2.20+ requires Python 3.9 or newer on targets. Its
+            # DNF module can use the system package-manager interpreter while
+            # the rest of the module runs from this supported managed venv.
+            ansible_python="${python_bin}"
+            ;;
+          *)
+            echo "Unsupported platform for managed Python: ${PRETTY_NAME:-${os_id}}" >&2
+            exit 1
+            ;;
+        esac
+
+        if [ ! -x "${python_bin}" ]; then
+          case "${os_id}:${os_like}" in
+            ubuntu:*|debian:*)
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -q
+              apt-get install -y --no-install-recommends \
+                python3 python3-pip python3-venv
+              ;;
+            rhel:*|rocky:*|almalinux:*|centos:*|*:*rhel*|*:*fedora*)
+              if [ "${os_major}" = "8" ]; then
+                dnf -y install python3.11 python3.11-pip
+              else
+                dnf -y install python3 python3-pip
+              fi
+              ;;
+          esac
+
+          install -d -m 0755 "$(dirname "${root}")"
+          "${target_python}" -m venv --system-site-packages "${root}"
+          changed=1
+        fi
+
+        current_pymysql=$("${python_bin}" -c \
+          'import importlib.metadata; print(importlib.metadata.version("PyMySQL"))' \
+          2>/dev/null || true)
+        current_redis=$("${python_bin}" -c \
+          'import importlib.metadata; print(importlib.metadata.version("redis"))' \
+          2>/dev/null || true)
+
+        if [ "${current_pymysql}" != {{ librenms_platform_pymysql_version | quote }} ] \
+          || [ "${current_redis}" != {{ librenms_platform_redis_version | quote }} ]; then
+          "${python_bin}" -m pip install --disable-pip-version-check \
+            "PyMySQL=={{ librenms_platform_pymysql_version }}" \
+            "redis=={{ librenms_platform_redis_version }}"
+            changed=1
+        fi
+
+        if [ ! -x "${ansible_python}" ]; then
+          echo "Ansible target Python is missing: ${ansible_python}" >&2
+          exit 1
+        fi
+
+        echo "LIBRENMS_ANSIBLE_PYTHON=${ansible_python}"
+        echo "LIBRENMS_BOOTSTRAP_CHANGED=${changed}"
+      register: librenms_platform_python_bootstrap
+      changed_when: >-
+        'LIBRENMS_BOOTSTRAP_CHANGED=1'
+        in (librenms_platform_python_bootstrap.stdout | default(''))
+
+    - name: Read the supported Ansible target interpreter
+      ansible.builtin.set_fact:
+        librenms_platform_ansible_python_binary: >-
+          {{
+            (
+              librenms_platform_python_bootstrap.stdout_lines
+              | default([])
+              | select('match', '^LIBRENMS_ANSIBLE_PYTHON=')
+              | map('regex_replace', '^LIBRENMS_ANSIBLE_PYTHON=', '')
+              | list
+              | first
+            )
+            | default(librenms_platform_python_binary, true)
+          }}
+
+    - name: Select the supported Python interpreters for subsequent plays
+      ansible.builtin.add_host:
+        name: "{{ inventory_hostname }}"
+        ansible_python_interpreter: "{{ librenms_platform_ansible_python_binary }}"
+        librenms_runtime_python_executable: "{{ librenms_platform_python_binary }}"
+      changed_when: false
+
+    - name: Reset the connection after selecting the managed interpreter
+      ansible.builtin.meta: reset_connection
+
+    - name: Gather facts with the managed Python interpreter
+      ansible.builtin.setup:

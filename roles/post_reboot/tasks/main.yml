@@ -212,7 +212,7 @@
     fi
 
     master="$(
-      REDISCLI_AUTH="$LIBRENMS_SENTINEL_PASSWORD" redis-cli \
+      REDISCLI_AUTH="$LIBRENMS_SENTINEL_PASSWORD" {{ librenms_redis_cli_binary }} \
         -h 127.0.0.1 \
         -p 26379 \
         ${sentinel_user_args} \
@@ -225,21 +225,21 @@
 
     node_name="$(hostname)"
     key="librenms:ansible:post-reboot:${node_name}:$$"
-    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" {{ librenms_redis_cli_binary }} \
       -h "$master_host" \
       -p "$master_port" \
       -n "$LIBRENMS_REDIS_CACHE_DB" \
       ${redis_user_args} \
       SET "$key" ok EX 30 >/dev/null
     value="$(
-      REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+      REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" {{ librenms_redis_cli_binary }} \
         -h "$master_host" \
         -p "$master_port" \
         -n "$LIBRENMS_REDIS_CACHE_DB" \
         ${redis_user_args} \
         GET "$key"
     )"
-    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" redis-cli \
+    REDISCLI_AUTH="$LIBRENMS_REDIS_PASSWORD" {{ librenms_redis_cli_binary }} \
       -h "$master_host" \
       -p "$master_port" \
       -n "$LIBRENMS_REDIS_CACHE_DB" \
@@ -302,7 +302,7 @@
     state: started
   failed_when: false
   when:
-    - librenms_rrd_mode == 'glusterfs'
+    - librenms_rrd_mode in ['glusterfs', 'external']
     - librenms_startup_repair_enabled | bool
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
 
@@ -334,7 +334,6 @@
   failed_when: false
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
 
 - name: Verify managed RRDCacheD is active after reboot # noqa command-instead-of-module
@@ -351,7 +350,6 @@
   delay: "{{ librenms_post_reboot_service_delay | int }}"
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
 
 - name: Capture RRDCacheD status after failed post-reboot repair # noqa command-instead-of-module
@@ -367,7 +365,6 @@
   failed_when: false
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
     - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
 
@@ -385,7 +382,6 @@
   failed_when: false
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
     - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
 
@@ -402,7 +398,6 @@
       {{ librenms_post_reboot_rrdcached_journal.stdout | default('') }}
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
     - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
 

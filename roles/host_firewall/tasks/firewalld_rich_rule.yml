@@ -1,0 +1,21 @@
+---
+- name: Query persistent firewalld rich rule # noqa command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - "--query-rich-rule={{ librenms_firewalld_rich_rule }}"
+  register: librenms_firewalld_rich_rule_query
+  changed_when: false
+  failed_when: librenms_firewalld_rich_rule_query.rc not in [0, 1]
+
+- name: Add persistent firewalld rich rule # noqa command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - "--add-rich-rule={{ librenms_firewalld_rich_rule }}"
+  when: librenms_firewalld_rich_rule_query.rc == 1
+  notify: Reload firewalld

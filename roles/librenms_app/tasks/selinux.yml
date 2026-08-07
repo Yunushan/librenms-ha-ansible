@@ -1,0 +1,84 @@
+---
+- name: Install SELinux policy management tooling
+  ansible.builtin.package:
+    name: policycoreutils-python-utils
+    state: present
+
+- name: Read required SELinux web booleans
+  ansible.builtin.command:
+    argv:
+      - getsebool
+      - "{{ item }}"
+  loop: >-
+    {{
+      librenms_redhat_selinux_web_booleans
+      + (['httpd_use_nfs'] if librenms_rrd_mode == 'external' else [])
+      + (['httpd_use_fusefs'] if librenms_rrd_mode == 'glusterfs' else [])
+    }}
+  register: librenms_selinux_web_boolean_state
+  changed_when: false
+
+- name: Enable required SELinux web booleans persistently
+  ansible.builtin.command:
+    argv:
+      - setsebool
+      - -P
+      - "{{ item.item }}"
+      - "on"
+  loop: "{{ librenms_selinux_web_boolean_state.results }}"
+  when: (item.stdout | default('')) is not search(' --> on$')
+
+- name: Persist LibreNMS SELinux file contexts # noqa command-instead-of-module
+  ansible.builtin.shell: |
+    set -eu
+    target={{ item.path | quote }}
+    setype={{ item.type | quote }}
+    current="$(
+      semanage fcontext -l -C |
+        awk -v target="${target}" '$1 == target { print $NF; exit }'
+    )"
+
+    case "${current}" in
+      *:"${setype}":*) exit 0 ;;
+    esac
+
+    if [ -n "${current}" ]; then
+      semanage fcontext -m -t "${setype}" "${target}"
+    else
+      semanage fcontext -a -t "${setype}" "${target}"
+    fi
+    printf '%s\n' LIBRENMS_SELINUX_FCONTEXT_CHANGED=1
+  args:
+    executable: /bin/bash
+  register: librenms_selinux_fcontext
+  changed_when: >-
+    'LIBRENMS_SELINUX_FCONTEXT_CHANGED=1'
+    in (librenms_selinux_fcontext.stdout | default(''))
+  loop:
+    - path: "{{ librenms_install_dir }}(/.*)?"
+      type: httpd_sys_content_t
+    - path: "{{ librenms_install_dir }}/logs(/.*)?"
+      type: httpd_sys_rw_content_t
+    - path: "{{ librenms_install_dir }}/storage(/.*)?"
+      type: httpd_sys_rw_content_t
+    - path: "{{ librenms_install_dir }}/bootstrap/cache(/.*)?"
+      type: httpd_sys_rw_content_t
+    - path: "{{ librenms_install_dir }}/rrd(/.*)?"
+      type: httpd_sys_rw_content_t
+  when: >-
+    item.path != (librenms_install_dir ~ '/rrd(/.*)?')
+    or librenms_rrd_mode == 'local'
+
+- name: Restore LibreNMS SELinux file contexts
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['restorecon', '-RF']
+        + (
+            ['-e', librenms_install_dir ~ '/rrd']
+            if librenms_rrd_mode in ['glusterfs', 'external']
+            else []
+          )
+        + [librenms_install_dir]
+      }}
+  changed_when: false

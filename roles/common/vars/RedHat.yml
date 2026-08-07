@@ -1,14 +1,18 @@
 ---
+librenms_curl_package: >-
+  {{ 'curl-minimal' if (ansible_distribution_major_version | int) >= 9 else 'curl' }}
+
 librenms_base_packages:
   - acl
   - bash-completion
   - ca-certificates
   - cronie
-  - curl
+  - "{{ librenms_curl_package }}"
   - fping
   - git
   - graphviz
   - ImageMagick
+  - iproute
   - mtr
   - net-snmp
   - net-snmp-utils
@@ -20,36 +24,41 @@ librenms_base_packages:
   - php-curl
   - php-gd
   - php-gmp
-  - php-json
   - php-mbstring
+  - php-opcache
   - php-process
   - php-snmp
   - php-xml
-  - php-zip
+  - php-pecl-zip
   - php-mysqlnd
   - python3
   - python3-pip
   - python3-psutil
-  - python3-PyMySQL
-  - python3-redis
   - python3-systemd
+  - firewalld
+  - policycoreutils-python-utils
   - rrdtool
   - rsync
   - traceroute
   - unzip
+  - util-linux
   - whois
 
 librenms_db_packages:
   - mariadb-server
+  - mariadb
   - python3-PyMySQL
 
 librenms_galera_packages:
-  - galera
+  - mariadb-server-galera
   - rsync
 
-librenms_redis_packages:
-  - redis
-  - python3-redis
+librenms_redis_packages: >-
+  {{
+    ['valkey']
+    if (ansible_distribution_major_version | int) >= 10
+    else ['redis', 'python3-redis']
+  }}
 
 librenms_gluster_packages:
   - glusterfs-server
@@ -74,10 +83,39 @@ librenms_php_fpm_ini_path: /etc/php.ini
 librenms_php_fpm_pool_dir: /etc/php-fpm.d
 librenms_php_fpm_service_name: php-fpm
 
-librenms_redis_service_name: redis
-librenms_redis_conf_path: /etc/redis.conf
-librenms_redis_sentinel_conf_path: /etc/librenms/redis-sentinel.conf
-librenms_redis_sentinel_native_service_name: redis-sentinel
+librenms_redis_runtime_user: >-
+  {{ 'valkey' if (ansible_distribution_major_version | int) >= 10 else 'redis' }}
+librenms_redis_runtime_group: "{{ librenms_redis_runtime_user }}"
+librenms_redis_data_dir: >-
+  {{ '/var/lib/valkey' if (ansible_distribution_major_version | int) >= 10 else '/var/lib/redis' }}
+librenms_redis_server_binary: >-
+  {{ '/usr/bin/valkey-server' if (ansible_distribution_major_version | int) >= 10 else '/usr/bin/redis-server' }}
+librenms_redis_cli_binary: >-
+  {{ '/usr/bin/valkey-cli' if (ansible_distribution_major_version | int) >= 10 else '/usr/bin/redis-cli' }}
+librenms_redis_service_name: >-
+  {{ 'valkey' if (ansible_distribution_major_version | int) >= 10 else 'redis' }}
+librenms_redis_conf_path: >-
+  {{
+    '/etc/valkey/valkey.conf'
+    if (ansible_distribution_major_version | int) >= 10
+    else (
+      '/etc/redis/redis.conf'
+      if (ansible_distribution_major_version | int) >= 9
+      else '/etc/redis.conf'
+    )
+  }}
+librenms_redis_sentinel_conf_path: >-
+  {{
+    '/etc/valkey/sentinel.conf'
+    if (ansible_distribution_major_version | int) >= 10
+    else (
+      '/etc/redis/sentinel.conf'
+      if (ansible_distribution_major_version | int) >= 9
+      else '/etc/redis-sentinel.conf'
+    )
+  }}
+librenms_redis_sentinel_native_service_name: >-
+  {{ 'valkey-sentinel' if (ansible_distribution_major_version | int) >= 10 else 'redis-sentinel' }}
 
 librenms_snmpd_service_name: snmpd
 librenms_snmpd_conf_path: /etc/snmp/snmpd.conf

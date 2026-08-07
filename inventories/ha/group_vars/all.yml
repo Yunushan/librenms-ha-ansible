@@ -1,6 +1,10 @@
 ---
 librenms_mode: ha
 librenms_install_profile: full
+# site.yml bootstraps this interpreter before gathering facts. Keeping it in
+# inventory also makes later status, backup, and recovery playbooks work on
+# RHEL 8, whose platform Python is too old for the pinned ansible-core release.
+ansible_python_interpreter: /opt/librenms-ha-ansible/python/bin/python
 # Enable only after completing the production values below and before running
 # playbooks/production-readiness.yml. This makes the readiness gate require
 # TLS and the explicit source-restricted host firewall policy.
@@ -43,7 +47,7 @@ librenms_db_bootstrap_host: lnms1
 
 librenms_galera_cluster_name: librenms_cluster
 
-# HA daily maintenance takes its cluster-wide flock on the GlusterFS RRD mount.
+# HA daily maintenance takes its cluster-wide flock on the shared RRD mount.
 # Do not move this lock to a local filesystem or replace it with a MariaDB named
 # lock, because MariaDB GET_LOCK() is not replicated between Galera members.
 # librenms_daily_global_lock_backend: shared_file
@@ -64,6 +68,9 @@ librenms_redis_manage_overcommit_memory: true
 librenms_redis_systemd_timeout_start_sec: 30
 librenms_redis_systemd_timeout_stop_sec: 30
 
+# Ubuntu/Debian may use in-node Gluster. RHEL-family 8/9/10 full HA must replace
+# this with external NFS/NFSv4 and set librenms_external_rrd_source plus fixed
+# shared librenms_uid/librenms_gid values before the first deployment.
 librenms_rrd_mode: glusterfs
 librenms_gluster_bootstrap_host: lnms1
 librenms_gluster_volume_name: librenms-rrd

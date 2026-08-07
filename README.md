@@ -3,7 +3,7 @@
 Production-minded Ansible automation for **LibreNMS standalone, distributed polling, and full HA** deployments across multiple Linux families.
 
 ![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
-![Ansible](https://img.shields.io/badge/ansible-core%202.16%2B-red.svg)
+![Ansible](https://img.shields.io/badge/ansible--core%202.20%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
 ![SNMP](https://img.shields.io/badge/snmp-v1%20%7C%20v2c%20%7C%20v3-orange.svg)
 ![GitHub Ready](https://img.shields.io/badge/repo-github--ready-black.svg)
@@ -107,7 +107,7 @@ Good for:
 Use:
 - `librenms_db_mode: galera`
 - `librenms_redis_mode: sentinel`
-- `librenms_rrd_mode: glusterfs`
+- `librenms_rrd_mode: glusterfs` on Ubuntu/Debian, or `external` on RHEL-family hosts
 - `librenms_vip_enabled: true`
 
 Good for:
@@ -259,7 +259,7 @@ Matching mode variables:
 librenms_mode: ha
 librenms_db_mode: galera
 librenms_redis_mode: sentinel
-librenms_rrd_mode: glusterfs
+librenms_rrd_mode: glusterfs  # use external with reviewed NFS/NFSv4 on RHEL-family hosts
 librenms_vip_enabled: true
 librenms_vip_ip: 10.10.10.10
 librenms_fqdn: librenms.example.com
@@ -277,16 +277,19 @@ changing a database series.
 
 ## Support Matrix
 
-This repository is built to support the distributions you asked for, but it does so in two tiers:
+This repository has explicit primary code paths for Ubuntu 26.04 and the
+supported RHEL-family releases. Primary means the repository owns the package,
+runtime, firewall, SELinux, service, and storage mappings; it does not replace a
+production acceptance test on your exact image and architecture.
 
 | Distro | Tier | Notes |
 |---|---|---|
-| Ubuntu | Primary | Best fit with upstream LibreNMS docs |
+| Ubuntu 22.04, 24.04, 26.04 | Primary | Native Debian-family packages; Ubuntu 26.04 is included in the package CI matrix |
 | Debian | Primary | Best fit with upstream LibreNMS docs |
 | Linux Mint | Primary-ish | Uses Debian-family logic |
-| RHEL / Red Hat Enterprise Linux 8, 9, 10 | Strong best-effort | RedHat-family logic |
-| AlmaLinux 8, 9, 10 | Strong best-effort | RedHat-family logic |
-| Rocky Linux 8, 9, 10 | Strong best-effort | RedHat-family logic |
+| RHEL / Red Hat Enterprise Linux 8.10+, 9.4+, 10.x | Primary source path | Uses the same EL mappings as Rocky/Alma; subscribed RHEL images require an operator acceptance run |
+| AlmaLinux 8.10+, 9.4+, 10.x | Primary | Included in the package CI matrix |
+| Rocky Linux 8.10+, 9.4+, 10.x | Primary | Included in the package CI matrix |
 | Fedora | Strong best-effort | RedHat-family logic |
 | CentOS / CentOS Stream | Best-effort | May need repo tuning depending on PHP availability |
 | Arch Linux | Best-effort | Family mapping included, verify package names in lab |
@@ -296,7 +299,17 @@ This repository is built to support the distributions you asked for, but it does
 
 ### Reality check
 
-Upstream LibreNMS documentation currently provides package/install examples for **Ubuntu 24.04**, **Ubuntu 22.04**, **Debian 12**, **Debian 13**, and **CentOS 8**. This repo additionally validates Ubuntu 26.04 and RHEL-family releases 8, 9, and 10, plus PHP 8.5, Python 3.14, Laravel 13, nginx 1.31.x, and RRDtool 1.10.x when those versions are supplied by the selected vendor repositories. You should still lab-test non-primary distros before production.
+Upstream LibreNMS documentation currently provides package/install examples for
+**Ubuntu 24.04**, **Ubuntu 22.04**, **Debian 12**, **Debian 13**, and **CentOS
+8**. This repo additionally validates the package surface for Ubuntu 26.04,
+Rocky Linux 8/9/10, and AlmaLinux 8/9/10. RHEL uses the same source path, but
+public CI cannot validate subscription-only repository behavior. EL8 uses a
+managed Python 3.11 runtime, and EL10 uses Valkey in place of Redis. Full HA on
+RHEL-family 8, 9, and 10 must use `librenms_rrd_mode: external` with reviewed
+NFS/NFSv4 storage because the repositories managed by this project do not
+provide a supported in-node Gluster server package. Run the
+full readiness, reboot, maintenance, and failover gates on the exact production
+images before declaring any cluster ready.
 
 The common role checks the installed runtime versions during convergence and
 fails early when a package stream falls outside the support matrix. See
@@ -600,13 +613,19 @@ database rows.
 
 ## Quick Start
 
-### 1) Clone and install collections
+### 1) Clone and bootstrap the controller
 
 ```bash
 git clone https://github.com/Yunushan/librenms-ha-ansible.git
 cd librenms-ha-ansible
-ansible-galaxy collection install -r requirements.yml
+make controller-bootstrap
 ```
+
+The bootstrap creates `.ansible/controller-venv` from the hash-locked
+`requirements-ci.txt` file. The current pin is ansible-core 2.21.2; ansible-core
+2.20 or newer is required because Ubuntu 26.04 managed hosts use Python 3.14.
+The repository launcher automatically uses this virtual environment when it is
+present.
 
 For routine HA convergence, use the repository launcher through Make. It
 synchronizes the exact collection versions pinned in `requirements.yml` before
@@ -622,9 +641,11 @@ The equivalent explicit command is:
 ./scripts/ansible-playbook.sh -i inventories/ha/hosts.yml playbooks/site.yml
 ```
 
-Use the launcher (or another Make playbook target) after `git pull`. A bare
-`ansible-playbook` command does not install collections automatically; when
-using it intentionally, run `make install` first whenever `requirements.yml`
+Use the launcher (or another Make playbook target) after `git pull`. It refuses
+ansible-core versions older than 2.20 before touching managed hosts. A bare
+`ansible-playbook` command does not install collections or enforce the
+controller version; when using it intentionally, activate
+`.ansible/controller-venv` and run `make install` whenever `requirements.yml`
 changes.
 
 ### Optional: use a Docker-based controller
@@ -1502,9 +1523,24 @@ librenms_rrdcached_endpoint_strategy: vip_tcp  # vip_tcp | primary_tcp | unix
 librenms_gluster_recover_stale_client_mounts: true
 ```
 
-With `librenms_rrd_mode: glusterfs` and a VIP, the role defaults to an HAProxy
-TCP endpoint for `rrdcached` on the VIP. `rrdcached` runs on each LibreNMS node,
-but HAProxy keeps only the first healthy backend active and treats the others as
+For a RHEL-family 8, 9, or 10 full-HA deployment, replace the Gluster mode with
+external shared storage before the first run:
+
+```yaml
+librenms_rrd_mode: external
+librenms_external_rrd_source: nfs.example.com:/exports/librenms-rrd
+librenms_external_rrd_fstype: nfs4
+librenms_uid: 60000
+librenms_gid: 60000
+```
+
+The NFS export must map those fixed IDs and allow the LibreNMS service account
+to write. The playbook verifies both the mount and write access.
+
+With either shared RRD mode (`glusterfs` or `external`) and a VIP, the role
+defaults to an HAProxy TCP endpoint for `rrdcached` on the VIP. `rrdcached`
+runs on each LibreNMS node, but HAProxy keeps only the first healthy backend
+active and treats the others as
 failover backends. This follows LibreNMS' recommendation to keep one active
 RRDCacheD writer while still allowing another node to take over. Set
 `librenms_rrdcached_scope: primary` and

@@ -10,17 +10,18 @@ Upstream LibreNMS installation examples currently cover Ubuntu 24.04, Ubuntu
 22.04, Debian 12, Debian 13, and CentOS 8. This repository also validates the
 following production-targeted release families: Ubuntu 22.04/24.04/26.04,
 Debian 12/13, and Red Hat Enterprise Linux, Rocky Linux, and AlmaLinux 8/9/10.
-The package stream and vendor repository still need to be validated on the
-exact target image before a production declaration.
+Primary support means this repository owns the platform mappings and CI
+guardrails. It does not mean Red Hat certification or that a package-container
+test substitutes for the live production-readiness gates.
 
 | Distro family | Tier | Expected state | Before production |
 | --- | --- | --- | --- |
-| Ubuntu LTS (22.04, 24.04, 26.04) | Primary | Best fit with upstream LibreNMS examples and package names. | Run the full HA command sequence and one node-maintenance drill. |
+| Ubuntu LTS (22.04, 24.04, 26.04) | Primary | Debian-family mappings; Ubuntu 26.04 has a package-resolution CI job. | Run the full HA command sequence and one node-maintenance drill. |
 | Debian stable | Primary | Best fit with upstream LibreNMS examples and package names. | Run the full HA command sequence and one node-maintenance drill. |
 | Linux Mint | Primary-ish | Uses Debian-family logic. | Validate package names, PHP-FPM service name, and firewall behavior in a lab. |
-| RHEL / Red Hat Enterprise Linux (8, 9, 10) | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
-| AlmaLinux (8, 9, 10) | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
-| Rocky Linux (8, 9, 10) | Strong best-effort | RedHat-family mappings exist. | Validate repositories, PHP extensions, SELinux policy, service names, and Galera packaging. |
+| RHEL / Red Hat Enterprise Linux (8.10+, 9.4+, 10.x) | Primary source path | Uses the tested EL mappings, including firewalld, enforcing SELinux, EL8 managed Python, and EL10 Valkey. Subscription-only repositories are not exercised in public CI. | Run package resolution and all live readiness/failover gates on subscribed RHEL images. |
+| AlmaLinux (8.10+, 9.4+, 10.x) | Primary | Package-resolution CI covers all three majors and the common EL runtime path. | Run the live HA readiness, reboot, maintenance, and failover gates on the exact image. |
+| Rocky Linux (8.10+, 9.4+, 10.x) | Primary | Package-resolution CI covers all three majors and the common EL runtime path. | Run the live HA readiness, reboot, maintenance, and failover gates on the exact image. |
 | Fedora | Strong best-effort | RedHat-family mappings exist, but package cadence is faster. | Pin package sources or test every upgrade in a lab first. |
 | CentOS / CentOS Stream | Best-effort | Package availability can vary by stream and mirror. | Expect repo and PHP tuning. Validate before every production use. |
 | Arch Linux / Manjaro | Best-effort | Package names and service defaults can drift quickly. | Treat as lab-first. Expect overrides. |
@@ -31,6 +32,30 @@ The common role validates the selected major release and the installed runtime
 versions during convergence. Set `librenms_runtime_support_enabled: false` only
 for a deliberate lab or vendor-supported exception; disabling it does not make
 an unsupported combination production-ready.
+
+The automated package matrix runs Ubuntu 26.04 plus Rocky Linux and AlmaLinux
+8/9/10 containers. It verifies the distro-sensitive package set, EL module
+streams, Galera package, firewall/SELinux tooling, EL8 Python 3.11 bootstrap,
+and EL10 Valkey commands and units. A separate SSH-based integration check uses
+the pinned controller to bootstrap fresh Ubuntu 26.04, Rocky 8, and Rocky 10
+targets, gather facts through the managed Python runtime, and exercise each
+target package manager. Full systemd, VRRP, Galera, Sentinel, enforcing
+SELinux, and storage behavior still requires the project playbooks on real VMs.
+The maintained CI and examples target x86_64; other architectures are not a
+declared production target.
+
+The controller requires ansible-core 2.20 or newer. Ubuntu 26.04 uses Python
+3.14 on the managed host, whose target support starts with ansible-core 2.20.
+Run `make controller-bootstrap` to install the repository's hash-locked
+ansible-core 2.21.2 toolchain under `.ansible/controller-venv`; Make targets
+automatically select it.
+
+RHEL-family 8, 9, and 10 cannot use this repository's in-node Gluster server
+topology because the repositories managed by this project do not provide a
+supported `glusterfs-server` package. For full HA, use
+`librenms_rrd_mode: external` with a reviewed NFS/NFSv4 source and fixed shared
+`librenms_uid`/`librenms_gid` values. Standalone local RRD mode remains valid
+when shared HA storage is not required.
 
 New major distro releases should still start as lab-only until the full checklist
 passes. For example, an Ubuntu 24.04 to 26.04 upgrade should be tested one node
@@ -48,7 +73,7 @@ vendor-supported repository before running the playbook.
 | --- | --- | --- | --- |
 | nginx | 1.18 through 1.31 | 1.31.x | `nginx -v` during common convergence; the HAProxy web integration uses nginx 1.31.3. |
 | PHP | 8.2 through 8.5 | 8.5 | The PHP CLI runtime used alongside PHP-FPM is detected on managed web nodes. |
-| Python | 3.10 through 3.14 | 3.14 | Managed hosts are checked during convergence; CI also installs the pinned controller toolchain on Python 3.14. |
+| Python | 3.9 through 3.14 | 3.14 | EL8 is bootstrapped onto managed Python 3.11; other managed hosts are checked during convergence; CI also installs the pinned controller toolchain on Python 3.14. |
 | Laravel | 12 and 13 | 13 | The resolved `laravel/framework` version is read from the installed Composer autoloader. |
 | RRDtool | 1.7 through 1.10 | 1.10.x | The installed `rrdtool --version` series is checked before service configuration. |
 
@@ -78,7 +103,7 @@ backup and a tested restore, for every major-series change.
 | --- | --- | --- |
 | Standalone LibreNMS | Primary | Single-node install with local database, local Redis/cache, and local RRD storage. Backups are still required. |
 | Distributed LibreNMS app/poller nodes with external DB/Redis/storage | Primary | Good fit when database, Redis, or storage are managed outside this repo. |
-| Full three-node HA with HAProxy, Keepalived, Galera, Redis Sentinel, and GlusterFS | Primary on primary distros | The main target of this repository. Requires regular drills and backups. |
+| Full three-node HA with HAProxy, Keepalived, Galera, Redis/Valkey Sentinel, and shared RRD storage | Primary on primary distros | The main target. Ubuntu/Debian may use GlusterFS; RHEL-family 8/9/10 require externally managed NFS/NFSv4 storage. Requires regular drills and backups. |
 | Dockerized HA example | Lab/example | Useful for learning and CI-style validation. Disposable HAProxy web-backend, three-node Galera continuity, and Redis Sentinel election tests run in CI; this is not a complete production container platform. |
 | AWX controller | Optional management plane | Supported as a separate controller-side service. It has its own backup and upgrade lifecycle. |
 

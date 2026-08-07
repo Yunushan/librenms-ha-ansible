@@ -16,7 +16,7 @@
 - name: Verify Redis Sentinel quorum TCP endpoints are reachable
   command:
     argv:
-      - python3
+      - "{{ librenms_managed_python_binary }}"
       - -c
       - |
         import json
@@ -83,7 +83,7 @@
   become_user: "{{ librenms_user }}"
   command:
     argv:
-      - python3
+      - "{{ librenms_managed_python_binary }}"
       - -c
       - |
         import json

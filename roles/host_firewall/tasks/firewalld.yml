@@ -1,0 +1,125 @@
+---
+- name: Install firewalld for the managed host-firewall policy
+  ansible.builtin.package:
+    name: firewalld
+    state: present
+
+- name: Enable and start firewalld before adding rules
+  ansible.builtin.service:
+    name: firewalld
+    enabled: true
+    state: started
+
+- name: Allow management SSH before restricting firewalld
+  ansible.builtin.include_tasks: firewalld_rich_rule.yml
+  vars:
+    librenms_firewalld_rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in librenms_firewalld_source else 'ipv4' }}"
+      source address="{{ librenms_firewalld_source }}"
+      port port="{{ librenms_host_firewall_ssh_port }}" protocol="tcp" accept
+  loop: "{{ librenms_host_firewall_management_sources }}"
+  loop_control:
+    loop_var: librenms_firewalld_source
+
+- name: Allow trusted cluster CIDRs before restricting firewalld
+  ansible.builtin.include_tasks: firewalld_rich_rule.yml
+  vars:
+    librenms_firewalld_rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in librenms_firewalld_source else 'ipv4' }}"
+      source address="{{ librenms_firewalld_source }}" accept
+  loop: "{{ librenms_host_firewall_cluster_sources }}"
+  loop_control:
+    loop_var: librenms_firewalld_source
+
+- name: Allow LibreNMS web access to load-balancer hosts with firewalld
+  ansible.builtin.include_tasks: firewalld_rich_rule.yml
+  vars:
+    librenms_firewalld_rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in librenms_firewalld_web_entry.0 else 'ipv4' }}"
+      source address="{{ librenms_firewalld_web_entry.0 }}"
+      port port="{{ librenms_firewalld_web_entry.1 }}" protocol="tcp" accept
+  loop: >-
+    {{
+      librenms_host_firewall_web_sources
+      | product(
+          [librenms_haproxy_web_port]
+          + ([librenms_haproxy_https_port] if librenms_haproxy_tls_enabled | bool else [])
+        )
+      | list
+    }}
+  loop_control:
+    loop_var: librenms_firewalld_web_entry
+  when: inventory_hostname in groups.get('lb_nodes', [])
+
+- name: Allow VRRP from trusted cluster CIDRs with firewalld
+  ansible.builtin.include_tasks: firewalld_rich_rule.yml
+  vars:
+    librenms_firewalld_rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in librenms_firewalld_source else 'ipv4' }}"
+      source address="{{ librenms_firewalld_source }}" protocol value="vrrp" accept
+  loop: "{{ librenms_host_firewall_cluster_sources }}"
+  loop_control:
+    loop_var: librenms_firewalld_source
+  when:
+    - inventory_hostname in groups.get('lb_nodes', [])
+    - librenms_vip_enabled | bool
+
+- name: Allow network-device syslog UDP sources with firewalld
+  ansible.builtin.include_tasks: firewalld_rich_rule.yml
+  vars:
+    librenms_firewalld_rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in librenms_firewalld_source else 'ipv4' }}"
+      source address="{{ librenms_firewalld_source }}"
+      port port="{{ librenms_syslog_udp_port }}" protocol="udp" accept
+  loop: "{{ librenms_host_firewall_syslog_sources }}"
+  loop_control:
+    loop_var: librenms_firewalld_source
+  when:
+    - librenms_syslog_enabled | bool
+    - librenms_syslog_listen_udp | bool
+
+- name: Allow network-device syslog TCP sources with firewalld
+  ansible.builtin.include_tasks: firewalld_rich_rule.yml
+  vars:
+    librenms_firewalld_rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in librenms_firewalld_source else 'ipv4' }}"
+      source address="{{ librenms_firewalld_source }}"
+      port port="{{ librenms_syslog_tcp_port }}" protocol="tcp" accept
+  loop: "{{ librenms_host_firewall_syslog_sources }}"
+  loop_control:
+    loop_var: librenms_firewalld_source
+  when:
+    - librenms_syslog_enabled | bool
+    - librenms_syslog_listen_tcp | bool
+
+- name: Allow SNMP sources for managed local agents with firewalld
+  ansible.builtin.include_tasks: firewalld_rich_rule.yml
+  vars:
+    librenms_firewalld_rich_rule: >-
+      rule family="{{ 'ipv6' if ':' in librenms_firewalld_source else 'ipv4' }}"
+      source address="{{ librenms_firewalld_source }}"
+      port port="161" protocol="udp" accept
+  loop: "{{ librenms_host_firewall_snmp_sources }}"
+  loop_control:
+    loop_var: librenms_firewalld_source
+  when: librenms_manage_local_snmpd | bool
+
+- name: Read persistent firewalld zone target
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - --get-target
+  register: librenms_firewalld_zone_target
+  changed_when: false
+
+- name: Set firewalld zone target to DROP after allow rules exist # noqa command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--zone={{ librenms_host_firewall_firewalld_zone }}"
+      - --set-target=DROP
+  when: (librenms_firewalld_zone_target.stdout | trim) != 'DROP'
+  notify: Reload firewalld
