@@ -12,17 +12,17 @@ librenms_base_packages:
   - mtr-tiny
   - nginx-full
   - nmap
-  - php-cli
-  - php-curl
-  - php-fpm
-  - php-gd
-  - php-gmp
-  - php-json
-  - php-mbstring
-  - php-mysql
-  - php-snmp
-  - php-xml
-  - php-zip
+  - "{{ librenms_php_package_prefix }}cli"
+  - "{{ librenms_php_package_prefix }}curl"
+  - "{{ librenms_php_package_prefix }}fpm"
+  - "{{ librenms_php_package_prefix }}gd"
+  - "{{ librenms_php_package_prefix }}gmp"
+  - "{{ librenms_php_json_package }}"
+  - "{{ librenms_php_package_prefix }}mbstring"
+  - "{{ librenms_php_package_prefix }}mysql"
+  - "{{ librenms_php_package_prefix }}snmp"
+  - "{{ librenms_php_package_prefix }}xml"
+  - "{{ librenms_php_package_prefix }}zip"
   - python3-command-runner
   - python3-dotenv
   - python3-pip
@@ -95,3 +95,21 @@ librenms_snmp_persistent_config_candidates:
 librenms_haproxy_service_name: haproxy
 librenms_keepalived_service_name: keepalived
 librenms_glusterd_service_name: glusterd
+
+librenms_ubuntu_php_versioned: >-
+  {{
+    ansible_distribution == 'Ubuntu'
+    and (ansible_distribution_major_version | int) == 22
+  }}
+librenms_php_package_prefix: >-
+  {{
+    'php' ~ librenms_ubuntu_php_version ~ '-'
+    if librenms_ubuntu_php_versioned | bool
+    else 'php-'
+  }}
+librenms_php_json_package: >-
+  {{
+    'php' ~ librenms_ubuntu_php_version ~ '-common'
+    if librenms_ubuntu_php_versioned | bool
+    else 'php-json'
+  }}

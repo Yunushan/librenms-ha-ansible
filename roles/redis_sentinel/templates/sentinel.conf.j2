@@ -7,8 +7,8 @@ protected-mode yes
 daemonize no
 supervised systemd
 {% endif %}
-{% if ansible_os_family == 'Debian' %}
-pidfile /run/redis/redis-sentinel.pid
+{% if ansible_service_mgr == 'systemd' or ansible_os_family == 'Debian' %}
+pidfile {{ librenms_redis_runtime_dir }}/{{ 'valkey-sentinel.pid' if ansible_os_family == 'RedHat' and (ansible_distribution_major_version | int) >= 10 else 'redis-sentinel.pid' }}
 logfile ""
 {% endif %}
 dir {{ librenms_redis_data_dir }}

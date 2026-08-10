@@ -1,0 +1,19 @@
+---
+- name: Run platform package acceptance on managed hosts
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Run the platform package smoke test on the target
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/../tests/platform/package-smoke.sh"
+      register: librenms_platform_acceptance_result
+      changed_when: false
+
+    - name: Report platform package acceptance result
+      ansible.builtin.debug:
+        msg: >-
+          Platform package acceptance passed on {{ inventory_hostname }}:
+          {{ librenms_platform_acceptance_result.stdout | trim }}

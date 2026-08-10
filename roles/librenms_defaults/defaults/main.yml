@@ -1,9 +1,9 @@
 ---
 librenms_repo_url: https://github.com/librenms/librenms.git
 librenms_version: latest-stable
-# Runtime versions are checked after the OS packages are installed. Keep this
-# policy explicit so a distro upgrade cannot silently move the deployment onto
-# an untested interpreter, web server, or RRDTool series.
+# The distribution baseline is checked before package changes. Runtime versions
+# are checked again during convergence so a distro upgrade cannot silently move
+# the deployment onto an untested interpreter, web server, or RRDTool series.
 librenms_runtime_support_enabled: true
 librenms_supported_php_versions:
   - "8.2"
@@ -85,7 +85,11 @@ librenms_managed_python_root: /opt/librenms-ha-ansible/python
 librenms_managed_python_binary: "{{ librenms_managed_python_root }}/bin/python"
 librenms_runtime_python_executable: "{{ librenms_managed_python_binary }}"
 librenms_managed_python_pymysql_version: "1.1.2"
+librenms_managed_python_dotenv_version: "1.0.1"
 librenms_managed_python_redis_version: "5.0.7"
+librenms_managed_python_setuptools_version: "75.9.1"
+librenms_managed_python_psutil_version: "7.0.0"
+librenms_managed_python_command_runner_version: "1.7.6"
 # Set this only after the inventory has the reviewed security and recovery
 # controls required for a real production declaration. The live readiness gate
 # then fails closed when TLS or the host firewall policy is missing.
@@ -389,6 +393,12 @@ librenms_mariadb_upstream_repo_setup_url: https://r.mariadb.com/downloads/mariad
 librenms_mariadb_upstream_repo_setup_path: /usr/local/sbin/mariadb_repo_setup
 librenms_mariadb_upstream_repo_setup_checksum: ""
 librenms_mariadb_upstream_state_path: /var/lib/librenms-ha-ansible/mariadb-upstream-series
+# Ubuntu's distro MariaDB stream follows the LTS release baseline. Keep this
+# explicit so package refreshes cannot silently move a node to another series.
+librenms_ubuntu_mariadb_expected_series:
+  "22": "10.6"
+  "24": "10.11"
+  "26": "11.8"
 # Keep co-located web/database nodes off the database VIP.  A VIP move or an
 # HAProxy backend transition can terminate an in-flight MySQL connection even
 # when the Galera primary component remains healthy.  Non-database web nodes
@@ -423,6 +433,7 @@ librenms_galera_clear_joiner_cache: true
 librenms_redis_mode: local
 librenms_redis_runtime_user: redis
 librenms_redis_runtime_group: redis
+librenms_redis_runtime_dir: /run/redis
 librenms_redis_data_dir: /var/lib/redis
 librenms_redis_server_binary: /usr/bin/redis-server
 librenms_redis_cli_binary: >-
@@ -484,6 +495,7 @@ librenms_redis_sentinel_failover_timeout: 30000
 librenms_redis_sentinel_parallel_syncs: 1
 librenms_redis_sentinel_restart_sec: 3
 librenms_redis_sentinel_enforce_configured_master: true
+librenms_redis_sentinel_allow_custom_service_fallback: true
 librenms_redis_sentinel_write_check_retries: 6
 librenms_redis_sentinel_write_check_delay: 5
 librenms_redis_sentinel_consensus_retries: 12
@@ -907,13 +919,33 @@ librenms_php_fpm_socket: /run/php-fpm-librenms.sock
 librenms_manage_lnms_symlink: true
 
 librenms_enable_extra_repos: true
+# LibreNMS requires PHP 8.2 or newer. Ubuntu 22.04's stock PHP stream is
+# older, so use the same versioned PHP repository path as the upstream install
+# guidance. Ubuntu 24.04 and 26.04 use their native supported stream.
+librenms_ubuntu_php_repository_enabled: true
+librenms_ubuntu_php_repository: ppa:ondrej/php
+# Ubuntu 22's PHP PPA is managed with add-apt-repository because
+# ansible.builtin.apt_repository is removed in ansible-core 2.25.
+librenms_ubuntu_php_repository_source_pattern: 'ppa.launchpad.net/ondrej/php'
+librenms_ubuntu_php_version: "8.3"
 librenms_redhat_enable_epel: true
 librenms_redhat_enable_remi: false
 librenms_redhat_php_stream: "8.2"
 librenms_redhat_mariadb_stream: "10.11"
+# The supported RHEL-family database contract is the vendor 10.11 stream.
+# Newer vendor streams need a separate Galera upgrade and rollback validation.
+librenms_redhat_mariadb_expected_series: "10.11"
 librenms_redhat_enable_builder_repository: true
+# Prefer the distribution's subscription-manager CLI for exact RHEL. The
+# Ansible RHSM module remains the fallback for environments that expose the
+# subscription API without the CLI path.
+librenms_rhel_subscription_manager_cli_enabled: true
 librenms_redhat_remi_release_url: ""
 librenms_redhat_manage_selinux: true
+# RHEL 8's supported DNF bindings are provided by platform-python (3.6),
+# while ansible-core 2.21 requires Python 3.9+ on managed nodes.  Keep Ansible
+# on the managed runtime and use the native dnf CLI for package transactions.
+librenms_rhel8_package_cli_fallback: true
 librenms_redhat_selinux_web_booleans:
   - httpd_can_network_connect
   - httpd_can_network_connect_db

@@ -86,6 +86,8 @@ librenms_php_fpm_service_name: php-fpm
 librenms_redis_runtime_user: >-
   {{ 'valkey' if (ansible_distribution_major_version | int) >= 10 else 'redis' }}
 librenms_redis_runtime_group: "{{ librenms_redis_runtime_user }}"
+librenms_redis_runtime_dir: >-
+  {{ '/run/valkey' if (ansible_distribution_major_version | int) >= 10 else '/run/redis' }}
 librenms_redis_data_dir: >-
   {{ '/var/lib/valkey' if (ansible_distribution_major_version | int) >= 10 else '/var/lib/redis' }}
 librenms_redis_server_binary: >-

@@ -3,7 +3,105 @@
   package:
     name: "{{ librenms_redis_packages }}"
     state: present
-  when: librenms_redis_mode in ['local', 'sentinel', 'external']
+  when:
+    - librenms_redis_mode in ['local', 'sentinel', 'external']
+    - >-
+      not (
+        ansible_os_family == 'RedHat'
+        and ansible_distribution_major_version | int == 8
+        and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+      )
+
+- name: Install Redis packages through native DNF on RHEL 8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'install'] + librenms_redis_packages }}
+  register: librenms_rhel8_redis_package_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_redis_package_install.stdout | default('')) ~
+    (librenms_rhel8_redis_package_install.stderr | default('')))
+  when:
+    - librenms_redis_mode in ['local', 'sentinel', 'external']
+    - ansible_os_family == 'RedHat'
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Verify Redis or Valkey runtime mapping for Sentinel
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ librenms_redis_server_binary }}"
+    - "{{ librenms_redis_cli_binary }}"
+  register: librenms_redis_sentinel_runtime_paths
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Verify native Redis or Valkey Sentinel unit exists
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - list-unit-files
+      - "{{ librenms_redis_sentinel_service_name_effective }}.service"
+  register: librenms_redis_sentinel_native_unit
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Determine whether the native Sentinel unit is usable
+  ansible.builtin.set_fact:
+    librenms_redis_sentinel_native_service_available: >-
+      {{
+        (librenms_redis_sentinel_native_unit.rc | default(1) | int) == 0
+        and
+        (
+          (librenms_redis_sentinel_native_unit.stdout | default(''))
+          is search(librenms_redis_sentinel_native_service_name ~ '\\.service')
+        )
+      }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Select the native or project-managed Sentinel service
+  ansible.builtin.set_fact:
+    librenms_redis_sentinel_service_name_effective: >-
+      {{
+        librenms_redis_sentinel_native_service_name
+        if librenms_redis_sentinel_native_service_available | bool
+        else librenms_redis_sentinel_custom_service_name
+      }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+
+- name: Fail early when Redis or Valkey Sentinel mapping is incomplete
+  ansible.builtin.assert:
+    that:
+      - >-
+        librenms_redis_sentinel_runtime_paths.results
+        | selectattr('stat.exists', 'equalto', true)
+        | list
+        | length == 2
+      - >-
+        librenms_redis_sentinel_native_service_available | bool
+        or librenms_redis_sentinel_allow_custom_service_fallback | bool
+      - librenms_redis_sentinel_service_name_effective | length > 0
+    fail_msg: >-
+      The {{ ansible_distribution }} {{ ansible_distribution_version }} Sentinel
+      mapping is incomplete. Expected server={{ librenms_redis_server_binary }},
+      cli={{ librenms_redis_cli_binary }}, service={{
+      librenms_redis_sentinel_native_service_name }}. The native unit was
+      {{ 'found' if librenms_redis_sentinel_native_service_available | bool else 'not found' }}.
+      A project-managed fallback is {{
+      'enabled' if librenms_redis_sentinel_allow_custom_service_fallback | bool else 'disabled' }}.
+      Confirm the Redis/Valkey binaries and service policy for this exact OS.
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
 
 - name: Ensure Redis config parent directory exists when needed
   file:
@@ -434,6 +532,7 @@
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
+    - librenms_redis_sentinel_native_service_available | bool
 
 - name: Deploy Redis Sentinel native systemd override
   template:
@@ -446,6 +545,7 @@
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
+    - librenms_redis_sentinel_native_service_available | bool
 
 - name: Stop legacy LibreNMS Redis Sentinel custom service before native takeover
   service:
@@ -455,6 +555,7 @@
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
+    - librenms_redis_sentinel_native_service_available | bool
 
 - name: Remove legacy LibreNMS Redis Sentinel custom unit
   file:
@@ -463,20 +564,24 @@
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
+    - librenms_redis_sentinel_native_service_available | bool
+
+- name: Deploy project-managed Redis Sentinel unit when native unit is unavailable
+  ansible.builtin.template:
+    src: librenms-redis-sentinel.service.j2
+    dest: "/etc/systemd/system/{{ librenms_redis_sentinel_custom_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Redis Sentinel
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_service_mgr == 'systemd'
+    - not (librenms_redis_sentinel_native_service_available | bool)
 
 - name: Reload systemd after sentinel unit changes
   systemd:
     daemon_reload: true
-  when:
-    - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
-
-- name: Stop and disable legacy LibreNMS Redis Sentinel custom service
-  service:
-    name: "{{ librenms_redis_sentinel_custom_service_name }}"
-    state: stopped
-    enabled: false
-  failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_service_mgr == 'systemd'
@@ -665,12 +770,34 @@
         | difference(librenms_inactive_inventory_nodes | default([]))
         | list
       }}
-    librenms_redis_sentinel_consensus_controller_host: >-
+    librenms_redis_sentinel_consensus_controller_candidates: >-
       {{
         (
           groups.get('librenms_redis', [])
           | difference(librenms_inactive_inventory_nodes | default([]))
+          | intersect(ansible_play_hosts_all | default([]))
           | list
+        )
+        if (ansible_play_hosts_all | default([]) | length > 0)
+        else []
+      }}
+    librenms_redis_sentinel_consensus_inactive_nodes: >-
+      {{
+        groups.get('librenms_redis', [])
+        | intersect(librenms_inactive_inventory_nodes | default([]))
+        | list
+      }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+
+- name: Select Redis Sentinel consensus controller host
+  set_fact:
+    librenms_redis_sentinel_consensus_controller_host: >-
+      {{
+        (
+          librenms_redis_sentinel_consensus_controller_candidates
+          if (librenms_redis_sentinel_consensus_controller_candidates | length > 0)
+          else librenms_redis_sentinel_consensus_query_nodes
         )
         | last
       }}
@@ -688,6 +815,17 @@
       contains {{ librenms_redis_sentinel_consensus_query_nodes | length }} node(s),
       but quorum requires {{ librenms_redis_quorum }}. Query nodes:
       {{ librenms_redis_sentinel_consensus_query_nodes | join(', ') }}.
+      Inventory Redis nodes:
+      {{ groups.get('librenms_redis', []) | join(', ') }}.
+      Inactive/excluded Redis nodes:
+      {{ librenms_redis_sentinel_consensus_inactive_nodes | default([]) | join(', ') | default('none', true) }}.
+      Hosts no longer participating in this site play:
+       {{
+         librenms_redis_sentinel_consensus_query_nodes
+         | difference(ansible_play_hosts_all | default([]))
+         | join(', ')
+         | default('none', true)
+       }}.
       Check the librenms_redis inventory group and remove unintended entries
       from maintenance_nodes or decommission_nodes.
   when:
@@ -782,34 +920,58 @@
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
 
-- name: Verify Redis Sentinels agree on one master
-  assert:
-    that:
-      - >-
+- name: Determine whether Redis Sentinel consensus is currently healthy
+  set_fact:
+    librenms_redis_sentinel_consensus_initial_ok: >-
+      {{
         (librenms_redis_sentinel_consensus_master_reports | length)
         >= (librenms_redis_quorum | int)
-      - librenms_redis_sentinel_consensus_masters | length == 1
-      - librenms_redis_sentinel_consensus_masters | first | length > 0
-      - "':' in (librenms_redis_sentinel_consensus_masters | first)"
-    fail_msg: >-
-      Redis Sentinels do not agree on the current master for
-      {{ librenms_redis_sentinel_service }}, or too few Sentinels were
-      reachable for quorum. Reported masters:
+        and librenms_redis_sentinel_consensus_masters | length == 1
+        and (librenms_redis_sentinel_consensus_masters | first | length > 0)
+        and (':' in (librenms_redis_sentinel_consensus_masters | first))
+      }}
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
+
+- name: Report Redis Sentinel consensus convergence before repair
+  debug:
+    msg: >-
+      Redis Sentinel {{ librenms_redis_sentinel_service }} is not yet at a
+      safe quorum. Automatic configured-master repair will run before the
+      deployment continues. Reported masters:
       {{ librenms_redis_sentinel_consensus_master_reports | default([]) | join(', ') }}.
       Query nodes:
       {{ librenms_redis_sentinel_consensus_query_nodes | default([]) | join(', ') }}.
+      Inventory Redis nodes:
+      {{ groups.get('librenms_redis', []) | join(', ') }}.
+      Inactive/excluded Redis nodes:
+      {{ librenms_redis_sentinel_consensus_inactive_nodes | default([]) | join(', ') | default('none', true) }}.
       Query failures:
       {{ librenms_redis_sentinel_consensus_query_failures | default([]) }}.
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
+    - not (librenms_redis_sentinel_consensus_initial_ok | bool)
 
 - name: Set Redis Sentinel consensus endpoint
   set_fact:
     librenms_redis_sentinel_consensus_master_host: >-
-      {{ (librenms_redis_sentinel_consensus_masters | first).split(':')[0] }}
+      {{
+        (
+          (librenms_redis_sentinel_consensus_masters | first).split(':')[0]
+          if librenms_redis_sentinel_consensus_initial_ok | bool
+          else hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host)
+        )
+      }}
     librenms_redis_sentinel_consensus_master_port: >-
-      {{ (librenms_redis_sentinel_consensus_masters | first).split(':')[1] }}
+      {{
+        (
+          (librenms_redis_sentinel_consensus_masters | first).split(':')[1]
+          if librenms_redis_sentinel_consensus_initial_ok | bool
+          else '6379'
+        )
+      }}
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
@@ -862,6 +1024,18 @@
     librenms_redis_sentinel_repair_attempted: false
     librenms_redis_sentinel_repair_consensus_ok: false
     librenms_redis_sentinel_repair_write_ok: false
+    librenms_redis_sentinel_consensus_needs_repair: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
+
+- name: Determine whether Redis Sentinel repair is required
+  set_fact:
+    librenms_redis_sentinel_consensus_needs_repair: >-
+      {{
+        not (librenms_redis_sentinel_consensus_initial_ok | bool)
+        or (librenms_redis_sentinel_consensus_write_check.rc | default(1) | int) != 0
+      }}
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
@@ -883,7 +1057,7 @@
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
-    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - librenms_redis_sentinel_consensus_needs_repair | bool
     - librenms_redis_sentinel_enforce_configured_master | bool
 
 - name: Set Redis Sentinel repair replica nodes
@@ -891,19 +1065,19 @@
     librenms_redis_sentinel_repair_replica_nodes: >-
       {{
         librenms_redis_sentinel_repair_non_master_nodes
-        | intersect(ansible_play_hosts_all)
+        | intersect(librenms_redis_sentinel_consensus_query_nodes)
       }}
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
-    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - librenms_redis_sentinel_consensus_needs_repair | bool
     - librenms_redis_sentinel_enforce_configured_master | bool
 
-- name: Repair Redis Sentinel consensus master after failed write check
+- name: Repair Redis Sentinel consensus master after failed quorum or write check
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
-    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - librenms_redis_sentinel_consensus_needs_repair | bool
     - librenms_redis_sentinel_enforce_configured_master | bool
   block:
     - name: Promote configured Redis master after failed consensus write
@@ -1087,10 +1261,17 @@
     - librenms_redis_sentinel_repair_consensus_ok | default(false) | bool
     - librenms_redis_sentinel_repair_write_ok | default(false) | bool
 
-- name: Fail when Redis Sentinel consensus master cannot accept cache writes
+- name: Fail when Redis Sentinel cannot converge on a writable quorum
   fail:
     msg: |-
-      Redis Sentinels agreed on {{ librenms_redis_sentinel_consensus_master_host }}:{{
+      Redis Sentinel {{ librenms_redis_sentinel_service }} did not converge
+      on a safe, writable quorum.
+
+      Initial consensus was healthy:
+      {{ librenms_redis_sentinel_consensus_initial_ok | default(false) }}
+
+      Redis Sentinel endpoint tested:
+      {{ librenms_redis_sentinel_consensus_master_host }}:{{
       librenms_redis_sentinel_consensus_master_port }}, but that endpoint did
       not accept cache writes after {{ librenms_redis_sentinel_consensus_retries }}
       attempts.
@@ -1113,7 +1294,7 @@
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host
-    - (librenms_redis_sentinel_consensus_write_check.rc | default(0) | int) != 0
+    - librenms_redis_sentinel_consensus_needs_repair | bool
     - >-
       not (
         librenms_redis_sentinel_repair_consensus_ok | default(false) | bool

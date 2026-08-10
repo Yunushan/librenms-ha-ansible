@@ -79,6 +79,12 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml --ask-become-p
 ansible-playbook -i inventories/ha/hosts.yml playbooks/cluster.yml --ask-become-pass
 ```
 
+The site deployment is fail-fast across the active inventory. If one host
+fails, Ansible stops the remaining site plays instead of continuing with a
+partially converged database, Redis, or load-balancer set. Fix the reported
+host, confirm its service state, and rerun the same command; later quorum
+errors from surviving hosts should not be treated as an independent failure.
+
 4. On the first install only, finish the LibreNMS web bootstrap at the VIP or
 node URL, then rerun `cluster.yml`. This lets the playbook apply the
 post-bootstrap distributed-poller, scheduler, Redis, and dispatcher settings.
@@ -504,7 +510,7 @@ librenms_backup_pre_upgrade_required: true
 ```
 
 The timer starts at 03:00 local time with up to 30 minutes of jitter by default.
-In HA mode, every run first takes a shared GlusterFS `flock` before performing
+In HA mode, every run first takes a shared RRD filesystem `flock` before performing
 any Git repair, backup, update, schema work, or cache refresh. This is
 deliberately not implemented with only MariaDB `GET_LOCK()`: named locks are
 local to one Galera member and therefore are not a cluster-wide mutex behind a
@@ -519,7 +525,9 @@ wrapper, clearing Laravel caches, and restarting PHP-FPM.
 
 HA mode also uses a deterministic canary by default: the first active web node
 in inventory is the canary, and all other nodes wait for its same-day healthy
-completion record on GlusterFS before they can start their own maintenance.
+completion record on the shared RRD filesystem before they can start their own
+maintenance. In Gluster mode this is the Gluster-backed RRD path; in external
+mode it is the mounted NFS/NFSv4 RRD path.
 The record is written only after the canary's post-update runtime probe has
 passed, then waits five minutes by default before followers continue. If the
 canary fails or never becomes healthy, followers skip their unattended update
@@ -571,9 +579,11 @@ default cleanup window is 30 days and is controlled by
 `librenms_daily_self_heal_notification_cleanup_days`.
 
 `playbooks/production-readiness.yml` verifies that the maintenance-lock path is
-mounted from GlusterFS and launches a short simultaneous lock probe from every
-active web node. Exactly one node must acquire the lock. A failure here blocks a
-production declaration because automatic updates could otherwise overlap.
+mounted from the selected shared RRD filesystem and launches a short simultaneous
+lock probe from every active web node. Exactly one node must acquire the lock. A
+failure here blocks a production declaration because automatic updates could
+otherwise overlap. Gluster-specific health is checked only in Gluster mode;
+external mode validates the NFS/NFSv4 mount and write path instead.
 
 The backup wrapper serializes scheduled and pre-upgrade backups on their
 coordinator host. A pre-upgrade backup waits for an existing local backup up to
@@ -971,6 +981,15 @@ redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster
 
 All reachable Sentinels should agree on one master. Exactly one Redis node should
 accept writes as master.
+
+During normal `site.yml` convergence, a transient Sentinel split is treated as a
+recoverable state. The role queries the complete active `librenms_redis` inventory
+group, points replicas at `librenms_redis_master_host`, resets and flushes Sentinel
+state, and retries the quorum and write checks. It still fails closed if the
+configured quorum cannot be restored, or if `librenms_redis_sentinel_enforce_configured_master`
+is disabled. Do not lower `librenms_redis_quorum` to hide an unreachable node;
+repair the node or explicitly move it to the inventory's maintenance/decommission
+list first.
 
 If a playbook appears stuck on `Restart Redis service`, check whether Redis is
 waiting on a shutdown snapshot:

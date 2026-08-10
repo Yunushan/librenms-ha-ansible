@@ -36,7 +36,7 @@ case "${TARGET_IMAGE}" in
         docker exec --env DEBIAN_FRONTEND=noninteractive "${TARGET_CONTAINER}" \
             bash -lc 'apt-get update -q && apt-get install -y --no-install-recommends ca-certificates openssh-server'
         ;;
-    rockylinux/*|almalinux:*)
+    rockylinux/*|almalinux:*|rhel:*|registry.access.redhat.com/*|registry.redhat.io/*)
         docker exec "${TARGET_CONTAINER}" \
             bash -lc 'dnf -y install ca-certificates openssh-server'
         ;;

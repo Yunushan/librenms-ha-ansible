@@ -34,6 +34,8 @@ main() {
     contains "${DEFAULTS_FILE}" '- "12.3"'
     contains "${DEFAULTS_FILE}" 'librenms_mariadb_upstream_galera_supported_series:'
     contains "${TASKS_FILE}" 'librenms_mariadb_upstream_galera_supported_series'
+    contains "${DEFAULTS_FILE}" 'librenms_ubuntu_mariadb_expected_series:'
+    contains "${TASKS_FILE}" 'Enforce the supported Ubuntu distro MariaDB server series'
     contains "${TASKS_FILE}" '--mariadb-server-version=mariadb-{{ librenms_mariadb_upstream_series }}'
     contains "${TASKS_FILE}" 'checksum: "{{ librenms_mariadb_upstream_repo_setup_checksum }}"'
     does_not_contain "${TASKS_FILE}" 'librenms_mariadb_allow_experimental_series'

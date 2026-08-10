@@ -3,7 +3,29 @@
   package:
     name: "{{ librenms_galera_packages }}"
     state: present
-  when: librenms_db_mode == 'galera'
+  when:
+    - librenms_db_mode == 'galera'
+    - >-
+      not (
+        ansible_os_family == 'RedHat'
+        and ansible_distribution_major_version | int == 8
+        and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+      )
+
+- name: Install Galera packages through native DNF on RHEL 8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'install'] + librenms_galera_packages }}
+  register: librenms_rhel8_galera_package_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_galera_package_install.stdout | default('')) ~
+    (librenms_rhel8_galera_package_install.stderr | default('')))
+  when:
+    - librenms_db_mode == 'galera'
+    - ansible_os_family == 'RedHat'
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Deploy Galera config
   template:

@@ -24,7 +24,7 @@ This repository supports five practical patterns:
       ├── LibreNMS Web / Poller / Dispatcher
       ├── MariaDB Galera
       ├── Redis + Sentinel
-      ├── GlusterFS brick
+      ├── Shared RRD storage
       └── Nginx + PHP-FPM
 ```
 
@@ -35,7 +35,8 @@ This repository supports five practical patterns:
 - `librenms_db`: database hosts
 - `librenms_redis`: redis and sentinel hosts
 - `lb_nodes`: haproxy / keepalived hosts
-- `gluster_nodes`: shared RRD storage hosts
+- `gluster_nodes`: shared RRD storage hosts (Gluster mode only)
+- external RRD storage: an operator-managed NFS/NFSv4 export (external mode)
 - `ansible_controller`: optional AWX controller VM
 
 ## Operating advice
@@ -82,8 +83,11 @@ Supported as a planned change, but test carefully.
 ### Redis node
 Supported as a planned change, but test carefully.
 
-### Gluster node
-Not treated as a casual operation. Rebalance and brick removal remain operator-reviewed.
+### Shared RRD storage
+Gluster rebalance and brick removal remain operator-reviewed in Gluster mode.
+External NFS/NFSv4 export, server, and authorization changes are also
+operator-reviewed; the playbook validates the mount and write path but does not
+repair the external storage service.
 
 ## Experimental Dockerized HA
 

@@ -32,7 +32,7 @@
         argv:
           - /opt/librenms-ha-ansible/python/bin/python
           - -c
-          - import pymysql, redis
+          - import command_runner, dotenv, psutil, pymysql, redis, setuptools
       changed_when: false
 
     - name: Verify the package-manager smoke package

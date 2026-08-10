@@ -9,8 +9,16 @@
     librenms_platform_python_binary: "{{ librenms_platform_python_root }}/bin/python"
     librenms_platform_pymysql_version: >-
       {{ librenms_managed_python_pymysql_version | default('1.1.2') }}
+    librenms_platform_dotenv_version: >-
+      {{ librenms_managed_python_dotenv_version | default('1.0.1') }}
     librenms_platform_redis_version: >-
       {{ librenms_managed_python_redis_version | default('5.0.7') }}
+    librenms_platform_setuptools_version: >-
+      {{ librenms_managed_python_setuptools_version | default('75.9.1') }}
+    librenms_platform_psutil_version: >-
+      {{ librenms_managed_python_psutil_version | default('7.0.0') }}
+    librenms_platform_command_runner_version: >-
+      {{ librenms_managed_python_command_runner_version | default('1.7.6') }}
   tasks:
     - name: Install and prepare the managed target Python runtime
       ansible.builtin.raw: |
@@ -45,9 +53,9 @@
             else
               target_python=/usr/bin/python3
             fi
-            # ansible-core 2.20+ requires Python 3.9 or newer on targets. Its
-            # DNF module can use the system package-manager interpreter while
-            # the rest of the module runs from this supported managed venv.
+            # ansible-core 2.21 requires Python 3.9 or newer on targets. RHEL 8
+            # keeps its DNF bindings in platform-python, so the role uses the
+            # native dnf CLI for package transactions after this bootstrap.
             ansible_python="${python_bin}"
             ;;
           *)
@@ -81,16 +89,36 @@
         current_pymysql=$("${python_bin}" -c \
           'import importlib.metadata; print(importlib.metadata.version("PyMySQL"))' \
           2>/dev/null || true)
+        current_dotenv=$("${python_bin}" -c \
+          'import importlib.metadata; print(importlib.metadata.version("python-dotenv"))' \
+          2>/dev/null || true)
         current_redis=$("${python_bin}" -c \
           'import importlib.metadata; print(importlib.metadata.version("redis"))' \
           2>/dev/null || true)
+        current_setuptools=$("${python_bin}" -c \
+          'import importlib.metadata; print(importlib.metadata.version("setuptools"))' \
+          2>/dev/null || true)
+        current_psutil=$("${python_bin}" -c \
+          'import importlib.metadata; print(importlib.metadata.version("psutil"))' \
+          2>/dev/null || true)
+        current_command_runner=$("${python_bin}" -c \
+          'import importlib.metadata; print(importlib.metadata.version("command_runner"))' \
+          2>/dev/null || true)
 
         if [ "${current_pymysql}" != {{ librenms_platform_pymysql_version | quote }} ] \
-          || [ "${current_redis}" != {{ librenms_platform_redis_version | quote }} ]; then
+          || [ "${current_dotenv}" != {{ librenms_platform_dotenv_version | quote }} ] \
+          || [ "${current_redis}" != {{ librenms_platform_redis_version | quote }} ] \
+          || [ "${current_setuptools}" != {{ librenms_platform_setuptools_version | quote }} ] \
+          || [ "${current_psutil}" != {{ librenms_platform_psutil_version | quote }} ] \
+          || [ "${current_command_runner}" != {{ librenms_platform_command_runner_version | quote }} ]; then
           "${python_bin}" -m pip install --disable-pip-version-check \
             "PyMySQL=={{ librenms_platform_pymysql_version }}" \
-            "redis=={{ librenms_platform_redis_version }}"
-            changed=1
+            "python-dotenv=={{ librenms_platform_dotenv_version }}" \
+            "redis=={{ librenms_platform_redis_version }}" \
+            "setuptools=={{ librenms_platform_setuptools_version }}" \
+            "psutil=={{ librenms_platform_psutil_version }}" \
+            "command_runner=={{ librenms_platform_command_runner_version }}"
+          changed=1
         fi
 
         if [ ! -x "${ansible_python}" ]; then

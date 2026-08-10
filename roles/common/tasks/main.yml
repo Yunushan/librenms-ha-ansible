@@ -26,6 +26,65 @@
         )
       }}
 
+- name: Validate production platform baseline before package changes
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution in librenms_supported_distribution_major_versions
+      - librenms_support_tier == 'primary'
+      - >-
+        (ansible_distribution_major_version | string)
+        in (librenms_supported_distribution_major_versions[ansible_distribution] | default([]))
+      - >-
+        librenms_platform_min_version | length == 0
+        or ansible_distribution_version
+        is version(librenms_platform_min_version, '>=')
+      - ansible_architecture in librenms_supported_architectures
+    fail_msg: >-
+      {{ ansible_distribution }} {{ ansible_distribution_version }} on
+      {{ ansible_architecture }} is outside the declared production platform
+      matrix. Supported primary distributions and minimum versions are:
+      {{ librenms_supported_distribution_min_versions }}. This check runs
+      before repository or package changes. Set
+      librenms_production_profile: false only for a reviewed lab or
+      vendor-supported exception.
+  vars:
+    librenms_platform_min_version: >-
+      {{
+        librenms_supported_distribution_min_versions
+        .get(ansible_distribution, {})
+        .get(ansible_distribution_major_version | string, '')
+      }}
+  when: librenms_production_profile | bool
+
+- name: Fail early when RHEL-family storage mode is unsupported
+  ansible.builtin.assert:
+    that:
+      - librenms_rrd_mode != 'glusterfs'
+    fail_msg: >-
+      RHEL-family hosts cannot use the in-node GlusterFS RRD mode because the
+      supported RHEL repositories do not provide a production-supported
+      glusterfs-server package. Use librenms_rrd_mode: external with a
+      reviewed NFS/NFSv4 source for HA, or local RRD storage for standalone
+      deployments.
+  when:
+    - ansible_os_family == 'RedHat'
+    - librenms_rrd_mode == 'glusterfs'
+
+- name: Require shared NFS RRD storage for RHEL-family HA
+  ansible.builtin.assert:
+    that:
+      - librenms_rrd_mode == 'external'
+      - librenms_external_rrd_fstype in ['nfs', 'nfs4']
+    fail_msg: >-
+      RHEL-family HA deployments require externally managed NFS/NFSv4 RRD
+      storage. Local RRD storage cannot be shared safely by multiple LibreNMS
+      web nodes. Set librenms_rrd_mode: external, provide a reviewed
+      librenms_external_rrd_source, and keep librenms_uid/librenms_gid identical
+      on every node.
+  when:
+    - ansible_os_family == 'RedHat'
+    - librenms_mode == 'ha'
+
 - name: Build active inventory host lists
   set_fact:
     librenms_active_web_nodes: >-
@@ -172,6 +231,49 @@
     - librenms_enable_extra_repos | bool
     - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
 
+- name: Install Ubuntu 22 PHP repository management dependency
+  apt:
+    name: software-properties-common
+    state: present
+    update_cache: false
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+
+- name: Check whether the supported Ubuntu 22 PHP repository is configured
+  ansible.builtin.shell: >-
+    grep -Rqs --include='*.list' --include='*.sources'
+    "{{ librenms_ubuntu_php_repository_source_pattern }}"
+    /etc/apt/sources.list /etc/apt/sources.list.d
+  register: librenms_ubuntu_php_repository_check
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+
+- name: Configure the supported PHP stream for Ubuntu 22
+  ansible.builtin.command:
+    argv:
+      - add-apt-repository
+      - --yes
+      - --no-update
+      - "{{ librenms_ubuntu_php_repository }}"
+  changed_when: true
+  # PPA management has no supported ansible-core module after apt_repository
+  # removal; software-properties is the Ubuntu-supported interface here.
+  # noqa command-instead-of-module
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+    - (librenms_ubuntu_php_repository_check.rc | default(1)) != 0
+
 - name: Refresh apt cache
   apt:
     update_cache: true
@@ -188,6 +290,29 @@
   package:
     name: "{{ librenms_base_packages + librenms_common_extra_packages }}"
     state: present
+  when: >-
+    not (
+      ansible_os_family == 'RedHat'
+      and (ansible_distribution_major_version | int) == 8
+      and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+    )
+
+- name: Install base packages through native DNF on RHEL 8
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['dnf', '-y', 'install']
+        + (librenms_base_packages + librenms_common_extra_packages)
+      }}
+  register: librenms_rhel8_base_package_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_base_package_install.stdout | default('')) ~
+    (librenms_rhel8_base_package_install.stderr | default('')))
+  when: >-
+    ansible_os_family == 'RedHat'
+    and (ansible_distribution_major_version | int) == 8
+    and (librenms_rhel8_package_cli_fallback | default(true) | bool)
 
 - name: Validate supported operating-system and runtime versions
   include_tasks: runtime_support.yml

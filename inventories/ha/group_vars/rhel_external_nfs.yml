@@ -1,0 +1,19 @@
+---
+# RHEL-family full HA profile.
+#
+# Add every RHEL web/DB/Redis/LB node to the `rhel_external_nfs` group in
+# hosts.yml. The source intentionally stays empty until the operator has
+# reviewed the NFS export, network path, and authorization policy. The
+# external_rrd role will fail before mounting anything until it is set.
+librenms_rrd_mode: external
+librenms_external_rrd_source: ""
+librenms_external_rrd_fstype: nfs4
+librenms_external_rrd_mount_options:
+  - rw
+  - hard
+  - noatime
+  - _netdev
+
+# These IDs must match the ownership IDs on the NFS export on every node.
+librenms_uid: 60000
+librenms_gid: 60000

@@ -2,6 +2,13 @@
 
 Production-minded Ansible automation for **LibreNMS standalone, distributed polling, and full HA** deployments across multiple Linux families.
 
+Ubuntu 26.04 and RHEL-family 8/9/10 are implemented primary targets. “Primary”
+means the repository owns the mappings and automated guardrails; it is not a
+substitute for the live VM acceptance and HA failure drills required before a
+production declaration. RHEL-family HA uses reviewed external NFS/NFSv4 RRD
+storage, and the supported RHEL database path is the vendor MariaDB 10.11
+stream.
+
 ![0BSD License](https://img.shields.io/badge/license-0BSD-green.svg)
 ![Ansible](https://img.shields.io/badge/ansible--core%202.20%2B-red.svg)
 ![LibreNMS](https://img.shields.io/badge/librenms-standalone%20%7C%20cluster-blue.svg)
@@ -284,7 +291,7 @@ production acceptance test on your exact image and architecture.
 
 | Distro | Tier | Notes |
 |---|---|---|
-| Ubuntu 22.04, 24.04, 26.04 | Primary | Native Debian-family packages; Ubuntu 26.04 is included in the package CI matrix |
+| Ubuntu 22.04, 24.04, 26.04 | Primary | Ubuntu 22.04 selects PHP 8.3 from the documented PHP PPA; 24.04/26.04 use native supported streams; all are covered by platform guardrails |
 | Debian | Primary | Best fit with upstream LibreNMS docs |
 | Linux Mint | Primary-ish | Uses Debian-family logic |
 | RHEL / Red Hat Enterprise Linux 8.10+, 9.4+, 10.x | Primary source path | Uses the same EL mappings as Rocky/Alma; subscribed RHEL images require an operator acceptance run |
@@ -310,6 +317,46 @@ NFS/NFSv4 storage because the repositories managed by this project do not
 provide a supported in-node Gluster server package. Run the
 full readiness, reboot, maintenance, and failover gates on the exact production
 images before declaring any cluster ready.
+
+Before the first RHEL deployment, run the exact package acceptance on each
+subscribed host from a Linux controller. This executes the smoke script on the
+managed host, so it validates the host's real CodeReady Builder, EPEL, and
+MariaDB/Valkey package sources:
+
+```bash
+make platform-acceptance PLATFORM_ACCEPTANCE_CONFIRM=true
+
+# Optional: select one host or a narrower inventory pattern.
+make platform-acceptance PLATFORM_ACCEPTANCE_CONFIRM=true \
+  PLATFORM_ACCEPTANCE_LIMIT=lnms1
+
+# Equivalent direct Ansible invocation:
+ansible librenms_nodes -i inventories/ha/hosts.yml -b \
+  -m ansible.builtin.script \
+  -a tests/platform/package-smoke.sh
+```
+
+The Make target runs one managed host at a time and requires explicit
+confirmation because package installation can start or restart distribution
+services. Use it before the first RHEL deployment and after an OS or repository
+change; it is not a daily maintenance command.
+
+The command requires RHEL 8.10+, 9.4+, or 10.x with the required subscription
+repositories enabled. It is an acceptance prerequisite, not a substitute for
+the HA readiness and failure drills.
+
+For the sample HA inventory, add every RHEL web/DB/Redis/LB host to the
+`rhel_external_nfs` group in `inventories/ha/hosts.yml`. That group selects the
+supported external NFS/NFSv4 RRD profile from
+`inventories/ha/group_vars/rhel_external_nfs.yml`; set its intentionally empty
+`librenms_external_rrd_source` to the reviewed export before running `make site`.
+
+The declared RHEL database path uses the vendor MariaDB 10.11 stream. Newer
+RHEL 9 and RHEL 10 minor releases may offer MariaDB 11.8, but the role does
+not select or certify that stream automatically. Site convergence verifies the
+installed RHEL-family server series and stops before configuration if it is not
+10.11; treat 11.8 as a separate version-specific Galera upgrade and validation
+project.
 
 The common role checks the installed runtime versions during convergence and
 fails early when a package stream falls outside the support matrix. See
@@ -382,8 +429,9 @@ nodes together unless you have accepted a full outage and have verified backups.
 ### Before upgrading
 
 1. Confirm that the target OS release is supported by LibreNMS and by this repo's
-   package mappings. Primary support is Ubuntu and Debian; other families should
-   be lab-tested first.
+   package mappings. Ubuntu/Debian and the declared RHEL-family 8/9/10 targets
+   have primary mappings; exact production images still require the live gates
+   in [docs/support-matrix.md](docs/support-matrix.md).
 2. Pin `librenms_version` to an explicit released tag instead of
    `latest-stable` if you need a repeatable maintenance window.
 3. Take VM snapshots or image backups for every node.

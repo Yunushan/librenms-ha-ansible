@@ -17,7 +17,29 @@
   ansible.builtin.package:
     name: "{{ awx_controller_prereq_packages }}"
     state: present
-  when: awx_controller_manage_prereq_packages | bool
+  when:
+    - awx_controller_manage_prereq_packages | bool
+    - >-
+      not (
+        ansible_os_family == 'RedHat'
+        and ansible_distribution_major_version | int == 8
+        and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+      )
+
+- name: Install AWX controller prerequisites through native DNF on RHEL 8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'install'] + awx_controller_prereq_packages }}
+  register: librenms_rhel8_awx_package_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_awx_package_install.stdout | default('')) ~
+    (librenms_rhel8_awx_package_install.stderr | default('')))
+  when:
+    - awx_controller_manage_prereq_packages | bool
+    - ansible_os_family == 'RedHat'
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Download k3s installer
   ansible.builtin.get_url:

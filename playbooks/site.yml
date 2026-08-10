@@ -6,6 +6,7 @@
   hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes
   become: true
   gather_facts: true
+  any_errors_fatal: true
   roles:
     - role: common
 
@@ -14,6 +15,7 @@
   become: true
   gather_facts: true
   serial: 1
+  any_errors_fatal: true
   roles:
     - role: mariadb
       when: librenms_db_mode in ['local', 'galera']
@@ -25,6 +27,7 @@
   become: true
   gather_facts: true
   serial: 1
+  any_errors_fatal: true
   roles:
     - role: redis_sentinel
       when: librenms_redis_mode in ['local', 'sentinel', 'external']
@@ -33,6 +36,7 @@
   hosts: gluster_nodes:!maintenance_nodes
   become: true
   gather_facts: true
+  any_errors_fatal: true
   roles:
     - role: glusterfs_rrd
       when: librenms_rrd_mode == 'glusterfs'
@@ -41,6 +45,7 @@
   hosts: librenms_nodes:!maintenance_nodes
   become: true
   gather_facts: true
+  any_errors_fatal: true
   roles:
     - role: external_rrd
       when: librenms_rrd_mode == 'external'
@@ -49,6 +54,7 @@
   hosts: librenms_nodes:!maintenance_nodes
   become: true
   gather_facts: true
+  any_errors_fatal: true
   roles:
     - role: snmpd
       when: librenms_manage_local_snmpd | bool
@@ -58,6 +64,7 @@
   become: true
   gather_facts: true
   serial: 1
+  any_errors_fatal: true
   roles:
     - role: librenms_app
 
@@ -66,6 +73,7 @@
   become: true
   gather_facts: true
   serial: 1
+  any_errors_fatal: true
   roles:
     - role: haproxy_keepalived
       when: librenms_vip_enabled | bool or (librenms_db_mode == 'galera') or ((librenms_active_web_nodes | default([])) | length > 1)
@@ -75,6 +83,7 @@
   become: true
   gather_facts: true
   serial: 1
+  any_errors_fatal: true
   roles:
     - role: host_firewall
       when: (librenms_manage_host_firewall | default(false)) | bool

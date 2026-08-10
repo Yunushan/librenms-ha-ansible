@@ -18,7 +18,8 @@ change.
 - [ ] Confirm the Ansible inventory matches the real cluster.
 - [ ] Confirm only the intentionally unavailable hosts are listed in
   `maintenance_nodes`.
-- [ ] Confirm no previous node is still rejoining Galera, Redis, or Gluster.
+- [ ] Confirm no previous node is still rejoining Galera, Redis, or the selected
+  shared RRD storage layer.
 - [ ] Confirm time sync is healthy on every node.
 - [ ] Confirm you have console or hypervisor access for every node.
 - [ ] Confirm the latest backup location is known and accessible.
@@ -80,12 +81,12 @@ Pass criteria:
 - The VIP is reachable.
 - Galera reports a primary component and synced reachable DB nodes.
 - Redis Sentinel reports one writable master.
-- Gluster is mounted and RRDCacheD is reachable.
+- The selected shared RRD storage is mounted and RRDCacheD is reachable.
 - LibreNMS validation is green.
 - LibreNMS device pages resume graph updates after the next poll cycle.
 
-Do not begin maintenance on another Galera, Redis, or Gluster member until this
-checklist passes.
+Do not begin maintenance on another Galera, Redis, or shared-storage member
+until this checklist passes.
 
 ## Hard Power-Off Test
 
@@ -160,7 +161,9 @@ Pass criteria:
 - Runtime gates report that DB, Redis, and RRD storage are usable.
 - Scheduler and dispatcher services are active where expected.
 - The VIP is reachable and owned by one load balancer.
-- Galera, Redis Sentinel, Gluster, HAProxy, and Keepalived are healthy.
+- Galera, Redis Sentinel, the selected shared RRD storage, HAProxy, and
+  Keepalived are healthy. Gluster healing is checked in Gluster mode; external
+  mode requires the NFS/NFSv4 export and mount to be healthy.
 - LibreNMS validation is green.
 
 Run `cluster.yml` only after this checklist if convergence reports drift that

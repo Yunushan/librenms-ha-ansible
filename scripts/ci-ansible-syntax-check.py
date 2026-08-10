@@ -46,6 +46,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    repo_root = Path(__file__).resolve().parent.parent
     playbooks = sorted(args.playbooks_dir.glob("*.yml"))
     if not playbooks:
         print(f"No playbooks found under {args.playbooks_dir}", file=sys.stderr)
@@ -53,6 +54,7 @@ def main() -> int:
 
     env = os.environ.copy()
     env.setdefault("ANSIBLE_HOST_KEY_CHECKING", "False")
+    env.setdefault("ANSIBLE_CONFIG", str(repo_root / "ansible.cfg"))
 
     ansible_playbook = shutil.which(args.ansible_playbook)
     if ansible_playbook is None:

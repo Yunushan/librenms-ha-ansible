@@ -375,7 +375,7 @@ def main() -> int:
     )
     failures += require(
         "roles/production_readiness/tasks/main.yml",
-        "Require a GlusterFS-backed HA maintenance lock",
+        "Require a shared-filesystem-backed HA maintenance lock",
         "Production readiness must verify the HA maintenance lock is shared",
     )
     failures += require(
@@ -385,12 +385,12 @@ def main() -> int:
     )
     failures += require(
         "roles/production_readiness/tasks/main.yml",
-        "Require a GlusterFS-backed daily-update canary state",
+        "Require a shared-filesystem-backed daily-update canary state",
         "Production readiness must verify the canary state is shared",
     )
     failures += require(
         "roles/production_readiness/tasks/main.yml",
-        "Require a GlusterFS-backed RRD directory on every HA web node",
+        "Require a shared-filesystem-backed RRD directory on every HA web node",
         "Production readiness must verify every HA web node uses shared RRD storage",
     )
     failures += require(
@@ -752,10 +752,19 @@ def main() -> int:
     if "--skip-verify" in read("roles/mariadb/tasks/main.yml"):
         failures.append("MariaDB repository setup must not bypass verification")
 
-    if "apt_repository:" in read("roles/common/tasks/main.yml"):
-        failures.append("Ubuntu repository management must use deb822_repository")
+    common_tasks = read("roles/common/tasks/main.yml")
+    default_values = read("roles/librenms_defaults/defaults/main.yml")
+    if "apt_repository:" in common_tasks:
+        if (
+            "ppa:ondrej/php" not in (common_tasks + default_values)
+            or "librenms_ubuntu_php_repository_enabled" not in common_tasks
+            or "(ansible_distribution_major_version | int) == 22" not in common_tasks
+        ):
+            failures.append(
+                "Ubuntu repository management must use deb822_repository except for the explicit Ubuntu 22 PHP PPA"
+            )
 
-    if "deb822_repository:" not in read("roles/common/tasks/main.yml"):
+    if "deb822_repository:" not in common_tasks:
         failures.append("Ubuntu repository management must declare deb822_repository")
 
     role_files = (ROOT / "roles").rglob("*.yml")

@@ -25,6 +25,26 @@
   package:
     name: "{{ librenms_syslog_packages }}"
     state: present
+  when: >-
+    not (
+      ansible_os_family == 'RedHat'
+      and ansible_distribution_major_version | int == 8
+      and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+    )
+
+- name: Install LibreNMS syslog receiver packages through native DNF on RHEL 8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'install'] + librenms_syslog_packages }}
+  register: librenms_rhel8_syslog_package_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_syslog_package_install.stdout | default('')) ~
+    (librenms_rhel8_syslog_package_install.stderr | default('')))
+  when:
+    - ansible_os_family == 'RedHat'
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Gather service facts for syslog firewall detection
   service_facts:

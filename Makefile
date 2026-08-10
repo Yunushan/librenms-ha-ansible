@@ -99,9 +99,15 @@ test-docker-ha-galera-config:
 
 integration-platform-runtime:
 	docker compose build ansible
+	bash tests/platform/managed-runtime-smoke.sh ubuntu:22.04 3.10 ubuntu-22
+	bash tests/platform/managed-runtime-smoke.sh ubuntu:24.04 3.12 ubuntu-24
 	bash tests/platform/managed-runtime-smoke.sh ubuntu:26.04 3.14 ubuntu-26
 	bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:8 3.11 rocky-8
+	bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:9 3.9 rocky-9
 	bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:10 3.12 rocky-10
+	bash tests/platform/managed-runtime-smoke.sh almalinux:8 3.11 alma-8
+	bash tests/platform/managed-runtime-smoke.sh almalinux:9 3.9 alma-9
+	bash tests/platform/managed-runtime-smoke.sh almalinux:10 3.12 alma-10
 
 integration-haproxy-web:
 	bash tests/integration/haproxy-web/test.sh
@@ -289,3 +295,18 @@ docker-awx-controller:
 
 docker-awx-bootstrap:
 	$(DOCKER_ANSIBLE) ansible-playbook -i $(AWX_INVENTORY) playbooks/awx-bootstrap.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+PLATFORM_ACCEPTANCE_CONFIRM ?= false
+PLATFORM_ACCEPTANCE_LIMIT ?= librenms_nodes
+
+.PHONY: platform-acceptance
+
+# This installs and verifies the platform package contract on the selected
+# managed hosts. Keep it explicit because package installation can start or
+# restart distribution services on an existing machine.
+platform-acceptance:
+	@if [ "$(PLATFORM_ACCEPTANCE_CONFIRM)" != "true" ]; then \
+		printf '%s\n' 'Refusing platform acceptance: set PLATFORM_ACCEPTANCE_CONFIRM=true explicitly.' >&2; \
+		exit 2; \
+	fi
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/platform-acceptance.yml --limit "$(PLATFORM_ACCEPTANCE_LIMIT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)

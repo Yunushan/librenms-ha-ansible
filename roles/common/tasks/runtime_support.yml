@@ -1,4 +1,21 @@
 ---
+- name: Require a primary distribution for production profile
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution in librenms_supported_distribution_major_versions
+      - librenms_support_tier == 'primary'
+      - >-
+        (ansible_distribution_major_version | string)
+        in (librenms_supported_distribution_major_versions[ansible_distribution] | default([]))
+    fail_msg: >-
+      {{ ansible_distribution }} {{ ansible_distribution_version }} is not a
+      primary production target for this repository. Production profile
+      deployments require a supported Ubuntu/Debian or RHEL-family primary
+      distribution and a supported major release. Set
+      librenms_production_profile=false only for a reviewed non-production or
+      vendor-supported exception.
+  when: librenms_production_profile | bool
+
 - name: Validate supported target architecture
   ansible.builtin.assert:
     that:

@@ -136,7 +136,100 @@
   package:
     name: "{{ librenms_db_packages }}"
     state: present
-  when: librenms_db_mode in ['local', 'galera']
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - >-
+      not (
+        ansible_os_family == 'RedHat'
+        and ansible_distribution_major_version | int == 8
+        and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+      )
+
+- name: Install MariaDB packages through native DNF on RHEL 8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'install'] + librenms_db_packages }}
+  register: librenms_rhel8_mariadb_package_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_mariadb_package_install.stdout | default('')) ~
+    (librenms_rhel8_mariadb_package_install.stderr | default('')))
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - ansible_os_family == 'RedHat'
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Detect installed RHEL-family MariaDB server series
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --version
+  register: librenms_redhat_mariadb_version_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'RedHat'
+    - librenms_db_mode in ['local', 'galera']
+
+- name: Enforce the supported RHEL-family MariaDB server series
+  ansible.builtin.assert:
+    that:
+      - librenms_redhat_mariadb_version_probe.rc == 0
+      - >-
+        (
+          librenms_redhat_mariadb_version_probe.stdout
+          | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
+          | first
+          | default('')
+        ) == (librenms_redhat_mariadb_expected_series | string)
+    fail_msg: >-
+      RHEL-family MariaDB stream is outside this role's production contract.
+      Expected {{ librenms_redhat_mariadb_expected_series }}, found:
+      {{ librenms_redhat_mariadb_version_probe.stdout | default('unavailable') }}.
+      Select the vendor 10.11 stream or use a separately validated Galera
+      upgrade/rollback workflow for a newer stream.
+  when:
+    - ansible_os_family == 'RedHat'
+    - librenms_db_mode in ['local', 'galera']
+
+- name: Detect installed Ubuntu distro MariaDB server series
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --version
+  register: librenms_ubuntu_mariadb_version_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'distro'
+    - ansible_distribution_major_version in librenms_ubuntu_mariadb_expected_series
+
+- name: Enforce the supported Ubuntu distro MariaDB server series
+  ansible.builtin.assert:
+    that:
+      - librenms_ubuntu_mariadb_version_probe.rc == 0
+      - >-
+        (
+          librenms_ubuntu_mariadb_version_probe.stdout
+          | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
+          | first
+          | default('')
+        ) == (librenms_ubuntu_mariadb_expected_series[ansible_distribution_major_version] | string)
+    fail_msg: >-
+      Ubuntu distro MariaDB stream is outside this role's production contract.
+      Ubuntu {{ ansible_distribution_version }} expects MariaDB
+      {{ librenms_ubuntu_mariadb_expected_series[ansible_distribution_major_version] }},
+      found: {{ librenms_ubuntu_mariadb_version_probe.stdout | default('unavailable') }}.
+      Use the matching Ubuntu LTS package stream or select the separately
+      validated upstream repository mode on a fresh, non-Galera install.
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_repository_mode == 'distro'
+    - ansible_distribution_major_version in librenms_ubuntu_mariadb_expected_series
 
 - name: Deploy MariaDB tuning config
   template:

@@ -3,6 +3,29 @@
   ansible.builtin.package:
     name: policycoreutils-python-utils
     state: present
+  when: >-
+    not (
+      ansible_os_family == 'RedHat'
+      and ansible_distribution_major_version | int == 8
+      and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+    )
+
+- name: Install SELinux policy tooling through native DNF on RHEL 8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - policycoreutils-python-utils
+  register: librenms_rhel8_selinux_package_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_selinux_package_install.stdout | default('')) ~
+    (librenms_rhel8_selinux_package_install.stderr | default('')))
+  when:
+    - ansible_os_family == 'RedHat'
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Read required SELinux web booleans
   ansible.builtin.command:

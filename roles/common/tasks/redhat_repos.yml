@@ -1,9 +1,49 @@
 ---
+- name: Validate the supported RHEL-family MariaDB stream
+  ansible.builtin.assert:
+    that:
+      - librenms_redhat_mariadb_stream | string == '10.11'
+      - librenms_redhat_mariadb_expected_series | string == '10.11'
+    fail_msg: >-
+      This production RHEL-family profile is pinned to MariaDB 10.11, including
+      the vendor Galera package set. RHEL 9/10 may expose newer MariaDB streams,
+      but this role does not silently select or certify them. Use a separate
+      version-specific Galera upgrade and rollback workflow before changing
+      librenms_redhat_mariadb_stream.
+  when:
+    - >-
+      ansible_distribution in [
+        'RedHat', 'Red Hat Enterprise Linux', 'Rocky', 'AlmaLinux', 'CentOS'
+      ]
+    - librenms_db_mode in ['local', 'galera']
+
 - name: Install DNF repository management tooling
   ansible.builtin.package:
     name: dnf-plugins-core
     state: present
-  when: ansible_distribution != 'Fedora'
+  when: >-
+    ansible_distribution != 'Fedora'
+    and not (
+      ansible_distribution_major_version | int == 8
+      and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+    )
+
+- name: Install DNF repository tooling through the native CLI on RHEL 8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - dnf-plugins-core
+  register: librenms_rhel8_dnf_plugins_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_dnf_plugins_install.stdout | default('')) ~
+    (librenms_rhel8_dnf_plugins_install.stderr | default('')))
+  when:
+    - ansible_distribution != 'Fedora'
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Determine RedHat-family builder repository name
   ansible.builtin.set_fact:
@@ -44,7 +84,86 @@
       librenms_redhat_builder_repository
       not in (librenms_redhat_builder_repository_probe.stdout | default(''))
 
-- name: Enable RHEL CodeReady Builder repository
+- name: Locate the native RHEL subscription-manager CLI
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /usr/sbin/subscription-manager
+    - /usr/bin/subscription-manager
+  register: librenms_rhel_subscription_manager_candidates
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - librenms_rhel_subscription_manager_cli_enabled | default(true) | bool
+    - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
+
+- name: Select the native RHEL subscription-manager CLI
+  ansible.builtin.set_fact:
+    librenms_rhel_subscription_manager_path: >-
+      {{
+        librenms_rhel_subscription_manager_candidates.results
+        | default([])
+        | selectattr('stat.exists', 'defined')
+        | selectattr('stat.exists')
+        | map(attribute='item')
+        | list
+        | first
+        | default('')
+      }}
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
+
+- name: Read enabled RHEL repositories through the native CLI
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_rhel_subscription_manager_path }}"
+      - repos
+      - --list-enabled
+  register: librenms_rhel_enabled_repositories
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
+    - librenms_rhel_subscription_manager_path | default('') | length > 0
+
+- name: Enable RHEL CodeReady Builder repository through the native CLI
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_rhel_subscription_manager_path }}"
+      - repos
+      - --enable
+      - >-
+        codeready-builder-for-rhel-{{ ansible_distribution_major_version }}-{{ ansible_architecture }}-rpms
+  register: librenms_rhel_builder_repository_enable
+  changed_when: true
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
+    - librenms_rhel_subscription_manager_path | default('') | length > 0
+    - >-
+      ('codeready-builder-for-rhel-' ~ ansible_distribution_major_version ~ '-'
+      ~ ansible_architecture ~ '-rpms') not in
+      (librenms_rhel_enabled_repositories.stdout | default(''))
+
+- name: Verify RHEL CodeReady Builder repository through the native CLI
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_rhel_subscription_manager_path }}"
+      - repos
+      - --list-enabled
+  register: librenms_rhel_builder_repository_verify
+  changed_when: false
+  failed_when: >-
+    ('codeready-builder-for-rhel-' ~ ansible_distribution_major_version ~ '-'
+    ~ ansible_architecture ~ '-rpms') not in
+    (librenms_rhel_builder_repository_verify.stdout | default(''))
+  when:
+    - librenms_redhat_enable_builder_repository | bool
+    - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
+    - librenms_rhel_subscription_manager_path | default('') | length > 0
+
+- name: Enable RHEL CodeReady Builder repository through the Ansible RHSM fallback
   community.general.rhsm_repository:
     name: >-
       codeready-builder-for-rhel-{{ ansible_distribution_major_version }}-{{ ansible_architecture }}-rpms
@@ -52,6 +171,7 @@
   when:
     - librenms_redhat_enable_builder_repository | bool
     - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
+    - librenms_rhel_subscription_manager_path | default('') | length == 0
 
 - name: Install EPEL on community RedHat-family systems
   ansible.builtin.package:
@@ -60,12 +180,43 @@
   when:
     - librenms_redhat_enable_epel | bool
     - ansible_distribution in ['Rocky', 'AlmaLinux', 'CentOS']
+    - >-
+      not (
+        ansible_distribution_major_version | int == 8
+        and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+      )
+
+- name: Install EPEL through the native CLI on community EL8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - epel-release
+  register: librenms_rhel8_epel_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_epel_install.stdout | default('')) ~
+    (librenms_rhel8_epel_install.stderr | default('')))
+  when:
+    - librenms_redhat_enable_epel | bool
+    - ansible_distribution in ['Rocky', 'AlmaLinux', 'CentOS']
+    - ansible_distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Install signed EPEL release package on RHEL
-  ansible.builtin.dnf:
-    name: >-
-      https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm
-    state: present
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - >-
+        https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm
+  register: librenms_rhel_epel_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel_epel_install.stdout | default('')) ~
+    (librenms_rhel_epel_install.stderr | default('')))
   when:
     - librenms_redhat_enable_epel | bool
     - ansible_distribution in ['RedHat', 'Red Hat Enterprise Linux']
@@ -82,9 +233,17 @@
   when: librenms_redhat_enable_remi | bool
 
 - name: Install optional signed Remi repository package
-  ansible.builtin.dnf:
-    name: "{{ librenms_redhat_remi_release_url }}"
-    state: present
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - "{{ librenms_redhat_remi_release_url }}"
+  register: librenms_redhat_remi_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_redhat_remi_install.stdout | default('')) ~
+    (librenms_redhat_remi_install.stderr | default('')))
   when: librenms_redhat_enable_remi | bool
 
 - name: Reset PHP module before selecting the supported stream

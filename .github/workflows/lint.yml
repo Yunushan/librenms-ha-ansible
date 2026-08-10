@@ -17,6 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: ubuntu-22.04
+            image: ubuntu:22.04
+          - name: ubuntu-24.04
+            image: ubuntu:24.04
           - name: ubuntu-26.04
             image: ubuntu:26.04
           - name: rocky-8
@@ -154,9 +158,15 @@ jobs:
 
       - name: Exercise managed-host runtime compatibility
         run: |
+          bash tests/platform/managed-runtime-smoke.sh ubuntu:22.04 3.10 ubuntu-22
+          bash tests/platform/managed-runtime-smoke.sh ubuntu:24.04 3.12 ubuntu-24
           bash tests/platform/managed-runtime-smoke.sh ubuntu:26.04 3.14 ubuntu-26
           bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:8 3.11 rocky-8
+          bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:9 3.9 rocky-9
           bash tests/platform/managed-runtime-smoke.sh rockylinux/rockylinux:10 3.12 rocky-10
+          bash tests/platform/managed-runtime-smoke.sh almalinux:8 3.11 alma-8
+          bash tests/platform/managed-runtime-smoke.sh almalinux:9 3.9 alma-9
+          bash tests/platform/managed-runtime-smoke.sh almalinux:10 3.12 alma-10
 
   haproxy-web-failover:
     runs-on: ubuntu-24.04
