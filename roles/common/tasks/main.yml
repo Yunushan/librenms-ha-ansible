@@ -231,9 +231,12 @@
     - librenms_enable_extra_repos | bool
     - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
 
-- name: Install Ubuntu 22 PHP repository management dependency
+- name: Install Ubuntu 22 PHP repository prerequisites
   apt:
-    name: software-properties-common
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
     state: present
     update_cache: false
   when:
@@ -242,14 +245,90 @@
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
-- name: Check whether the supported Ubuntu 22 PHP repository is configured
-  ansible.builtin.shell: >-
-    grep -Rqs --include='*.list' --include='*.sources'
-    "{{ librenms_ubuntu_php_repository_source_pattern }}"
-    /etc/apt/sources.list /etc/apt/sources.list.d
-  register: librenms_ubuntu_php_repository_check
+- name: Ensure the Ubuntu PHP APT keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+
+- name: Remove the legacy Ondrej PHP trusted key import
+  ansible.builtin.file:
+    path: /etc/apt/trusted.gpg.d/ondrej-ubuntu-php.gpg
+    state: absent
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+
+- name: Find legacy Ondrej PHP source files
+  ansible.builtin.find:
+    paths: /etc/apt/sources.list.d
+    patterns: '*ondrej*php*'
+    file_type: file
+  register: librenms_ubuntu_php_legacy_sources
   changed_when: false
-  failed_when: false
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+
+- name: Remove legacy Ondrej PHP source files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ librenms_ubuntu_php_legacy_sources.files | default([]) }}"
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+    - item.path != librenms_ubuntu_php_repository_source_file
+
+- name: Install the verified Ondrej PHP signing key
+  ansible.builtin.get_url:
+    url: "{{ librenms_ubuntu_php_repository_key_url }}"
+    dest: "{{ librenms_ubuntu_php_repository_keyring }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+
+- name: Read the Ondrej PHP signing-key fingerprint
+  ansible.builtin.shell: |
+    set -o pipefail
+    gpg --batch --show-keys --with-colons "{{ librenms_ubuntu_php_repository_keyring }}" |
+      awk -F: '$1 == "fpr" { print toupper($10); exit }'
+  args:
+    executable: /bin/bash
+  register: librenms_ubuntu_php_key_fingerprint
+  changed_when: false
+  check_mode: false
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - (ansible_distribution_major_version | int) == 22
+    - librenms_enable_extra_repos | bool
+    - librenms_ubuntu_php_repository_enabled | bool
+
+- name: Validate the Ondrej PHP signing-key fingerprint
+  ansible.builtin.assert:
+    that:
+      - librenms_ubuntu_php_key_fingerprint.stdout | trim == librenms_ubuntu_php_repository_key_fingerprint
+    fail_msg: >-
+      The downloaded Ondrej PHP signing key fingerprint does not match the pinned
+      fingerprint. Refusing to configure the PHP repository.
   when:
     - ansible_distribution == 'Ubuntu'
     - (ansible_distribution_major_version | int) == 22
@@ -257,22 +336,22 @@
     - librenms_ubuntu_php_repository_enabled | bool
 
 - name: Configure the supported PHP stream for Ubuntu 22
-  ansible.builtin.command:
-    argv:
-      - add-apt-repository
-      - --yes
-      - --no-update
-      - "{{ librenms_ubuntu_php_repository }}"
-  changed_when: true
-  # PPA management has no supported ansible-core module after apt_repository
-  # removal; software-properties is the Ubuntu-supported interface here.
-  # noqa command-instead-of-module
+  ansible.builtin.copy:
+    dest: "{{ librenms_ubuntu_php_repository_source_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Types: deb
+      URIs: {{ librenms_ubuntu_php_repository_uri }}
+      Suites: {{ ansible_distribution_release }}
+      Components: main
+      Signed-By: {{ librenms_ubuntu_php_repository_keyring }}
   when:
     - ansible_distribution == 'Ubuntu'
     - (ansible_distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
-    - (librenms_ubuntu_php_repository_check.rc | default(1)) != 0
 
 - name: Refresh apt cache
   apt:

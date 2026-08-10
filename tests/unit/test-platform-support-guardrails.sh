@@ -130,14 +130,17 @@ require_text "$REDHAT_REPOS_FILE" 'Enable supported MariaDB module stream'
 require_text "$COMMON_TASKS_FILE" 'Fail early when RHEL-family storage mode is unsupported'
 require_text "$COMMON_TASKS_FILE" 'Require shared NFS RRD storage for RHEL-family HA'
 require_text "$COMMON_TASKS_FILE" 'Configure the supported PHP stream for Ubuntu 22'
-require_text "$COMMON_TASKS_FILE" 'add-apt-repository'
-require_text "$COMMON_TASKS_FILE" 'librenms_ubuntu_php_repository_source_pattern'
-if grep -Eq '^[[:space:]]*ansible\.builtin\.apt_repository:|^[[:space:]]*apt_repository:' "$COMMON_TASKS_FILE"; then
-    printf 'Ubuntu repository setup must not use removed apt_repository.\n' >&2
+require_text "$COMMON_TASKS_FILE" 'Install Ubuntu 22 PHP repository prerequisites'
+require_text "$COMMON_TASKS_FILE" 'librenms_ubuntu_php_repository_keyring'
+require_text "$COMMON_TASKS_FILE" 'gpg --batch --show-keys'
+require_text "$COMMON_TASKS_FILE" 'Signed-By:'
+if grep -Fq 'add-apt-repository' "$COMMON_TASKS_FILE"; then
+    printf 'Ubuntu repository setup must not use the fragile add-apt-repository shortcut.\n' >&2
     exit 1
 fi
 require_text "$DEFAULTS_FILE" 'librenms_ubuntu_php_repository: ppa:ondrej/php'
 require_text "$DEFAULTS_FILE" 'librenms_ubuntu_php_repository_source_pattern'
+require_text "$DEFAULTS_FILE" 'librenms_ubuntu_php_repository_key_fingerprint'
 require_text "$REDHAT_VARS_FILE" 'librenms_php_fpm_service_name: php-fpm'
 require_text "$COMMON_TASKS_FILE" 'Local RRD storage cannot be shared safely'
 require_text "$COMMON_TASKS_FILE" 'multiple LibreNMS'
@@ -194,9 +197,13 @@ require_text "$MANAGED_RUNTIME_PLAYBOOK" "ansible_facts.python.executable == '/o
 require_text "$MANAGED_RUNTIME_PLAYBOOK" 'ansible.builtin.package:'
 require_text "$MANAGED_RUNTIME_PLAYBOOK" 'import command_runner, dotenv, psutil, pymysql, redis, setuptools'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'librenms-ha-ansible-controller:local'
+require_text "$MANAGED_RUNTIME_SCRIPT" 'PermitRootLogin=yes'
+require_text "$MANAGED_RUNTIME_SCRIPT" 'IdentitiesOnly=yes'
 require_text "$PACKAGE_SMOKE_FILE" 'rocky|almalinux|rhel)'
 require_text "$PACKAGE_SMOKE_FILE" '22.04|24.04|26.04'
 require_text "$PACKAGE_SMOKE_FILE" 'galera_new_cluster galera_recovery'
+require_text "$PACKAGE_SMOKE_FILE" 'get_mariadb_series()'
+require_text "$PACKAGE_SMOKE_FILE" '(Distrib|from)'
 require_text "$PACKAGE_SMOKE_FILE" 'expected_mariadb_series=10.6'
 require_text "$PACKAGE_SMOKE_FILE" 'expected_mariadb_series=11.8'
 require_text "$PACKAGE_SMOKE_FILE" '8) minimum_minor=10'

@@ -924,9 +924,14 @@ librenms_enable_extra_repos: true
 # guidance. Ubuntu 24.04 and 26.04 use their native supported stream.
 librenms_ubuntu_php_repository_enabled: true
 librenms_ubuntu_php_repository: ppa:ondrej/php
-# Ubuntu 22's PHP PPA is managed with add-apt-repository because
-# ansible.builtin.apt_repository is removed in ansible-core 2.25.
-librenms_ubuntu_php_repository_source_pattern: 'ppa.launchpad.net/ondrej/php'
+librenms_ubuntu_php_repository_uri: https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+librenms_ubuntu_php_repository_source_pattern: 'ppa.launchpadcontent.net/ondrej/php'
+librenms_ubuntu_php_repository_key_url: 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6&options=mr'
+librenms_ubuntu_php_repository_key_fingerprint: B8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6
+librenms_ubuntu_php_repository_keyring: /etc/apt/keyrings/ondrej-php.asc
+librenms_ubuntu_php_repository_source_file: /etc/apt/sources.list.d/ondrej-php.sources
+# Ubuntu 22's PHP PPA is managed as a signed deb822 source with the pinned
+# Launchpad key above; Ubuntu 24.04 and 26.04 use their native PHP stream.
 librenms_ubuntu_php_version: "8.3"
 librenms_redhat_enable_epel: true
 librenms_redhat_enable_remi: false

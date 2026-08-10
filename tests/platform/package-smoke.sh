@@ -48,6 +48,53 @@ check_any_path() {
     exit 1
 }
 
+get_mariadb_series() {
+    local mariadb_client
+    local version_output
+
+    mariadb_client="$(command -v mariadb 2>/dev/null || command -v mysql 2>/dev/null || true)"
+    if [ -z "${mariadb_client}" ]; then
+        printf 'MariaDB client command is missing.\n' >&2
+        return 1
+    fi
+
+    version_output="$(${mariadb_client} --version)"
+    # MariaDB 10.x commonly reports "Distrib 10.11" while newer clients
+    # report "mariadb from 11.8". Accept both formats.
+    printf '%s\n' "${version_output}" |
+        sed -nE 's/.*(Distrib|from)[[:space:]]+([0-9]+\.[0-9]+).*/\2/p' |
+        head -n 1
+}
+
+configure_ondrej_php_repository() {
+    local key_url='https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6&options=mr'
+    local keyring=/etc/apt/keyrings/ondrej-php.asc
+    local expected_fingerprint=B8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6
+    local actual_fingerprint
+
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg
+    install -d -m 0755 /etc/apt/keyrings
+    rm -f /etc/apt/sources.list.d/*ondrej*php* \
+        /etc/apt/trusted.gpg.d/ondrej-ubuntu-php.gpg
+    curl --fail --silent --show-error --location --retry 3 \
+        "${key_url}" -o "${keyring}"
+    actual_fingerprint="$(gpg --batch --show-keys --with-colons "${keyring}" |
+        awk -F: '$1 == "fpr" { print toupper($10); exit }')"
+    if [ "${actual_fingerprint}" != "${expected_fingerprint}" ]; then
+        printf 'Ondrej PHP key fingerprint mismatch: expected %s, found %s.\n' \
+            "${expected_fingerprint}" "${actual_fingerprint:-unavailable}" >&2
+        exit 1
+    fi
+    cat >/etc/apt/sources.list.d/ondrej-php.sources <<EOF
+Types: deb
+URIs: https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+Suites: ${VERSION_CODENAME}
+Components: main
+Signed-By: ${keyring}
+EOF
+    apt-get update -q
+}
+
 case "${ID}" in
     ubuntu)
         case "${VERSION_ID}" in
@@ -62,9 +109,7 @@ case "${ID}" in
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -q
         if [ "${VERSION_ID}" = "22.04" ]; then
-            apt-get install -y --no-install-recommends software-properties-common
-            add-apt-repository -y ppa:ondrej/php
-            apt-get update -q
+            configure_ondrej_php_repository
             php_packages=(
                 php8.3-cli php8.3-curl php8.3-fpm php8.3-gd php8.3-gmp
                 php8.3-mbstring php8.3-mysql php8.3-snmp php8.3-xml php8.3-zip
@@ -96,7 +141,7 @@ case "${ID}" in
             haproxy keepalived snmpd; do
             check_command "${command_name}"
         done
-        mariadb_series="$(mariadb --version | sed -n 's/.*Distrib \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+        mariadb_series="$(get_mariadb_series)"
         case "${VERSION_ID}" in
             22.04) expected_mariadb_series=10.6 ;;
             24.04) expected_mariadb_series=10.11 ;;
@@ -196,7 +241,7 @@ case "${ID}" in
             snmpd; do
             check_command "${command_name}"
         done
-        mariadb_series="$(mariadb --version | sed -n 's/.*Distrib \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+        mariadb_series="$(get_mariadb_series)"
         if [ "${mariadb_series}" != "10.11" ]; then
             printf 'EL %s expects MariaDB 10.11, found %s.\n' \
                 "${VERSION_ID}" "${mariadb_series:-unavailable}" >&2

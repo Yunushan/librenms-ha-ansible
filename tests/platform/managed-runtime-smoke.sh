@@ -52,7 +52,18 @@ docker exec "${TARGET_CONTAINER}" bash -lc \
 docker cp "${TEST_DIR}/id_ed25519.pub" \
     "${TARGET_CONTAINER}:/root/.ssh/authorized_keys" >/dev/null
 docker exec "${TARGET_CONTAINER}" chmod 0600 /root/.ssh/authorized_keys
-docker exec --detach "${TARGET_CONTAINER}" /usr/sbin/sshd -D -e
+docker exec "${TARGET_CONTAINER}" bash -lc \
+    'install -d -m 0755 /etc/ssh/sshd_config.d && printf "%s\\n" \
+        "PermitRootLogin yes" \
+        "PubkeyAuthentication yes" \
+        "PasswordAuthentication no" \
+        "AuthorizedKeysFile /root/.ssh/authorized_keys" \
+        > /etc/ssh/sshd_config.d/99-librenms-managed-runtime-smoke.conf'
+docker exec --detach "${TARGET_CONTAINER}" /usr/sbin/sshd -D -e \
+    -o PermitRootLogin=yes \
+    -o PubkeyAuthentication=yes \
+    -o PasswordAuthentication=no \
+    -o AuthorizedKeysFile=/root/.ssh/authorized_keys
 
 for _ in $(seq 1 30); do
     if docker exec "${TARGET_CONTAINER}" \
@@ -80,7 +91,8 @@ all:
           ansible_ssh_private_key_file: /test/id_ed25519
           ansible_python_interpreter: /opt/librenms-ha-ansible/python/bin/python
           ansible_ssh_common_args: >-
-            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
 EOF
 
 docker run --rm \
