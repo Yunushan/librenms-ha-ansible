@@ -48,6 +48,23 @@ check_any_path() {
     exit 1
 }
 
+check_unit_or_init_script() {
+    local unit_name="$1"
+    local service_name="${unit_name%.service}"
+
+    if [ -f "/usr/lib/systemd/system/${unit_name}" ] || \
+        [ -f "/lib/systemd/system/${unit_name}" ] || \
+        [ -f "/run/systemd/generator/${unit_name}" ] || \
+        [ -f "/run/systemd/generator.late/${unit_name}" ] || \
+        [ -f "/etc/init.d/${service_name}" ]; then
+        return 0
+    fi
+
+    printf 'Expected systemd unit or init script is missing: %s\n' \
+        "${unit_name}" >&2
+    exit 1
+}
+
 get_mariadb_series() {
     local mariadb_client
     local version_output
@@ -125,9 +142,8 @@ case "${ID}" in
             galera-4 git glusterfs-client glusterfs-server graphviz haproxy \
             imagemagick keepalived lsb-release mariadb-client mariadb-server \
             mtr-tiny nfs-common nginx-full nmap "${php_packages[@]}" \
-            python3 python3-command-runner python3-dotenv python3-pip \
-            python3-psutil python3-pymysql python3-redis python3-setuptools \
-            python3-systemd python3-venv redis-sentinel redis-server rrdcached \
+            python3 python3-pip python3-systemd python3-venv \
+            redis-sentinel redis-server rrdcached \
             rrdtool rsync snmp snmpd traceroute unzip util-linux wget whois
 
         python3 -m venv --system-site-packages /tmp/librenms-platform-python
@@ -154,11 +170,12 @@ case "${ID}" in
         fi
         check_any_path /usr/sbin/php-fpm* /usr/bin/php-fpm*
         for unit_name in \
-            mariadb.service nginx.service rrdcached.service \
+            mariadb.service nginx.service \
             redis-server.service redis-sentinel.service haproxy.service \
             keepalived.service; do
             check_unit "${unit_name}"
         done
+        check_unit_or_init_script rrdcached.service
         check_any_path /etc/mysql/mariadb.conf.d /etc/mysql/conf.d
         check_any_path /etc/redis/redis.conf
         check_any_path /etc/redis/sentinel.conf

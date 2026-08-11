@@ -17,6 +17,7 @@ readonly RESOURCE_TOKEN="$(basename "${TEST_DIR}")"
 readonly RESOURCE_SUFFIX="${CASE_NAME//[^a-zA-Z0-9]/-}-${RESOURCE_TOKEN}"
 readonly TARGET_CONTAINER="librenms-platform-target-${RESOURCE_SUFFIX}"
 readonly TARGET_NETWORK="librenms-platform-network-${RESOURCE_SUFFIX}"
+readonly TEST_PASSWORD="librenms-smoke-${RESOURCE_TOKEN//[^a-zA-Z0-9]/}"
 
 cleanup() {
     docker rm -f "${TARGET_CONTAINER}" >/dev/null 2>&1 || true
@@ -52,17 +53,20 @@ docker exec "${TARGET_CONTAINER}" bash -lc \
 docker cp "${TEST_DIR}/id_ed25519.pub" \
     "${TARGET_CONTAINER}:/root/.ssh/authorized_keys" >/dev/null
 docker exec "${TARGET_CONTAINER}" chmod 0600 /root/.ssh/authorized_keys
+docker exec -e "LIBRENMS_SMOKE_PASSWORD=${TEST_PASSWORD}" \
+    "${TARGET_CONTAINER}" bash -lc \
+    'printf "root:%s\\n" "${LIBRENMS_SMOKE_PASSWORD}" | chpasswd'
 docker exec "${TARGET_CONTAINER}" bash -lc \
     'install -d -m 0755 /etc/ssh/sshd_config.d && printf "%s\\n" \
         "PermitRootLogin yes" \
         "PubkeyAuthentication yes" \
-        "PasswordAuthentication no" \
+        "PasswordAuthentication yes" \
         "AuthorizedKeysFile /root/.ssh/authorized_keys" \
         > /etc/ssh/sshd_config.d/99-librenms-managed-runtime-smoke.conf'
 docker exec --detach "${TARGET_CONTAINER}" /usr/sbin/sshd -D -e \
     -o PermitRootLogin=yes \
     -o PubkeyAuthentication=yes \
-    -o PasswordAuthentication=no \
+    -o PasswordAuthentication=yes \
     -o AuthorizedKeysFile=/root/.ssh/authorized_keys
 
 for _ in $(seq 1 30); do
@@ -88,10 +92,13 @@ all:
         platform-target:
           ansible_host: ${TARGET_CONTAINER}
           ansible_user: root
+          ansible_password: ${TEST_PASSWORD}
           ansible_ssh_private_key_file: /test/id_ed25519
           ansible_python_interpreter: /opt/librenms-ha-ansible/python/bin/python
           ansible_ssh_common_args: >-
-            -o IdentitiesOnly=yes -o StrictHostKeyChecking=no
+            -o IdentitiesOnly=yes -o PreferredAuthentications=password,publickey
+            -o PubkeyAuthentication=yes -o KbdInteractiveAuthentication=no
+            -o StrictHostKeyChecking=no
             -o UserKnownHostsFile=/dev/null
 EOF
 
