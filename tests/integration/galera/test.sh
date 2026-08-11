@@ -63,6 +63,21 @@ all_nodes_are_synced() {
     done
 }
 
+dump_cluster_diagnostics() {
+    local node
+
+    printf '\nGalera integration diagnostics:\n' >&2
+    compose ps >&2 || true
+    for node in "${NODES[@]}"; do
+        printf '\n--- %s status ---\n' "${node}" >&2
+        sql "${node}" \
+            "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size', 'wsrep_cluster_status', 'wsrep_local_state_comment', 'wsrep_ready', 'wsrep_connected');" \
+            >&2 2>&1 || true
+        printf '\n--- %s logs ---\n' "${node}" >&2
+        compose logs --no-color --tail 80 "${node}" >&2 || true
+    done
+}
+
 wait_for() {
     local description="$1"
     shift
@@ -90,8 +105,19 @@ main() {
     require_docker
     trap cleanup EXIT
 
-    compose up --detach --quiet-pull
-    wait_for 'three synced Galera members' all_nodes_are_synced 3 "${NODES[@]}"
+    # Start the bootstrap member first. Starting every container at once lets
+    # joiners race the new-cluster member and exit before a primary view exists.
+    compose up --detach --quiet-pull galera-1
+    if ! wait_for 'the Galera bootstrap member' node_is_synced_in_cluster galera-1 1; then
+        dump_cluster_diagnostics
+        return 1
+    fi
+
+    compose up --detach --quiet-pull galera-2 galera-3
+    if ! wait_for 'three synced Galera members' all_nodes_are_synced 3 "${NODES[@]}"; then
+        dump_cluster_diagnostics
+        return 1
+    fi
 
     sql galera-1 \
         "CREATE DATABASE integration_state; CREATE TABLE integration_state.events (id INT PRIMARY KEY, value VARCHAR(64)) ENGINE=InnoDB; INSERT INTO integration_state.events VALUES (1, 'before-failover');"
