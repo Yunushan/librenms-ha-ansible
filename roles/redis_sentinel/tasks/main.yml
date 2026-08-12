@@ -1061,6 +1061,16 @@
     librenms_redis_sentinel_repair_consensus_ok: false
     librenms_redis_sentinel_repair_write_ok: false
     librenms_redis_sentinel_consensus_needs_repair: false
+    # Ansible templates delegated hosts and loops before inherited block
+    # conditions. Keep skipped repair tasks safe to render.
+    librenms_redis_sentinel_repair_master_host: "{{ librenms_redis_master_host }}"
+    librenms_redis_sentinel_repair_master_addr: >-
+      {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }}
+    librenms_redis_sentinel_repair_master_port: "6379"
+    librenms_redis_sentinel_repair_expected_master: >-
+      {{ hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) }}:6379
+    librenms_redis_sentinel_repair_non_master_nodes: []
+    librenms_redis_sentinel_repair_replica_nodes: []
   when:
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname == librenms_redis_sentinel_consensus_controller_host

@@ -25,6 +25,21 @@ contains 'librenms_redis_sentinel_consensus_needs_repair'
 contains 'Repair Redis Sentinel consensus master after failed quorum or write check'
 contains 'Fail when Redis Sentinel cannot converge on a writable quorum'
 
+repair_initialization_block=$(sed -n \
+    '/^- name: Initialize Redis Sentinel consensus repair state/,/^- name: Determine whether Redis Sentinel repair is required/p' \
+    "${TASKS_FILE}")
+
+for repair_fact in \
+    librenms_redis_sentinel_repair_master_host \
+    librenms_redis_sentinel_repair_master_addr \
+    librenms_redis_sentinel_repair_master_port \
+    librenms_redis_sentinel_repair_expected_master \
+    librenms_redis_sentinel_repair_non_master_nodes \
+    librenms_redis_sentinel_repair_replica_nodes; do
+    grep -Fq "${repair_fact}:" <<< "${repair_initialization_block}" \
+        || fail "repair render-safety fact is not initialized: ${repair_fact}"
+done
+
 if sed -n '/^- name: Determine Redis Sentinel consensus master/,/^- name: Set Redis Sentinel consensus endpoint/p' \
     "${TASKS_FILE}" | grep -Fq '^- name: Verify Redis Sentinels agree on one master'; then
     fail 'initial Sentinel disagreement still aborts before automatic repair'
