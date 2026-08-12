@@ -8,9 +8,15 @@ assert_output() {
     local expected="$1"
     local service_state="$2"
     local status="$3"
+    local drain_state="${4:-absent}"
     local actual
 
-    actual="$(SERVICE_STATE="${service_state}" MOCK_STATUS="${status}" run_agent)"
+    actual="$(
+        SERVICE_STATE="${service_state}" \
+            MOCK_STATUS="${status}" \
+            MOCK_DRAIN_STATE="${drain_state}" \
+            run_agent
+    )"
     [ "${actual}" = "${expected}" ] || {
         printf 'Expected readiness agent output %s, got %s.\n' "${expected}" "${actual}" >&2
         return 1
@@ -39,9 +45,14 @@ EOF
     chmod +x "${temporary_dir}/bin/systemctl" "${temporary_dir}/bin/timeout" \
         "${temporary_dir}/bin/mysql"
 
+    if [ "${MOCK_DRAIN_STATE:-absent}" = "present" ]; then
+        touch "${temporary_dir}/backend-drain"
+    fi
+
     sed \
         -e 's@{{ librenms_mariadb_service_name | quote }}@"mariadb"@' \
         -e 's@{{ librenms_mariadb_socket | quote }}@"/run/mysqld/mysqld.sock"@' \
+        -e "s@{{ librenms_galera_backend_drain_path | quote }}@\"${temporary_dir}/backend-drain\"@" \
         -e 's@{{ librenms_galera_readiness_agent_query_timeout | int }}@2@' \
         "${TEMPLATE}" >"${temporary_dir}/agent"
     chmod +x "${temporary_dir}/agent"
@@ -50,6 +61,7 @@ EOF
 }
 
 main() {
+    assert_output drain active $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced' present
     assert_output up active $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced'
     assert_output down active $'wsrep_cluster_status\tNon-Primary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced'
     assert_output down active $'wsrep_cluster_status\tPrimary\nwsrep_ready\tOFF\nwsrep_local_state_comment\tSynced'

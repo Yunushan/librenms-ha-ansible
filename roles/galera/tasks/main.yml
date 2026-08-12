@@ -27,6 +27,56 @@
     - ansible_distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
+- name: Deploy Galera readiness agent
+  template:
+    src: librenms-galera-readiness-agent.sh.j2
+    dest: "{{ librenms_galera_readiness_agent_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /bin/bash -n %s
+  notify: Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Deploy Galera readiness agent socket
+  template:
+    src: librenms-galera-readiness-agent.socket.j2
+    dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_socket_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Deploy Galera readiness agent service
+  template:
+    src: librenms-galera-readiness-agent@.service.j2
+    dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_service_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Enable and start Galera readiness agent socket
+  systemd:
+    name: "{{ librenms_galera_readiness_agent_socket_unit }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Apply Galera readiness agent before database convergence
+  meta: flush_handlers
+
 - name: Deploy Galera config
   template:
     src: galera.cnf.j2
@@ -37,6 +87,18 @@
   register: librenms_galera_config_deploy
   notify: Restart MariaDB
   when: librenms_db_mode == 'galera'
+
+- name: Deploy local Galera backend drain helper
+  template:
+    src: librenms-galera-node-drain.sh.j2
+    dest: "{{ librenms_galera_web_drain_helper_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /bin/bash -n %s
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_web_drain_enabled | bool
 
 - name: Check Galera bootstrap marker
   stat:
@@ -86,7 +148,7 @@
       - --protocol=socket
       - "--socket={{ librenms_mariadb_socket }}"
       - -Nse
-      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
+      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');"
   loop: "{{ librenms_active_db_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_component_probe
@@ -1209,7 +1271,7 @@
       - --protocol=socket
       - "--socket={{ librenms_mariadb_socket }}"
       - -Nse
-      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready');"
+      - "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');"
   register: librenms_galera_pre_start_status
   failed_when: false
   changed_when: false
@@ -1236,6 +1298,19 @@
         )
       }}
   when: librenms_db_mode == 'galera'
+
+- name: Enter local Galera drain before planned service convergence
+  include_tasks: enter_local_web_drain.yml
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - >-
+      (librenms_galera_config_deploy.changed | default(false))
+      or not (
+        (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+        and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+        and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_local_state_comment\\s+Synced')
+      )
 
 - name: Stop non-ready Galera joiner before stale state cleanup # noqa: command-instead-of-module
   shell: |-
@@ -1465,6 +1540,19 @@
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
+
+- name: Enter local Galera drain before backend listener recovery
+  include_tasks: enter_local_web_drain.yml
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+    - (librenms_galera_backend_tcp_initial.state | default('')) != 'started'
+    - >-
+      not (
+        not librenms_galera_cluster_has_live_member | bool
+        and inventory_hostname == librenms_galera_bootstrap_effective_host
+        and librenms_galera_cluster_bootstrapped_this_run | default(false)
+      )
 
 - name: Restart local Galera node when backend TCP listener is unavailable
   service:
@@ -2002,6 +2090,12 @@
     - not librenms_galera_backend_tcp_final.skipped | default(false)
     - (librenms_galera_backend_tcp_final.state | default('')) != 'started'
 
+- name: Leave local Galera drain after convergence
+  include_tasks: exit_local_web_drain.yml
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_local_service_expected | bool
+
 - name: Create LibreNMS database in Galera mode
   ansible.mysql.mysql_db:
     name: "{{ librenms_db_name }}"
@@ -2045,52 +2139,6 @@
     - librenms_haproxy_db_mysql_check_enabled | bool
     - inventory_hostname == librenms_galera_bootstrap_effective_host
     - librenms_galera_local_service_expected | bool
-
-- name: Deploy Galera readiness agent
-  template:
-    src: librenms-galera-readiness-agent.sh.j2
-    dest: "{{ librenms_galera_readiness_agent_path }}"
-    owner: root
-    group: root
-    mode: "0750"
-  notify: Restart Galera readiness agent socket
-  when:
-    - librenms_db_mode == 'galera'
-    - librenms_galera_readiness_agent_enabled | bool
-
-- name: Deploy Galera readiness agent socket
-  template:
-    src: librenms-galera-readiness-agent.socket.j2
-    dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_socket_unit }}"
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Restart Galera readiness agent socket
-  when:
-    - librenms_db_mode == 'galera'
-    - librenms_galera_readiness_agent_enabled | bool
-
-- name: Deploy Galera readiness agent service
-  template:
-    src: librenms-galera-readiness-agent@.service.j2
-    dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_service_unit }}"
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Restart Galera readiness agent socket
-  when:
-    - librenms_db_mode == 'galera'
-    - librenms_galera_readiness_agent_enabled | bool
-
-- name: Enable and start Galera readiness agent socket
-  systemd:
-    name: "{{ librenms_galera_readiness_agent_socket_unit }}"
-    state: started
-    enabled: true
-    daemon_reload: true
-  when:
-    - librenms_db_mode == 'galera'
-    - librenms_galera_readiness_agent_enabled | bool
 
 - name: Resume LibreNMS workers after Galera recovery
   shell: |-

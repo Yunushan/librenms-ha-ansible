@@ -274,9 +274,11 @@ librenms_fqdn: librenms.example.com
 
 MariaDB defaults to the operating-system package series. Optional MariaDB
 Community repository support is available for explicit `11.4`, `11.8`, and
-`12.3` selection. `11.4` and `11.8` are supported by the built-in Galera
-profile; `12.3` is supported for local/standalone MariaDB because its Community
-repository does not ship the Galera package required by this project. See
+`12.3` selection. All three are accepted by the built-in Debian-family Galera
+profile. MariaDB 12.3 no longer includes `galera-4` in its server repository,
+so 12.3 HA additionally requires the separate official Galera package source
+and provider version enforced by the role. Normal convergence deliberately
+refuses an installed major-series change. See
 [MariaDB Series Selection](docs/operations.md#mariadb-series-selection) before
 changing a database series.
 
@@ -1619,7 +1621,7 @@ librenms_haproxy_web_check_fall: 2
 librenms_haproxy_db_check_interval: 2s
 librenms_haproxy_db_check_fall: 2
 librenms_haproxy_db_tcp_keepalive: true
-librenms_haproxy_db_shutdown_sessions_on_backend_down: true
+librenms_haproxy_db_shutdown_sessions_on_backend_down: false
 librenms_haproxy_db_connection_logging_enabled: false
 ```
 
@@ -1632,12 +1634,19 @@ is removed from browser rotation instead of intermittently serving HTTP 500.
 With the default checks above, a failed web or DB backend is usually removed
 from rotation after roughly four seconds.
 
-For the Galera DB frontend, the default HAProxy config enables TCP keepalive and
-closes client sessions when a checked DB backend is marked down. This prevents
-long-lived LibreNMS PHP workers from continuing to use a dead MySQL connection
-after Galera or HAProxy failover. Routine DB frontend connection logging is
-disabled because LibreNMS creates many short-lived database connections;
-HAProxy process and backend UP/DOWN events remain logged. Set
+For the Galera DB frontend, the default HAProxy config enables TCP keepalive but
+does not forcibly close established sessions when a readiness check briefly
+marks a backend down. Planned Galera convergence first reports that backend as
+`drain`, withdraws its co-located web endpoint, pauses local workers, and waits
+for database clients to quiesce before MariaDB is touched. After the node is
+`Primary`, ready, and `Synced`, PHP-FPM is refreshed and the backend proves its
+HAProxy rejoin before web traffic resumes. A real MariaDB process or host crash
+still closes its own sockets, so an already in-flight request can fail during
+an unplanned crash; no TCP load balancer can migrate that connection.
+
+Routine DB frontend connection logging is disabled because LibreNMS creates
+many short-lived database connections; HAProxy process and backend UP/DOWN
+events remain logged. Set
 `librenms_haproxy_db_connection_logging_enabled: true` only for a short,
 diagnostic capture.
 

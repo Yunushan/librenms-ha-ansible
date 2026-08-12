@@ -37,13 +37,14 @@ librenms_db_bootstrap_host: lnms1
 
 # MariaDB uses the Ubuntu 24.04 packages (10.11) by default. To use MariaDB
 # Community Server for a fresh install instead, select one explicit series and
-# pin the approved MariaDB repository setup script checksum. 11.4 and 11.8 are
-# supported for this HA Galera profile; 12.3 is supported for local mode only.
+# pin the approved MariaDB repository setup script checksum. 11.4, 11.8, and
+# 12.3 are supported for this HA Galera profile. MariaDB 12.3 also requires the
+# separate official Galera package source and galera-4 provider version checked
+# by the role. Follow the staged upgrade runbook; changing this value is
+# intentionally not an in-place major upgrade switch.
 # librenms_mariadb_repository_mode: upstream
 # librenms_mariadb_upstream_series: "11.8" # supported: 11.4, 11.8, 12.3
 # librenms_mariadb_upstream_repo_setup_checksum: sha256:REPLACE_WITH_64_HEX_CHARACTERS
-# MariaDB 12.3 cannot be selected with librenms_db_mode: galera because the
-# Community repository no longer ships the Galera package for that series.
 
 librenms_galera_cluster_name: librenms_cluster
 
@@ -209,7 +210,7 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # librenms_startup_repair_reload_php_fpm_after_db_recovery: false
 # librenms_web_validation_rrd_check_timeout: 900s
 # librenms_haproxy_db_tcp_keepalive: true
-# librenms_haproxy_db_shutdown_sessions_on_backend_down: true
+# librenms_haproxy_db_shutdown_sessions_on_backend_down: false
 # Keep this false in normal production. Backend state changes remain logged,
 # while high-volume database connection logs are suppressed.
 # librenms_haproxy_db_connection_logging_enabled: false

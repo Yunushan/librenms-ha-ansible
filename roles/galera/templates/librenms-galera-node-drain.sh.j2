@@ -1,0 +1,311 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENABLED={{ (librenms_galera_web_drain_enabled | bool) | ternary('1', '0') }}
+LOCAL_WEB_MEMBER={{ (inventory_hostname in (librenms_active_web_nodes | default([]))) | ternary('1', '0') }}
+WEB_DRAIN_PATH={{ librenms_galera_web_drain_path | quote }}
+WEB_DRAIN_COMPAT_PATH={{ librenms_galera_web_drain_compat_path | quote }}
+BACKEND_DRAIN_PATH={{ librenms_galera_backend_drain_path | quote }}
+STATE_PATH={{ librenms_galera_web_drain_state_path | quote }}
+COMPAT_OWNERSHIP_PATH="${STATE_PATH}.compat-owned"
+LOCK_PATH={{ librenms_galera_web_drain_lock_path | quote }}
+LOCK_TIMEOUT={{ librenms_galera_web_drain_lock_timeout | int }}
+DRAIN_DELAY={{ librenms_galera_web_drain_delay | int }}
+BACKEND_DRAIN_TIMEOUT={{ librenms_galera_backend_drain_timeout | int }}
+BACKEND_DRAIN_POLL_DELAY={{ librenms_galera_backend_drain_poll_delay | int }}
+BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS={{ librenms_galera_backend_drain_max_client_connections | int }}
+BACKEND_REJOIN_DELAY={{ librenms_galera_backend_rejoin_delay | int }}
+QUERY_TIMEOUT={{ librenms_galera_readiness_agent_query_timeout | int }}
+MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
+MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
+HAPROXY_HEALTH_USER={{ librenms_haproxy_db_health_user | quote }}
+PHP_FPM_SERVICE={{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) | quote }}
+QUIESCE_UNITS=(
+{% for unit in librenms_galera_web_drain_quiesce_units %}
+  {{ unit | quote }}
+{% endfor %}
+)
+CONFLICTING_UNITS=(
+{% for unit in librenms_galera_web_drain_conflicting_units %}
+  {{ unit | quote }}
+{% endfor %}
+)
+
+log() {
+  logger -t librenms-galera-node-drain -- "$*" 2>/dev/null || true
+  printf '%s\n' "$*" >&2
+}
+
+managed_here() {
+  [ "${ENABLED}" = '1' ]
+}
+
+assert_no_conflicting_units() {
+  local unit
+
+  for unit in "${CONFLICTING_UNITS[@]}"; do
+    if systemctl is-active --quiet "${unit}" 2>/dev/null; then
+      log "refusing Galera drain while conflicting unit ${unit} is active"
+      return 1
+    fi
+  done
+}
+
+activate_web_drain_markers() {
+  [ "${LOCAL_WEB_MEMBER}" = '1' ] || return 0
+
+  touch "${WEB_DRAIN_PATH}"
+  if [ -n "${WEB_DRAIN_COMPAT_PATH}" ] \
+      && [ "${WEB_DRAIN_COMPAT_PATH}" != "${WEB_DRAIN_PATH}" ] \
+      && [ ! -e "${WEB_DRAIN_COMPAT_PATH}" ]; then
+    touch "${WEB_DRAIN_COMPAT_PATH}"
+    touch "${COMPAT_OWNERSHIP_PATH}"
+  fi
+}
+
+clear_web_drain_markers() {
+  [ "${LOCAL_WEB_MEMBER}" = '1' ] || return 0
+
+  rm -f "${WEB_DRAIN_PATH}"
+  if [ -e "${COMPAT_OWNERSHIP_PATH}" ]; then
+    rm -f "${WEB_DRAIN_COMPAT_PATH}" "${COMPAT_OWNERSHIP_PATH}"
+  fi
+}
+
+galera_ready() {
+  local status
+
+  status=$(timeout "${QUERY_TIMEOUT}" \
+    mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+    "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" \
+    2>/dev/null || true)
+
+  printf '%s\n' "${status}" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \
+    && printf '%s\n' "${status}" | grep -Eq 'wsrep_ready[[:space:]]+ON' \
+    && printf '%s\n' "${status}" | grep -Eq 'wsrep_local_state_comment[[:space:]]+Synced'
+}
+
+active_php_fpm_services() {
+  local unit
+
+  if [ -n "${PHP_FPM_SERVICE}" ] \
+      && systemctl is-active --quiet "${PHP_FPM_SERVICE}" 2>/dev/null; then
+    printf '%s\n' "${PHP_FPM_SERVICE}"
+  fi
+
+  while IFS= read -r unit; do
+    [ -n "${unit}" ] || continue
+    if systemctl is-active --quiet "${unit}" 2>/dev/null; then
+      printf '%s\n' "${unit}"
+    fi
+  done < <(
+    systemctl list-unit-files --type=service --no-legend \
+      'php*-fpm.service' 'php-fpm.service' 2>/dev/null \
+      | awk '{print $1}' \
+      | sort -u
+  )
+}
+
+record_active_units() {
+  local temporary_state
+  local unit
+
+  temporary_state="${STATE_PATH}.tmp.$$"
+  umask 077
+  : > "${temporary_state}"
+
+  if [ "${LOCAL_WEB_MEMBER}" = '1' ]; then
+    for unit in "${QUIESCE_UNITS[@]}"; do
+      if systemctl is-active --quiet "${unit}" 2>/dev/null; then
+        printf '%s\n' "${unit}" >> "${temporary_state}"
+      fi
+    done
+  fi
+
+  mv -f "${temporary_state}" "${STATE_PATH}"
+}
+
+stop_recorded_units() {
+  local unit
+
+  [ -r "${STATE_PATH}" ] || return 0
+  while IFS= read -r unit; do
+    [ -n "${unit}" ] || continue
+    systemctl stop "${unit}"
+  done < "${STATE_PATH}"
+}
+
+start_recorded_units() {
+  local unit
+
+  [ -r "${STATE_PATH}" ] || return 0
+  while IFS= read -r unit; do
+    [ -n "${unit}" ] || continue
+    systemctl start "${unit}"
+  done < "${STATE_PATH}"
+}
+
+active_client_connections() {
+  local count
+
+  count=$(timeout "${QUERY_TIMEOUT}" \
+    mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+    "SELECT GREATEST(COUNT(*) - 1, 0)
+       FROM information_schema.PROCESSLIST
+      WHERE COALESCE(USER, '') NOT IN ('system user', 'event_scheduler')
+        AND COALESCE(USER, '') <> '${HAPROXY_HEALTH_USER}';" \
+    2>/dev/null || true)
+
+  if [[ "${count}" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "${count}"
+    return 0
+  fi
+
+  return 1
+}
+
+wait_for_client_connections_to_drain() {
+  local connections
+  local deadline
+
+  deadline=$((SECONDS + BACKEND_DRAIN_TIMEOUT))
+  while systemctl is-active --quiet "${MARIADB_SERVICE}" 2>/dev/null; do
+    connections=$(active_client_connections || true)
+    if [[ "${connections}" =~ ^[0-9]+$ ]] \
+        && [ "${connections}" -le "${BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS}" ]; then
+      log "database clients drained (${connections} active)"
+      return 0
+    fi
+
+    if [ "${SECONDS}" -ge "${deadline}" ]; then
+      log "database drain timed out after ${BACKEND_DRAIN_TIMEOUT}s (${connections:-unknown} active clients)"
+      return 1
+    fi
+
+    sleep "${BACKEND_DRAIN_POLL_DELAY}"
+  done
+
+  log 'MariaDB is already stopped; no client sessions remain'
+  return 0
+}
+
+rollback_drain() {
+  if ! galera_ready; then
+    log 'leaving traffic drained because local Galera is not Primary/ready/Synced'
+    return 0
+  fi
+
+  rm -f "${BACKEND_DRAIN_PATH}"
+  sleep "${BACKEND_REJOIN_DELAY}"
+  clear_web_drain_markers
+  start_recorded_units
+  rm -f "${STATE_PATH}"
+  log 'cancelled Galera maintenance and restored traffic without restarting MariaDB'
+}
+
+enter_drain() {
+  local already_entered=0
+
+  if ! managed_here; then
+    printf '%s\n' 'not-managed'
+    return 0
+  fi
+
+  if [ -e "${BACKEND_DRAIN_PATH}" ]; then
+    already_entered=1
+  fi
+
+  assert_no_conflicting_units
+
+  if [ ! -r "${STATE_PATH}" ]; then
+    record_active_units
+  fi
+
+  touch "${BACKEND_DRAIN_PATH}"
+  activate_web_drain_markers
+
+  if [ "${already_entered}" -eq 0 ]; then
+    log "entered Galera backend drain; waiting ${DRAIN_DELAY}s for HAProxy"
+    sleep "${DRAIN_DELAY}"
+  fi
+
+  stop_recorded_units
+  if ! wait_for_client_connections_to_drain; then
+    rollback_drain
+    return 1
+  fi
+
+  if [ "${already_entered}" -eq 1 ]; then
+    printf '%s\n' 'already-entered'
+  else
+    printf '%s\n' 'entered'
+  fi
+}
+
+exit_drain() {
+  local php_service
+
+  if ! managed_here; then
+    printf '%s\n' 'not-managed'
+    return 0
+  fi
+
+  if [ ! -e "${BACKEND_DRAIN_PATH}" ] \
+      && [ ! -e "${WEB_DRAIN_PATH}" ] \
+      && [ ! -e "${STATE_PATH}" ]; then
+    printf '%s\n' 'not-entered'
+    return 0
+  fi
+
+  if ! galera_ready; then
+    log 'refusing to leave drain while local Galera is not Primary/ready/Synced'
+    return 1
+  fi
+
+  if [ "${LOCAL_WEB_MEMBER}" = '1' ]; then
+    while IFS= read -r php_service; do
+      [ -n "${php_service}" ] || continue
+      systemctl try-reload-or-restart "${php_service}"
+    done < <(active_php_fpm_services | sort -u)
+  fi
+
+  rm -f "${BACKEND_DRAIN_PATH}"
+  sleep "${BACKEND_REJOIN_DELAY}"
+  clear_web_drain_markers
+  start_recorded_units
+  rm -f "${STATE_PATH}"
+  log 'left Galera drain after readiness and HAProxy rejoin verification'
+  printf '%s\n' 'exited'
+}
+
+mkdir -p \
+  "$(dirname "${LOCK_PATH}")" \
+  "$(dirname "${WEB_DRAIN_PATH}")" \
+  "$(dirname "${WEB_DRAIN_COMPAT_PATH}")" \
+  "$(dirname "${BACKEND_DRAIN_PATH}")" \
+  "$(dirname "${STATE_PATH}")"
+exec 9>"${LOCK_PATH}"
+if ! flock -w "${LOCK_TIMEOUT}" 9; then
+  log "could not acquire drain lock within ${LOCK_TIMEOUT}s"
+  exit 1
+fi
+
+case "${1:-status}" in
+  enter)
+    enter_drain
+    ;;
+  exit)
+    exit_drain
+    ;;
+  status)
+    if [ -e "${BACKEND_DRAIN_PATH}" ] || [ -e "${WEB_DRAIN_PATH}" ]; then
+      printf '%s\n' 'entered'
+    else
+      printf '%s\n' 'not-entered'
+    fi
+    ;;
+  *)
+    printf 'Usage: %s {enter|exit|status}\n' "$0" >&2
+    exit 2
+    ;;
+esac

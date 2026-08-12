@@ -1,0 +1,10 @@
+---
+- name: Drain local Galera backend and co-located LibreNMS traffic before disruption
+  command:
+    argv:
+      - "{{ librenms_galera_web_drain_helper_path }}"
+      - enter
+  register: librenms_galera_web_drain_enter
+  changed_when: librenms_galera_web_drain_enter.stdout == 'entered'
+  when:
+    - librenms_galera_web_drain_enabled | bool

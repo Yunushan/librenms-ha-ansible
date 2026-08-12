@@ -86,11 +86,20 @@
     - librenms_maintenance_target in librenms_maintenance_web_nodes
   run_once: true
 
-- name: Start target LibreNMS timers and dispatcher after maintenance
+- name: Start target LibreNMS daily timer after maintenance
+  systemd:
+    name: librenms-daily.timer
+    state: started
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_target in librenms_maintenance_app_nodes
+    - librenms_maintenance_resume_daily_timer | bool
+  run_once: true
+
+- name: Start target LibreNMS scheduler and dispatcher after maintenance
   shell: |
     set -eu
     for unit in \
-      librenms-daily.timer \
       librenms-scheduler.timer \
       librenms.service
     do

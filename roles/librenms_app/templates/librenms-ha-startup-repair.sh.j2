@@ -48,6 +48,9 @@ GALERA_SELF_HEAL_SERVICE_POLL_DELAY={{ librenms_galera_self_heal_service_poll_de
 GALERA_SELF_HEAL_DIAGNOSTIC_LINES={{ librenms_galera_self_heal_diagnostic_lines | int }}
 GALERA_SELF_HEAL_STATE_DIR={{ librenms_galera_self_heal_state_dir | quote }}
 GALERA_SELF_HEAL_LOCAL_MEMBER={{ (inventory_hostname in librenms_active_db_nodes) | ternary('1', '0') }}
+GALERA_WEB_DRAIN_ENABLED={{ (librenms_galera_web_drain_enabled | bool) | ternary('1', '0') }}
+GALERA_WEB_DRAIN_HELPER={{ librenms_galera_web_drain_helper_path | quote }}
+GALERA_WEB_DRAIN_LOCAL_MEMBER={{ (inventory_hostname in (librenms_active_db_nodes | default([]))) | ternary('1', '0') }}
 GALERA_PEERS=(
 {% for host in librenms_active_db_nodes | difference([inventory_hostname]) %}
   {{ hostvars[host].ansible_host | default(host) | quote }}
@@ -362,6 +365,28 @@ wait_for_local_galera_ready() {
   return 1
 }
 
+enter_local_galera_web_drain() {
+  [ "${GALERA_WEB_DRAIN_ENABLED}" = '1' ] || return 0
+  [ "${GALERA_WEB_DRAIN_LOCAL_MEMBER}" = '1' ] || return 0
+
+  if [ ! -x "${GALERA_WEB_DRAIN_HELPER}" ]; then
+    log "refusing managed Galera restart because ${GALERA_WEB_DRAIN_HELPER} is unavailable"
+    return 1
+  fi
+
+  timeout "${GALERA_SELF_HEAL_SERVICE_ACTION_TIMEOUT}" \
+    "${GALERA_WEB_DRAIN_HELPER}" enter >/dev/null
+}
+
+exit_local_galera_web_drain() {
+  [ "${GALERA_WEB_DRAIN_ENABLED}" = '1' ] || return 0
+  [ "${GALERA_WEB_DRAIN_LOCAL_MEMBER}" = '1' ] || return 0
+  [ -x "${GALERA_WEB_DRAIN_HELPER}" ] || return 1
+
+  timeout "${GALERA_SELF_HEAL_SERVICE_ACTION_TIMEOUT}" \
+    "${GALERA_WEB_DRAIN_HELPER}" exit >/dev/null
+}
+
 recover_persistently_unready_local_galera() {
   local local_status
   local peer
@@ -384,6 +409,9 @@ recover_persistently_unready_local_galera() {
   local_status=$(local_galera_status)
   if galera_status_is_ready "${local_status}"; then
     rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
+    if ! exit_local_galera_web_drain; then
+      log 'local Galera is ready, but its web drain could not be cleared safely'
+    fi
     return 0
   fi
 
@@ -431,6 +459,11 @@ recover_persistently_unready_local_galera() {
     return 0
   fi
 
+  if ! enter_local_galera_web_drain; then
+    log 'local Galera restart was cancelled because database clients could not drain'
+    return 0
+  fi
+
   # Record the attempt before invoking systemd. A failed start must observe the
   # same cooldown as a successful one instead of creating a restart storm.
   printf '%s\n' "${now}" > "${GALERA_SELF_HEAL_STATE_DIR}/galera-restarted-at"
@@ -439,7 +472,11 @@ recover_persistently_unready_local_galera() {
   if timeout 10 systemctl --no-block "${service_action}" "${MARIADB_SERVICE}" \
       >/dev/null 2>&1 && wait_for_local_galera_ready; then
     rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
-    log "local Galera rejoined the existing Primary component"
+    if exit_local_galera_web_drain; then
+      log "local Galera rejoined the existing Primary component and web traffic resumed"
+    else
+      log 'local Galera rejoined, but web traffic remains drained because recovery cleanup failed'
+    fi
   else
     report_local_galera_rejoin_failure
   fi
