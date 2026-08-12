@@ -1146,23 +1146,23 @@ component after a full outage. If any DB node still has a live primary
 component, use `cluster.yml` or `post-reboot.yml` instead.
 
 First run it without confirmation to collect non-destructive evidence from
-`grastate.dat`:
+`grastate.dat`. The interactive Make target uses the same bounded SSH and sudo
+settings as `site-ask-become-pass`:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml --ask-become-pass
+make galera-recover-ask-become-pass
 ```
 
-The equivalent Make target is `make galera-recover`. With its default settings,
-it prints the evidence and exits without stopping MariaDB or modifying Galera.
+Use `make galera-recover` instead when passwordless sudo is already configured.
+With default settings, both targets print evidence and exit without stopping
+MariaDB or modifying Galera.
 
 If no node has `safe_to_bootstrap: 1`, Galera requires stopped MariaDB data
 directories before `galera_recovery` can report recovered positions. The guarded
 playbook therefore requires explicit confirmation before stopping MariaDB:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
-  --ask-become-pass \
-  -e librenms_galera_recover_confirm=true
+make galera-recover-ask-become-pass GALERA_RECOVER_CONFIRM=true
 ```
 
 That run stops MariaDB on reachable Galera nodes, runs `galera_recovery`, ranks
@@ -1170,14 +1170,15 @@ candidates by highest recovered `seqno`, reports the selected bootstrap host,
 and still refuses to bootstrap until you name that same host explicitly:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
-  --ask-become-pass \
-  -e librenms_galera_recover_confirm=true \
-  -e librenms_galera_recover_bootstrap_host=lnms2
+make galera-recover-ask-become-pass \
+  GALERA_RECOVER_CONFIRM=true \
+  GALERA_RECOVER_BOOTSTRAP_HOST=lnms2
 ```
 
-Tied recovered seqno values are not selected by default. Choose a policy only
-after reviewing the evidence:
+Tied recovered seqno values are not selected automatically. An explicitly
+requested host resolves a tie only when that host is one of the highest-seqno
+candidates; a lower-seqno host is rejected. Automation can instead use a
+pre-approved tie policy:
 
 ```yaml
 librenms_galera_recover_tie_breaker: manual

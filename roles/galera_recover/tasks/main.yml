@@ -33,9 +33,18 @@
       - librenms_db_mode == 'galera'
       - librenms_galera_recover_db_nodes | length > 0
       - librenms_galera_recover_tie_breaker in ['manual', 'first', 'configured_bootstrap']
+      - >-
+        (
+          librenms_galera_recover_bootstrap_host
+          | default('', true)
+          | trim
+          | length
+        ) == 0
+        or librenms_galera_recover_bootstrap_host in librenms_galera_recover_db_nodes
     fail_msg: >-
       galera-recover.yml is only for HA deployments using Galera. Check
-      librenms_mode, librenms_db_mode, and the librenms_db inventory group.
+      librenms_mode, librenms_db_mode, the librenms_db inventory group, and any
+      explicitly requested bootstrap host.
   run_once: true
 
 - name: Probe Galera nodes for an existing primary component
@@ -404,6 +413,17 @@
   when: librenms_galera_recover_max_seqno is defined
   run_once: true
 
+- name: Determine highest recovered Galera candidate hosts
+  set_fact:
+    librenms_galera_recover_highest_candidate_hosts: >-
+      {{
+        librenms_galera_recover_highest_candidates
+        | default([])
+        | map(attribute='host')
+        | list
+      }}
+  run_once: true
+
 - name: Select Galera recovery bootstrap host
   set_fact:
     librenms_galera_recover_selected_host: >-
@@ -419,31 +439,38 @@
           if (librenms_galera_recover_highest_candidates | default([]) | length) == 1
           else
           (
-            librenms_db_bootstrap_host
+            librenms_galera_recover_bootstrap_host
             if (
               (librenms_galera_recover_highest_candidates | default([]) | length) > 1
-              and librenms_galera_recover_tie_breaker == 'configured_bootstrap'
-              and librenms_db_bootstrap_host in (
-                librenms_galera_recover_highest_candidates
-                | default([])
-                | map(attribute='host')
-                | list
+              and (
+                librenms_galera_recover_bootstrap_host
+                | default('', true)
+                | trim
+                | length
+              ) > 0
+              and librenms_galera_recover_bootstrap_host in (
+                librenms_galera_recover_highest_candidate_hosts | default([])
               )
             )
             else
             (
-              (
-                librenms_galera_recover_highest_candidates
-                | default([])
-                | map(attribute='host')
-                | list
-                | first
-              )
+              librenms_db_bootstrap_host
               if (
                 (librenms_galera_recover_highest_candidates | default([]) | length) > 1
-                and librenms_galera_recover_tie_breaker == 'first'
+              and librenms_galera_recover_tie_breaker == 'configured_bootstrap'
+                and librenms_db_bootstrap_host in (
+                  librenms_galera_recover_highest_candidate_hosts | default([])
+                )
               )
-              else ''
+              else
+              (
+                (librenms_galera_recover_highest_candidate_hosts | first)
+                if (
+                  (librenms_galera_recover_highest_candidates | default([]) | length) > 1
+                  and librenms_galera_recover_tie_breaker == 'first'
+                )
+                else ''
+              )
             )
           )
         )
@@ -471,11 +498,15 @@
       {{ librenms_galera_recover_highest_candidates | default([]) }}
 
       Selected bootstrap host:
-      {{ librenms_galera_recover_selected_host | default('') }}
+      {{ librenms_galera_recover_selected_host | default('<none>', true) }}
 
       To execute recovery, rerun with:
-      -e librenms_galera_recover_confirm=true
-      -e librenms_galera_recover_bootstrap_host={{ librenms_galera_recover_selected_host | default('<selected-host>') }}
+      make galera-recover-ask-become-pass GALERA_RECOVER_CONFIRM=true \
+        GALERA_RECOVER_BOOTSTRAP_HOST={{ librenms_galera_recover_selected_host | default('<highest-candidate-host>', true) }}
+
+      When multiple hosts have the same highest recovered seqno, explicitly name
+      one of those highest candidates. The requested candidate resolves only that
+      verified tie; a lower-seqno host is rejected.
   run_once: true
 
 - name: End Galera recovery after read-only evidence collection
@@ -506,12 +537,13 @@
       {{ librenms_galera_recover_bootstrap_host }}
 
       If the selected host is correct, rerun with:
-      -e librenms_galera_recover_confirm=true
-      -e librenms_galera_recover_bootstrap_host={{ librenms_galera_recover_selected_host | default('<selected-host>') }}
+      make galera-recover-ask-become-pass GALERA_RECOVER_CONFIRM=true \
+        GALERA_RECOVER_BOOTSTRAP_HOST={{ librenms_galera_recover_selected_host | default('<highest-candidate-host>', true) }}
 
       If no host was selected, inspect the evidence above. For tied recovered
-      seqno values, set librenms_galera_recover_tie_breaker to
-      configured_bootstrap or first only after choosing that policy deliberately.
+      seqno values, explicitly request one of the highest candidate hosts. The
+      configured_bootstrap and first tie-break policies remain available for
+      deliberately configured non-interactive recovery.
       If galera_recovery positions are empty, rerun with
       librenms_galera_recover_confirm=true so the playbook can stop MariaDB and
       collect recovered seqno values from each reachable node.

@@ -156,26 +156,26 @@ Do not randomly bootstrap a Galera node. Use the guarded recovery workflow.
 Evidence-only run:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml --ask-become-pass
+make galera-recover-ask-become-pass
 ```
 
 If the playbook says no safe bootstrap host can be selected, collect stopped
 MariaDB recovery evidence:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
-  --ask-become-pass \
-  -e librenms_galera_recover_confirm=true
+make galera-recover-ask-become-pass GALERA_RECOVER_CONFIRM=true
 ```
 
 Bootstrap only the selected host reported by the playbook:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
-  --ask-become-pass \
-  -e librenms_galera_recover_confirm=true \
-  -e librenms_galera_recover_bootstrap_host=lnms2
+make galera-recover-ask-become-pass \
+  GALERA_RECOVER_CONFIRM=true \
+  GALERA_RECOVER_BOOTSTRAP_HOST=lnms2
 ```
+
+If several hosts share the highest recovered `seqno`, explicitly name one of
+those listed candidates. The playbook rejects a requested lower-seqno host.
 
 After recovery:
 
