@@ -1,5 +1,6 @@
 .git
 .ansible
+lib
 __pycache__
 *.pyc
 .env
