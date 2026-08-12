@@ -80,7 +80,7 @@
           ~ ' '
           ~ librenms_runtime_python_version_command.stderr
         )
-        | regex_search('[0-9]+\\.[0-9]+')
+        | regex_search('[0-9]+[.][0-9]+')
         | default('', true)
       }}
 
@@ -93,6 +93,9 @@
       Python 3 runtime is unavailable or unsupported on {{ inventory_hostname }}.
       Checked: {{ librenms_runtime_python_executable }}.
       Detected: {{ librenms_runtime_python_series | default('unknown') }}.
+      Command rc: {{ librenms_runtime_python_version_command.rc | default('unknown') }}.
+      stdout: {{ librenms_runtime_python_version_command.stdout | default('') | trim | default('<empty>', true) }}.
+      stderr: {{ librenms_runtime_python_version_command.stderr | default('') | trim | default('<empty>', true) }}.
       Supported versions: {{ librenms_supported_python_versions | join(', ') }}.
 
 - name: Detect RRDtool runtime version
@@ -113,7 +116,7 @@
           ~ ' '
           ~ librenms_runtime_rrdtool_version_command.stderr
         )
-        | regex_search('[0-9]+\\.[0-9]+')
+        | regex_search('[0-9]+[.][0-9]+')
         | default('', true)
       }}
 
@@ -168,7 +171,7 @@
           ~ ' '
           ~ librenms_runtime_nginx_version_command.stderr
         )
-        | regex_search('[0-9]+\\.[0-9]+')
+        | regex_search('[0-9]+[.][0-9]+')
         | default('', true)
       }}
   when: librenms_manage_nginx | bool
