@@ -20,6 +20,11 @@ server {
             return 503;
         }
 {% endif %}
+{% if librenms_galera_web_drain_enabled | bool %}
+        if (-f {{ librenms_galera_web_drain_path }}) {
+            return 503;
+        }
+{% endif %}
         add_header Content-Type text/plain;
         return 200 "ok\n";
     }
@@ -49,15 +54,25 @@ server {
             return 503;
         }
 {% endif %}
+{% if librenms_galera_web_drain_enabled | bool %}
+        if (-f {{ librenms_galera_web_drain_path }}) {
+            return 503;
+        }
+{% endif %}
         add_header Content-Type text/plain;
         return 200 "ok\n";
     }
 
-{% if librenms_daily_ha_drain_enabled | bool and librenms_haproxy_web_check_path != librenms_nginx_health_check_path %}
+{% if (librenms_daily_ha_drain_enabled | bool or librenms_galera_web_drain_enabled | bool) and librenms_haproxy_web_check_path != librenms_nginx_health_check_path %}
     location = {{ librenms_haproxy_web_check_path }} {
         if (-f {{ librenms_daily_ha_drain_path }}) {
             return 503;
         }
+{% if librenms_galera_web_drain_enabled | bool %}
+        if (-f {{ librenms_galera_web_drain_path }}) {
+            return 503;
+        }
+{% endif %}
 
         try_files $uri $uri/ /index.php?$query_string;
     }
@@ -68,6 +83,11 @@ server {
         access_log off;
 {% if librenms_daily_ha_drain_enabled | bool %}
         if (-f {{ librenms_daily_ha_drain_path }}) {
+            return 503;
+        }
+{% endif %}
+{% if librenms_galera_web_drain_enabled | bool %}
+        if (-f {{ librenms_galera_web_drain_path }}) {
             return 503;
         }
 {% endif %}

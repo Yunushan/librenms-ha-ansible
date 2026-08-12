@@ -7,6 +7,7 @@ librenms_maintenance_stop_application_services: true
 librenms_maintenance_stop_data_services: true
 librenms_maintenance_stop_keepalived: true
 librenms_maintenance_stop_rrdcached: true
+librenms_maintenance_resume_daily_timer: true
 librenms_maintenance_fail_on_degraded_after_exit: true
 librenms_maintenance_probe_retries: 24
 librenms_maintenance_probe_delay: 3

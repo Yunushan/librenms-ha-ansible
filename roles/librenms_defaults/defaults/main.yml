@@ -146,6 +146,39 @@ librenms_daily_canary_wait_delay: 15
 librenms_daily_ha_drain_enabled: "{{ librenms_mode == 'ha' }}"
 librenms_daily_ha_drain_path: /run/librenms-daily-drain
 librenms_daily_ha_drain_delay: 15
+# Keep a separate marker for Galera maintenance so the daily wrapper and a
+# database recovery cannot accidentally clear each other's drain state.
+librenms_galera_web_drain_enabled: >-
+  {{ librenms_mode == 'ha' and librenms_db_mode == 'galera' }}
+librenms_galera_web_drain_path: /run/librenms-galera-drain
+# Older deployed Nginx configurations already understand the daily drain path.
+# The helper temporarily owns this compatibility marker during the first
+# rollout, while retaining the separate Galera marker for normal operation.
+librenms_galera_web_drain_compat_path: "{{ librenms_daily_ha_drain_path }}"
+librenms_galera_web_drain_helper_path: /usr/local/sbin/librenms-galera-node-drain
+librenms_galera_web_drain_state_path: /run/librenms-galera-node-drain.state
+librenms_galera_web_drain_lock_path: /run/librenms-galera-node-drain.lock
+librenms_galera_web_drain_delay: "{{ librenms_daily_ha_drain_delay }}"
+librenms_galera_web_drain_lock_timeout: 30
+# The readiness agent reports "drain" while this marker exists. HAProxy then
+# stops assigning new DB sessions without treating the node as failed or
+# terminating established sessions.
+librenms_galera_backend_drain_path: /run/librenms-galera-backend-drain
+librenms_galera_backend_drain_timeout: 120
+librenms_galera_backend_drain_poll_delay: 1
+librenms_galera_backend_drain_max_client_connections: 0
+# Two readiness-agent intervals gives HAProxy enough time to observe the
+# post-recovery "up" response before web traffic and workers resume.
+librenms_galera_backend_rejoin_delay: 6
+librenms_galera_web_drain_quiesce_units:
+  - librenms-daily.timer
+  - librenms-scheduler.timer
+  - librenms-scheduler.service
+  - librenms-dispatcher-ha-recover.timer
+  - librenms-dispatcher-ha-recover.service
+  - librenms.service
+librenms_galera_web_drain_conflicting_units:
+  - librenms-daily.service
 # Host firewall enforcement is intentionally opt-in. Enabling it without the
 # explicit management and trusted-cluster CIDRs below fails before any UFW
 # policy change is made, which prevents accidental SSH lockout.
@@ -377,9 +410,8 @@ librenms_mariadb_log_warnings: 1
 librenms_db_user_host: "%"
 librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname]) | first) }}"
 # Use the distribution MariaDB packages by default. Upstream series selection is
-# intentionally opt-in and never follows LibreNMS daily updates. This list is
-# for local/standalone Community Server installs; Galera has its own narrower
-# capability list because MariaDB 12.3 no longer ships the required package.
+# intentionally opt-in and never follows LibreNMS daily updates. Galera series
+# remain explicit because changing this value is not an in-place upgrade switch.
 librenms_mariadb_repository_mode: distro
 librenms_mariadb_upstream_series: ""
 librenms_mariadb_upstream_supported_series:
@@ -389,6 +421,10 @@ librenms_mariadb_upstream_supported_series:
 librenms_mariadb_upstream_galera_supported_series:
   - "11.4"
   - "11.8"
+  - "12.3"
+# MariaDB 12.3 server repositories no longer include galera-4. Require a
+# separately sourced provider new enough for this project's 12.3 HA contract.
+librenms_mariadb_12_3_galera_min_provider_version: "26.4.26"
 librenms_mariadb_upstream_repo_setup_url: https://r.mariadb.com/downloads/mariadb_repo_setup
 librenms_mariadb_upstream_repo_setup_path: /usr/local/sbin/mariadb_repo_setup
 librenms_mariadb_upstream_repo_setup_checksum: ""
@@ -412,6 +448,10 @@ librenms_runtime_db_wait_delay: 5
 librenms_galera_cluster_name: librenms_cluster
 librenms_galera_sst_method: rsync
 librenms_galera_pc_recovery: true
+# Retain enough write-set history for routine rolling convergence and staged
+# LTS upgrades to use IST. Size this from the site's peak write rate and the
+# longest expected single-node maintenance window.
+librenms_galera_gcache_size: 2G
 librenms_galera_bootstrap_marker: /var/lib/librenms-ha-ansible/galera_bootstrapped
 # MariaDB datadir used to distinguish a fresh deployment from an existing
 # cluster whose marker was lost or never written.
@@ -636,7 +676,10 @@ librenms_haproxy_redispatch: true
 librenms_haproxy_db_timeout_client: 8h
 librenms_haproxy_db_timeout_server: 8h
 librenms_haproxy_db_tcp_keepalive: true
-librenms_haproxy_db_shutdown_sessions_on_backend_down: true
+# A readiness probe can fail transiently while MariaDB remains healthy. Do not
+# turn that false negative into SQLSTATE 2006 by killing established sessions.
+# A genuinely stopped/crashed MariaDB closes its own sockets.
+librenms_haproxy_db_shutdown_sessions_on_backend_down: false
 # The DB frontend can receive hundreds of short-lived application connections
 # per second. Backend state transitions remain in HAProxy's process log; routine
 # per-connection logging is disabled by default to avoid outage log storms.

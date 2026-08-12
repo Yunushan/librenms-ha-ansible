@@ -38,8 +38,10 @@ Ubuntu 22.04 uses 10.6, Ubuntu 24.04 uses 10.11, Ubuntu 26.04 uses 11.8, and
 RHEL-family 8/9/10 uses the vendor 10.11 stream. The MariaDB role checks the
 installed series during convergence and stops before a silent stream change.
 Upstream MariaDB 11.4/11.8/12.3 remains an explicit Debian-family option for
-fresh local installs; upstream Galera is limited to 11.4/11.8 and is not a
-generic upgrade path for an existing cluster.
+fresh local and Galera installs when the matching server and compatible
+`galera-4` packages resolve. MariaDB 12.3 requires the separate official Galera
+provider source because the server repository no longer includes that package.
+It is not a generic upgrade path for an existing cluster.
 
 | Distro family | Tier | Expected state | Before production |
 | --- | --- | --- | --- |
@@ -163,7 +165,7 @@ before planning a major-series change.
 | --- | --- | --- | --- |
 | 11.4 | Supported | Supported | Long-term series; use for a fresh or explicitly planned HA deployment. |
 | 11.8 | Supported | Supported | Long-term series; recommended Community-repository choice for new Galera deployments. |
-| 12.3 | Supported | Not supported by this repository's Community package path | MariaDB 12.3 is a long-term Community Server series, but its Community repository does not ship the Galera package required by this role. |
+| 12.3 | Supported after Stable/GA verification | Conditional on Debian-family hosts with separate `galera-4` >= 26.4.26 | Long-term series maintained through June 2029; verify the exact candidate is Stable/GA, because the server repository omits Galera and existing clusters require the explicit multi-hop upgrade runbook. |
 
 The playbook never changes an installed major series during normal convergence.
 Use the documented maintenance and upgrade procedure, with an off-cluster

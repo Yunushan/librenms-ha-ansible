@@ -3,6 +3,12 @@ set -u
 
 MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
 MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
+BACKEND_DRAIN_PATH={{ librenms_galera_backend_drain_path | quote }}
+
+if [ -e "${BACKEND_DRAIN_PATH}" ]; then
+  printf 'drain\n'
+  exit 0
+fi
 
 if ! systemctl is-active --quiet "${MARIADB_SERVICE}"; then
   printf 'down\n'

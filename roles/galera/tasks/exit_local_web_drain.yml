@@ -1,0 +1,10 @@
+---
+- name: Restore local Galera backend and co-located LibreNMS traffic after recovery
+  command:
+    argv:
+      - "{{ librenms_galera_web_drain_helper_path }}"
+      - exit
+  register: librenms_galera_web_drain_exit
+  changed_when: librenms_galera_web_drain_exit.stdout == 'exited'
+  when:
+    - librenms_galera_web_drain_enabled | bool

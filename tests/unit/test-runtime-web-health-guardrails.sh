@@ -9,6 +9,10 @@ readonly PROBE_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/librenms-runti
 readonly NGINX_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/nginx-librenms.conf.j2"
 readonly HAPROXY_TEMPLATE="${ROOT_DIR}/roles/haproxy_keepalived/templates/haproxy.cfg.j2"
 readonly STARTUP_REPAIR_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2"
+readonly GALERA_DRAIN_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-node-drain.sh.j2"
+readonly GALERA_AGENT_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent.sh.j2"
+readonly GALERA_TASKS="${ROOT_DIR}/roles/galera/tasks/main.yml"
+readonly SITE_PLAYBOOK="${ROOT_DIR}/playbooks/site.yml"
 readonly READINESS_DEFAULTS="${ROOT_DIR}/roles/production_readiness/defaults/main.yml"
 readonly READINESS_TASKS="${ROOT_DIR}/roles/production_readiness/tasks/main.yml"
 readonly INTEGRATION_HAPROXY="${ROOT_DIR}/tests/integration/haproxy-web/haproxy.cfg"
@@ -35,6 +39,10 @@ main() {
     local nginx
     local haproxy
     local startup_repair
+    local galera_drain
+    local galera_agent
+    local galera_tasks
+    local site_playbook
     local readiness_defaults
     local readiness_tasks
     local integration_haproxy
@@ -47,6 +55,10 @@ main() {
     nginx="$(tr -d '\r' < "${NGINX_TEMPLATE}")"
     haproxy="$(tr -d '\r' < "${HAPROXY_TEMPLATE}")"
     startup_repair="$(tr -d '\r' < "${STARTUP_REPAIR_TEMPLATE}")"
+    galera_drain="$(tr -d '\r' < "${GALERA_DRAIN_TEMPLATE}")"
+    galera_agent="$(tr -d '\r' < "${GALERA_AGENT_TEMPLATE}")"
+    galera_tasks="$(tr -d '\r' < "${GALERA_TASKS}")"
+    site_playbook="$(tr -d '\r' < "${SITE_PLAYBOOK}")"
     readiness_defaults="$(tr -d '\r' < "${READINESS_DEFAULTS}")"
     readiness_tasks="$(tr -d '\r' < "${READINESS_TASKS}")"
     integration_haproxy="$(tr -d '\r' < "${INTEGRATION_HAPROXY}")"
@@ -129,6 +141,80 @@ main() {
         "librenms_daily_ha_drain_path" \
         "Runtime health checks must respect the HA maintenance drain marker."
     require_contains \
+        "${defaults}" \
+        "librenms_galera_web_drain_path: /run/librenms-galera-drain" \
+        "Galera maintenance must use an independent web drain marker."
+    require_contains \
+        "${defaults}" \
+        'librenms_galera_web_drain_compat_path: "{{ librenms_daily_ha_drain_path }}"' \
+        "The first Galera-drain rollout must reuse the already-deployed daily health marker."
+    require_contains \
+        "${galera_drain}" \
+        'COMPAT_OWNERSHIP_PATH="${STATE_PATH}.compat-owned"' \
+        "Compatibility marker cleanup must be ownership-safe."
+    require_contains \
+        "${galera_drain}" \
+        'assert_no_conflicting_units' \
+        "Galera convergence must not race an active daily update."
+    require_contains \
+        "${nginx}" \
+        "librenms_galera_web_drain_path" \
+        "Nginx health checks must reject a web node during local Galera maintenance."
+    require_contains \
+        "${nginx}" \
+        "librenms_daily_ha_drain_enabled | bool or librenms_galera_web_drain_enabled | bool" \
+        "The HAProxy health location must exist when either independent drain is enabled."
+    require_contains \
+        "${galera_tasks}" \
+        "Enter local Galera drain before planned service convergence" \
+        "Galera convergence must drain database and co-located web traffic before disruption."
+    require_contains \
+        "${galera_tasks}" \
+        "Leave local Galera drain after convergence" \
+        "Galera convergence must restore traffic after database readiness validation."
+    require_contains \
+        "${defaults}" \
+        "librenms_galera_backend_drain_path: /run/librenms-galera-backend-drain" \
+        "Galera maintenance must own a separate HAProxy backend drain marker."
+    require_contains \
+        "${defaults}" \
+        "librenms_haproxy_db_shutdown_sessions_on_backend_down: false" \
+        "Transient readiness failures must not terminate established SQL sessions."
+    require_contains \
+        "${galera_agent}" \
+        "BACKEND_DRAIN_PATH" \
+        "The Galera readiness agent must observe the planned backend drain marker."
+    require_contains \
+        "${galera_agent}" \
+        "printf 'drain\\n'" \
+        "The readiness agent must tell HAProxy to drain instead of fail a planned restart."
+    require_contains \
+        "${galera_drain}" \
+        "if ! galera_ready; then" \
+        "The drain helper must fail closed while the local database is unhealthy."
+    require_contains \
+        "${galera_drain}" \
+        "information_schema.PROCESSLIST" \
+        "The drain helper must wait for established database clients to quiesce."
+    require_contains \
+        "${galera_drain}" \
+        'rm -f "${BACKEND_DRAIN_PATH}"' \
+        "The HAProxy backend drain marker must be removed only by a guarded recovery path."
+    require_contains \
+        "${galera_drain}" \
+        'sleep "${BACKEND_REJOIN_DELAY}"' \
+        "The recovered database backend must be observed by HAProxy before web traffic resumes."
+    require_contains \
+        "${site_playbook}" \
+        $'- name: Configure database hosts\n  hosts: librenms_db:!maintenance_nodes\n  become: true\n  gather_facts: true\n  serial: 1' \
+        "Database convergence must remain serialized one Galera member at a time."
+    local agent_line
+    local config_line
+    agent_line="$(grep -n -m1 -- '- name: Deploy Galera readiness agent$' "${GALERA_TASKS}" | cut -d: -f1)"
+    config_line="$(grep -n -m1 -- '- name: Deploy Galera config$' "${GALERA_TASKS}" | cut -d: -f1)"
+    [[ -n "${agent_line}" && -n "${config_line}" && "${agent_line}" -lt "${config_line}" ]] \
+        || fail "The readiness agent must be active before a config-driven MariaDB restart can be drained."
+    require_contains \
         "${haproxy}" \
         "librenms_haproxy_web_runtime_check_enabled" \
         "HAProxy must select the runtime probe when it is enabled."
@@ -165,6 +251,14 @@ main() {
         "${startup_repair}" \
         "mark_latest_db_gone_away_error_handled" \
         "A successful transition recovery must suppress duplicate log-triggered reloads."
+    require_contains \
+        "${startup_repair}" \
+        "enter_local_galera_web_drain" \
+        "Startup repair must drain web traffic before restarting local Galera."
+    require_contains \
+        "${startup_repair}" \
+        "exit_local_galera_web_drain" \
+        "Startup repair must restore traffic after local Galera is synced."
     [[ "$(grep -c 'recover_php_fpm_after_db_recovery || true' "${STARTUP_REPAIR_TEMPLATE}")" -ge 2 ]] \
         || fail "Startup repair must sample DB readiness before and after service recovery."
     require_contains \

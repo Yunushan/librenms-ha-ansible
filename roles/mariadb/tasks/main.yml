@@ -14,10 +14,12 @@
         or librenms_mariadb_upstream_series in librenms_mariadb_upstream_galera_supported_series
     fail_msg: >-
       MariaDB upstream repository mode is supported only on Debian-family hosts.
-      MariaDB Community Server 11.4, 11.8, and 12.3 are supported for local
-      installs. Choose 11.4 or 11.8 for a Galera cluster because the MariaDB
-      12.3 Community repository does not provide the Galera package used by
-      this role. Set an immutable sha256 checksum for
+      MariaDB Community Server 11.4, 11.8, and 12.3 are supported selections
+      for local and Galera installs on Debian-family hosts. Galera deployments
+      also require a compatible galera-4 package. MariaDB 12.3 server
+      repositories do not include that package, so configure the separately
+      published Galera repository before selecting 12.3. Set an immutable
+      sha256 checksum for
       librenms_mariadb_upstream_repo_setup_checksum before enabling upstream mode.
   when: librenms_db_mode in ['local', 'galera']
 
@@ -159,6 +161,57 @@
     - ansible_os_family == 'RedHat'
     - ansible_distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Read installed Galera provider package version for MariaDB 12.3
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - -W
+      - "-f=${Version}"
+      - galera-4
+  register: librenms_mariadb_12_3_galera_provider_version
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Debian'
+    - librenms_db_mode == 'galera'
+    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_upstream_series == '12.3'
+
+- name: Check MariaDB 12.3 Galera provider package version
+  ansible.builtin.command:
+    argv:
+      - dpkg
+      - --compare-versions
+      - "{{ librenms_mariadb_12_3_galera_provider_version.stdout | default('0') }}"
+      - ge
+      - "{{ librenms_mariadb_12_3_galera_min_provider_version }}"
+  register: librenms_mariadb_12_3_galera_provider_check
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Debian'
+    - librenms_db_mode == 'galera'
+    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_upstream_series == '12.3'
+
+- name: Enforce MariaDB 12.3 Galera provider package contract
+  ansible.builtin.assert:
+    that:
+      - librenms_mariadb_12_3_galera_provider_version.rc == 0
+      - librenms_mariadb_12_3_galera_provider_check.rc == 0
+    fail_msg: >-
+      MariaDB 12.3 Galera mode requires galera-4 >=
+      {{ librenms_mariadb_12_3_galera_min_provider_version }} from the separate
+      official Galera package source. Installed version:
+      {{ librenms_mariadb_12_3_galera_provider_version.stdout | default('missing') }}.
+      Configure and approve the provider source from mariadb.com/galera-downloads,
+      then rerun package installation before starting MariaDB 12.3.
+  when:
+    - ansible_os_family == 'Debian'
+    - librenms_db_mode == 'galera'
+    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_upstream_series == '12.3'
 
 - name: Detect installed RHEL-family MariaDB server series
   ansible.builtin.command:
