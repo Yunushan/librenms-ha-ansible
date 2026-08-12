@@ -90,6 +90,8 @@ librenms_managed_python_redis_version: "5.0.7"
 librenms_managed_python_setuptools_version: "75.9.1"
 librenms_managed_python_psutil_version: "7.0.0"
 librenms_managed_python_command_runner_version: "1.7.6"
+librenms_managed_python_apt_lock_retries: 60
+librenms_managed_python_apt_lock_retry_delay: 5
 # Set this only after the inventory has the reviewed security and recovery
 # controls required for a real production declaration. The live readiness gate
 # then fails closed when TLS or the host firewall policy is missing.
@@ -534,6 +536,7 @@ librenms_redis_sentinel_down_after_milliseconds: 5000
 librenms_redis_sentinel_failover_timeout: 30000
 librenms_redis_sentinel_parallel_syncs: 1
 librenms_redis_sentinel_restart_sec: 3
+librenms_redis_sentinel_takeover_timeout: 30
 librenms_redis_sentinel_enforce_configured_master: true
 librenms_redis_sentinel_allow_custom_service_fallback: true
 librenms_redis_sentinel_write_check_retries: 6

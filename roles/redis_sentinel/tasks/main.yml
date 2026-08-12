@@ -42,8 +42,10 @@
   ansible.builtin.command:
     argv:
       - systemctl
-      - list-unit-files
-      - "{{ librenms_redis_sentinel_service_name_effective }}.service"
+      - show
+      - --property=LoadState
+      - --value
+      - "{{ librenms_redis_sentinel_native_service_name }}.service"
   register: librenms_redis_sentinel_native_unit
   changed_when: false
   failed_when: false
@@ -56,11 +58,7 @@
     librenms_redis_sentinel_native_service_available: >-
       {{
         (librenms_redis_sentinel_native_unit.rc | default(1) | int) == 0
-        and
-        (
-          (librenms_redis_sentinel_native_unit.stdout | default(''))
-          is search(librenms_redis_sentinel_native_service_name ~ '\\.service')
-        )
+        and (librenms_redis_sentinel_native_unit.stdout | default('') | trim) == 'loaded'
       }}
   when:
     - librenms_redis_mode == 'sentinel'
@@ -548,14 +546,28 @@
     - librenms_redis_sentinel_native_service_available | bool
 
 - name: Stop legacy LibreNMS Redis Sentinel custom service before native takeover
-  service:
+  ansible.builtin.service:
     name: "{{ librenms_redis_sentinel_custom_service_name }}"
     state: stopped
+    enabled: false
+  register: librenms_redis_sentinel_custom_service_stop
   failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
     - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_sentinel_native_service_available | bool
+
+- name: Wait for legacy custom Sentinel listener to stop before native takeover
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 26379
+    state: stopped
+    timeout: "{{ librenms_redis_sentinel_takeover_timeout | int }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_redis_sentinel_native_service_available | bool
+    - librenms_redis_sentinel_custom_service_stop is changed
 
 - name: Remove legacy LibreNMS Redis Sentinel custom unit
   file:
@@ -578,6 +590,30 @@
     - librenms_redis_mode == 'sentinel'
     - ansible_facts.service_mgr == 'systemd'
     - not (librenms_redis_sentinel_native_service_available | bool)
+
+- name: Stop native Redis Sentinel service before project-managed takeover
+  ansible.builtin.service:
+    name: "{{ librenms_redis_sentinel_native_service_name }}"
+    state: stopped
+    enabled: false
+  register: librenms_redis_sentinel_native_service_stop
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_facts.service_mgr == 'systemd'
+    - not (librenms_redis_sentinel_native_service_available | bool)
+
+- name: Wait for native Sentinel listener to stop before project-managed takeover
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 26379
+    state: stopped
+    timeout: "{{ librenms_redis_sentinel_takeover_timeout | int }}"
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_facts.service_mgr == 'systemd'
+    - not (librenms_redis_sentinel_native_service_available | bool)
+    - librenms_redis_sentinel_native_service_stop is changed
 
 - name: Reload systemd after sentinel unit changes
   systemd:

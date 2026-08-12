@@ -42,6 +42,37 @@
         target_python=""
         ansible_python=""
 
+        run_apt_with_lock_retry() {
+          max_attempts={{ librenms_managed_python_apt_lock_retries | default(60) | int }}
+          retry_delay={{ librenms_managed_python_apt_lock_retry_delay | default(5) | int }}
+          attempt=1
+
+          while :; do
+            if apt_output=$("$@" 2>&1); then
+              [ -z "${apt_output}" ] || printf '%s\n' "${apt_output}"
+              return 0
+            else
+              apt_rc=$?
+            fi
+
+            if ! printf '%s\n' "${apt_output}" \
+              | grep -Eq 'Could not get lock|Unable to lock|is another process using it'; then
+              printf '%s\n' "${apt_output}" >&2
+              return "${apt_rc}"
+            fi
+
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              printf '%s\n' "${apt_output}" >&2
+              echo "Timed out waiting for the APT package-manager lock" >&2
+              return "${apt_rc}"
+            fi
+
+            echo "APT is busy; retrying in ${retry_delay}s (${attempt}/${max_attempts})" >&2
+            sleep "${retry_delay}"
+            attempt=$((attempt + 1))
+          done
+        }
+
         case "${os_id}:${os_like}" in
           ubuntu:*|debian:*)
             target_python=/usr/bin/python3
@@ -68,8 +99,8 @@
           case "${os_id}:${os_like}" in
             ubuntu:*|debian:*)
               export DEBIAN_FRONTEND=noninteractive
-              apt-get update -q
-              apt-get install -y --no-install-recommends \
+              run_apt_with_lock_retry apt-get update -q
+              run_apt_with_lock_retry apt-get install -y --no-install-recommends \
                 python3 python3-pip python3-venv
               ;;
             rhel:*|rocky:*|almalinux:*|centos:*|*:*rhel*|*:*fedora*)
