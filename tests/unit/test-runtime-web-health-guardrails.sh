@@ -157,6 +157,21 @@ main() {
         'assert_no_conflicting_units' \
         "Galera convergence must not race an active daily update."
     require_contains \
+        "${galera_drain}" \
+        'stop_recorded_unit "${DAILY_TIMER_UNIT}"' \
+        "Galera convergence must stop the daily timer before publishing drain markers."
+    require_contains \
+        "${galera_drain}" \
+        'assert_unit_inactive "${DAILY_SERVICE_UNIT}"' \
+        "Galera convergence must recheck the daily service after stopping its timer."
+    local daily_quiesce_line
+    local drain_marker_line
+    daily_quiesce_line="$(grep -n -m1 -- 'if ! quiesce_daily_timer; then' "${GALERA_DRAIN_TEMPLATE}" | cut -d: -f1)"
+    drain_marker_line="$(grep -n -m1 -- '^  activate_web_drain_markers$' "${GALERA_DRAIN_TEMPLATE}" | cut -d: -f1)"
+    [[ -n "${daily_quiesce_line}" && -n "${drain_marker_line}" \
+        && "${daily_quiesce_line}" -lt "${drain_marker_line}" ]] \
+        || fail "The daily timer must be quiesced before Galera publishes a web drain marker."
+    require_contains \
         "${nginx}" \
         "librenms_galera_web_drain_path" \
         "Nginx health checks must reject a web node during local Galera maintenance."

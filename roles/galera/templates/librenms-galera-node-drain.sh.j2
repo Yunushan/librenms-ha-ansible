@@ -20,6 +20,8 @@ MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
 MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
 HAPROXY_HEALTH_USER={{ librenms_haproxy_db_health_user | quote }}
 PHP_FPM_SERVICE={{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) | quote }}
+DAILY_TIMER_UNIT=librenms-daily.timer
+DAILY_SERVICE_UNIT=librenms-daily.service
 QUIESCE_UNITS=(
 {% for unit in librenms_galera_web_drain_quiesce_units %}
   {{ unit | quote }}
@@ -49,6 +51,15 @@ assert_no_conflicting_units() {
       return 1
     fi
   done
+}
+
+assert_unit_inactive() {
+  local unit="$1"
+
+  if systemctl is-active --quiet "${unit}" 2>/dev/null; then
+    log "refusing Galera drain while conflicting unit ${unit} is active"
+    return 1
+  fi
 }
 
 activate_web_drain_markers() {
@@ -115,14 +126,45 @@ record_active_units() {
   : > "${temporary_state}"
 
   if [ "${LOCAL_WEB_MEMBER}" = '1' ]; then
-    for unit in "${QUIESCE_UNITS[@]}"; do
+    for unit in "${DAILY_TIMER_UNIT}" "${QUIESCE_UNITS[@]}"; do
       if systemctl is-active --quiet "${unit}" 2>/dev/null; then
-        printf '%s\n' "${unit}" >> "${temporary_state}"
+        if ! grep -Fqx -- "${unit}" "${temporary_state}"; then
+          printf '%s\n' "${unit}" >> "${temporary_state}"
+        fi
       fi
     done
   fi
 
   mv -f "${temporary_state}" "${STATE_PATH}"
+}
+
+recorded_unit() {
+  local unit="$1"
+
+  [ -r "${STATE_PATH}" ] && grep -Fqx -- "${unit}" "${STATE_PATH}"
+}
+
+stop_recorded_unit() {
+  local unit="$1"
+
+  if recorded_unit "${unit}"; then
+    systemctl stop "${unit}"
+  fi
+}
+
+start_recorded_unit() {
+  local unit="$1"
+
+  if recorded_unit "${unit}"; then
+    systemctl start "${unit}"
+  fi
+}
+
+quiesce_daily_timer() {
+  [ "${LOCAL_WEB_MEMBER}" = '1' ] || return 0
+
+  stop_recorded_unit "${DAILY_TIMER_UNIT}"
+  assert_unit_inactive "${DAILY_SERVICE_UNIT}"
 }
 
 stop_recorded_units() {
@@ -205,6 +247,7 @@ rollback_drain() {
 
 enter_drain() {
   local already_entered=0
+  local state_created=0
 
   if ! managed_here; then
     printf '%s\n' 'not-managed'
@@ -216,9 +259,21 @@ enter_drain() {
   fi
 
   assert_no_conflicting_units
+  if [ "${LOCAL_WEB_MEMBER}" = '1' ]; then
+    assert_unit_inactive "${DAILY_SERVICE_UNIT}"
+  fi
 
   if [ ! -r "${STATE_PATH}" ]; then
     record_active_units
+    state_created=1
+  fi
+
+  if ! quiesce_daily_timer; then
+    if [ "${state_created}" -eq 1 ]; then
+      start_recorded_unit "${DAILY_TIMER_UNIT}"
+      rm -f "${STATE_PATH}"
+    fi
+    return 1
   fi
 
   touch "${BACKEND_DRAIN_PATH}"

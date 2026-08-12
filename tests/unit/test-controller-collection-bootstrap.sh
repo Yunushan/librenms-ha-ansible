@@ -12,6 +12,11 @@ python_bin="${PYTHON_BIN:-python3}"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "${temporary_dir}"' EXIT
 
+if [ ! -x "${controller_bootstrap}" ]; then
+    echo "Controller bootstrap script must be executable." >&2
+    exit 1
+fi
+
 write_manifest() {
     local root="$1"
     local namespace="$2"

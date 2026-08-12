@@ -42,6 +42,11 @@ main() {
     contains "${COMMON_TASKS_FILE}" 'Validate supported RRDtool runtime'
     contains "${COMMON_TASKS_FILE}" 'Validate supported PHP runtime on managed web nodes'
     contains "${COMMON_TASKS_FILE}" 'Validate supported nginx runtime on managed web nodes'
+    if [ "$(grep -Fc "regex_search('[0-9]+[.][0-9]+')" "${COMMON_TASKS_FILE}")" -ne 3 ]; then
+        fail "${COMMON_TASKS_FILE} must use an unambiguous literal-dot version parser for Python, RRDtool, and nginx"
+    fi
+    contains "${COMMON_TASKS_FILE}" 'Command rc: {{ librenms_runtime_python_version_command.rc'
+    contains "${COMMON_TASKS_FILE}" "default('<empty>', true)"
     contains "${APP_TASKS_FILE}" 'Validate resolved Laravel framework version'
     contains "${WORKFLOW_FILE}" 'python-version: "3.14"'
     contains "${SUPPORT_MATRIX_FILE}" '## Application Runtime Versions'
