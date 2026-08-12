@@ -12,6 +12,22 @@ fail() {
     exit 1
 }
 
+ensure_controller_pip() {
+    local controller_python="${venv_path}/bin/python"
+
+    if "${controller_python}" -m pip --version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    printf 'Controller virtual environment is missing pip; attempting repair with ensurepip.\n'
+    if "${controller_python}" -m ensurepip --upgrade \
+        && "${controller_python}" -m pip --version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    fail "Controller virtual environment ${venv_path} is incomplete and pip repair failed. Install the Python ${controller_python_version} venv package (Ubuntu/Debian: apt install python${controller_python_version}-venv), then rerun 'make controller-bootstrap'."
+}
+
 command -v "${bootstrap_python}" >/dev/null 2>&1 || \
     fail "Python command not found: ${bootstrap_python}"
 [ -f "${requirements_file}" ] || \
@@ -31,6 +47,8 @@ if [ ! -x "${venv_path}/bin/python" ]; then
     "${bootstrap_python}" -m venv "${venv_path}" || \
         fail "Unable to create ${venv_path}; install the Python venv package and retry."
 fi
+
+ensure_controller_pip
 
 "${venv_path}/bin/python" -m pip install \
     --disable-pip-version-check \

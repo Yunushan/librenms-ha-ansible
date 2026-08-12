@@ -37,6 +37,29 @@ grep -A1 -F -- '- name: community.general' "${collection_requirements}" \
 grep -Eq '^ansible-core==2\.21\.2[[:space:]\\]*$' "${controller_requirements}"
 grep -Fq 'Python 3.12 through 3.14 is required' "${controller_bootstrap}"
 grep -Fq -- '--require-hashes' "${controller_bootstrap}"
+grep -Fq 'ensure_controller_pip' "${controller_bootstrap}"
+grep -Fq -- '-m ensurepip --upgrade' "${controller_bootstrap}"
+grep -Fq 'apt install python${controller_python_version}-venv' "${controller_bootstrap}"
+
+repair_venv="${temporary_dir}/controller-venv-without-pip"
+empty_requirements="${temporary_dir}/empty-requirements.txt"
+repair_output="${temporary_dir}/controller-repair.out"
+: > "${empty_requirements}"
+"${python_bin}" -m venv --without-pip "${repair_venv}"
+cat > "${repair_venv}/bin/ansible-playbook" <<'EOF'
+#!/usr/bin/env bash
+printf 'ansible-playbook [core 2.21.2]\n'
+EOF
+chmod +x "${repair_venv}/bin/ansible-playbook"
+
+PYTHON_BIN="${python_bin}" \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${repair_venv}" \
+LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${empty_requirements}" \
+    "${controller_bootstrap}" >"${repair_output}"
+
+grep -Fq 'Controller virtual environment is missing pip; attempting repair with ensurepip.' \
+    "${repair_output}"
+"${repair_venv}/bin/python" -m pip --version >/dev/null
 
 fake_bin="${temporary_dir}/bin"
 call_log="${temporary_dir}/calls.log"
