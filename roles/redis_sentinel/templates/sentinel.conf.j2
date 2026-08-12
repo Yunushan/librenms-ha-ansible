@@ -1,14 +1,14 @@
-{% set redis_node_address = ansible_default_ipv4.address | default(ansible_host | default(inventory_hostname)) %}
+{% set redis_node_address = ansible_facts.default_ipv4.address | default(ansible_host | default(inventory_hostname)) %}
 {% set redis_master_address = hostvars[librenms_redis_master_host].ansible_host | default(librenms_redis_master_host) %}
 port 26379
 bind 127.0.0.1 {{ redis_node_address }}
 protected-mode yes
-{% if ansible_service_mgr == 'systemd' %}
+{% if ansible_facts.service_mgr == 'systemd' %}
 daemonize no
 supervised systemd
 {% endif %}
-{% if ansible_service_mgr == 'systemd' or ansible_os_family == 'Debian' %}
-pidfile {{ librenms_redis_runtime_dir }}/{{ 'valkey-sentinel.pid' if ansible_os_family == 'RedHat' and (ansible_distribution_major_version | int) >= 10 else 'redis-sentinel.pid' }}
+{% if ansible_facts.service_mgr == 'systemd' or ansible_facts.os_family == 'Debian' %}
+pidfile {{ librenms_redis_runtime_dir }}/{{ 'valkey-sentinel.pid' if ansible_facts.os_family == 'RedHat' and (ansible_facts.distribution_major_version | int) >= 10 else 'redis-sentinel.pid' }}
 logfile ""
 {% endif %}
 dir {{ librenms_redis_data_dir }}

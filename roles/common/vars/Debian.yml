@@ -98,8 +98,8 @@ librenms_glusterd_service_name: glusterd
 
 librenms_ubuntu_php_versioned: >-
   {{
-    ansible_distribution == 'Ubuntu'
-    and (ansible_distribution_major_version | int) == 22
+    ansible_facts.distribution == 'Ubuntu'
+    and (ansible_facts.distribution_major_version | int) == 22
   }}
 librenms_php_package_prefix: >-
   {{

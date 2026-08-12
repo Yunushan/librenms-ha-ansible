@@ -102,7 +102,7 @@
           if librenms_db_mode == 'local'
           else
           (
-            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+            ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
             if (
               librenms_db_mode == 'galera'
               and librenms_runtime_db_prefer_local_galera | bool
@@ -319,7 +319,7 @@
     librenms_rrdcached_network_bind_address_effective: >-
       {{
         ansible_host
-        | default(ansible_default_ipv4.address | default(inventory_hostname))
+        | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
         if (
           librenms_rrdcached_endpoint_strategy == 'vip_tcp'
           and (
@@ -628,7 +628,7 @@
   delegate_to: "{{ item.item }}"
   run_once: true
   when:
-    - (hostvars[item.item].ansible_service_mgr | default(ansible_service_mgr)) == 'systemd'
+    - (hostvars[item.item].ansible_facts.service_mgr | default(ansible_facts.service_mgr)) == 'systemd'
     - item.rc | default(0) != 0
 
 - name: Drain LibreNMS user processes before numeric identity changes
@@ -1006,7 +1006,7 @@
       - "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;"
   register: librenms_php_version_cmd
   changed_when: false
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Set effective PHP paths on Debian-family systems
   set_fact:
@@ -1015,7 +1015,7 @@
     librenms_php_fpm_pool_dir_effective: "/etc/php/{{ librenms_php_version_cmd.stdout }}/fpm/pool.d"
     librenms_php_fpm_service_effective: "php{{ librenms_php_version_cmd.stdout }}-fpm"
     librenms_php_fpm_binary_effective: "/usr/sbin/php-fpm{{ librenms_php_version_cmd.stdout }}"
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Set effective PHP paths on non-Debian systems
   set_fact:
@@ -1024,7 +1024,7 @@
     librenms_php_fpm_pool_dir_effective: "{{ librenms_php_fpm_pool_dir }}"
     librenms_php_fpm_service_effective: "{{ librenms_php_fpm_service_name }}"
     librenms_php_fpm_binary_effective: "{{ librenms_php_fpm_service_name }}"
-  when: ansible_os_family != 'Debian'
+  when: ansible_facts.os_family != 'Debian'
 
 - name: Ensure LibreNMS writable directories exist
   file:
@@ -1070,9 +1070,9 @@
 - name: Apply persistent SELinux policy for LibreNMS
   ansible.builtin.include_tasks: selinux.yml
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - librenms_redhat_manage_selinux | bool
-    - ansible_selinux.status | default('disabled') == 'enabled'
+    - ansible_facts.selinux.status | default('disabled') == 'enabled'
 
 - name: Deploy LibreNMS HA RRD permission repair script
   template:
@@ -1238,7 +1238,7 @@
   notify: Restart PHP-FPM
   when:
     - librenms_manage_php_fpm | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
 
 - name: Deploy LibreNMS nginx site
   template:
@@ -1262,7 +1262,7 @@
   notify: Restart nginx
   when:
     - librenms_manage_nginx | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
 
 - name: Remove legacy LibreNMS nginx site paths
   file:
@@ -1276,7 +1276,7 @@
   notify: Restart nginx
   when:
     - librenms_manage_nginx | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
 
 - name: Discover enabled Debian nginx site entries
   find:
@@ -1285,7 +1285,7 @@
   register: librenms_nginx_sites_enabled_entries
   when:
     - librenms_manage_nginx | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
 
 - name: Remove unmanaged Debian nginx site entries
   file:
@@ -1295,7 +1295,7 @@
   notify: Restart nginx
   when:
     - librenms_manage_nginx | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
 
 - name: Deploy LibreNMS install-time environment file
   template:
@@ -2024,7 +2024,7 @@
   notify: Restart rrdcached
   when:
     - librenms_manage_rrdcached | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - librenms_rrdcached_runs_on_host | bool
 
 - name: Ensure rrdcached systemd override directory exists
@@ -2275,7 +2275,7 @@
   notify: Restart LibreNMS dispatcher
   when:
     - librenms_dispatcher_runtime_wait_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy scheduler service file
   template:
@@ -2287,7 +2287,7 @@
   notify: Restart LibreNMS scheduler timer
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy scheduler timer file
   template:
@@ -2299,7 +2299,7 @@
   notify: Restart LibreNMS scheduler timer
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS HA backup wrapper
   template:
@@ -2312,7 +2312,7 @@
   no_log: "{{ librenms_db_mode not in ['local', 'galera'] }}"
   when:
     - librenms_manage_scheduled_backups | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS scheduled backup service files
   template:
@@ -2332,7 +2332,7 @@
   when:
     - librenms_manage_scheduled_backups | bool
     - item.enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - inventory_hostname == librenms_backup_scheduled_host
 
 - name: Deploy LibreNMS scheduled backup timer files
@@ -2359,7 +2359,7 @@
   when:
     - librenms_manage_scheduled_backups | bool
     - item.enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - inventory_hostname == librenms_backup_scheduled_host
 
 - name: Deploy daily maintenance self-heal wrapper
@@ -2374,7 +2374,7 @@
   when:
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_self_heal_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Validate daily-update canary configuration
   assert:
@@ -2392,7 +2392,7 @@
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_self_heal_enabled | bool
     - librenms_daily_canary_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Create LibreNMS daily maintenance helper directory
   file:
@@ -2405,7 +2405,7 @@
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_self_heal_enabled | bool
     - librenms_daily_global_lock_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy daily maintenance cluster lock helper
   template:
@@ -2420,7 +2420,7 @@
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_self_heal_enabled | bool
     - librenms_daily_global_lock_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy daily maintenance service file
   template:
@@ -2432,7 +2432,7 @@
   notify: Restart LibreNMS daily maintenance timer
   when:
     - librenms_manage_daily_maintenance | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy daily maintenance timer file
   template:
@@ -2444,7 +2444,7 @@
   notify: Restart LibreNMS daily maintenance timer
   when:
     - librenms_manage_daily_maintenance | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Check LibreNMS dispatcher watchdog service file
   stat:
@@ -2452,7 +2452,7 @@
   register: librenms_dispatcher_watchdog_service_file
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS dispatcher service file
   copy:
@@ -2473,7 +2473,7 @@
   notify: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Ensure LibreNMS dispatcher systemd override directory exists
   file:
@@ -2485,7 +2485,7 @@
   when:
     - librenms_manage_dispatcher | bool
     - librenms_dispatcher_runtime_wait_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS dispatcher HA systemd override
   template:
@@ -2498,7 +2498,7 @@
   when:
     - librenms_manage_dispatcher | bool
     - librenms_dispatcher_runtime_wait_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Remove LibreNMS dispatcher HA systemd override when disabled
   file:
@@ -2508,7 +2508,7 @@
   when:
     - librenms_manage_dispatcher | bool
     - not (librenms_dispatcher_runtime_wait_enabled | bool)
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS dispatcher HA recovery script
   template:
@@ -2521,7 +2521,7 @@
   when:
     - librenms_manage_dispatcher | bool
     - librenms_dispatcher_failover_recovery_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS dispatcher HA recovery service
   template:
@@ -2533,7 +2533,7 @@
   when:
     - librenms_manage_dispatcher | bool
     - librenms_dispatcher_failover_recovery_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS dispatcher HA recovery timer
   template:
@@ -2545,7 +2545,7 @@
   when:
     - librenms_manage_dispatcher | bool
     - librenms_dispatcher_failover_recovery_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS HA startup repair script
   template:
@@ -2557,7 +2557,7 @@
     validate: "bash -n %s"
   when:
     - librenms_startup_repair_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS HA startup repair service
   template:
@@ -2568,7 +2568,7 @@
     mode: "0644"
   when:
     - librenms_startup_repair_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS HA startup repair timer
   template:
@@ -2579,12 +2579,12 @@
     mode: "0644"
   when:
     - librenms_startup_repair_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Reload systemd for LibreNMS services
   systemd:
     daemon_reload: true
-  when: ansible_service_mgr == 'systemd'
+  when: ansible_facts.service_mgr == 'systemd'
 
 - name: Enable and start scheduler timer
   service:
@@ -2593,7 +2593,7 @@
     enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Enable and start daily maintenance timer
   service:
@@ -2602,7 +2602,7 @@
     enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
   when:
     - librenms_manage_daily_maintenance | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Enable and start scheduled backup timers
   service:
@@ -2617,7 +2617,7 @@
   when:
     - librenms_manage_scheduled_backups | bool
     - item.enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - inventory_hostname == librenms_backup_scheduled_host
 
 - name: Enable and start dispatcher service
@@ -2635,7 +2635,7 @@
     enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Enable and start dispatcher HA recovery timer
   service:
@@ -2645,7 +2645,7 @@
   when:
     - librenms_manage_dispatcher | bool
     - librenms_dispatcher_failover_recovery_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Enable and start LibreNMS HA startup repair timer
   service:
@@ -2654,7 +2654,7 @@
     enabled: "{{ librenms_bootstrap_completed_effective | bool }}"
   when:
     - librenms_startup_repair_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Run LibreNMS HA startup repair once after deployment
   systemd:
@@ -2662,7 +2662,7 @@
     state: started
   when:
     - librenms_startup_repair_enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Remove legacy cron file
@@ -2958,15 +2958,15 @@
           librenms_autodiscovery_nets
           + (
             [
-              ansible_default_ipv4.network
+              ansible_facts.default_ipv4.network
               ~ '/'
-              ~ (ansible_default_ipv4.prefix | string)
+              ~ (ansible_facts.default_ipv4.prefix | string)
             ]
             if (
               librenms_autodiscovery_include_primary_subnet | bool
-              and ansible_default_ipv4 is defined
-              and ansible_default_ipv4.network is defined
-              and ansible_default_ipv4.prefix is defined
+              and ansible_facts.default_ipv4 is defined
+              and ansible_facts.default_ipv4.network is defined
+              and ansible_facts.default_ipv4.prefix is defined
             )
             else []
           )
@@ -3513,7 +3513,7 @@
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_run_once_after_deploy | bool
     - librenms_apply_post_bootstrap_config | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Run LibreNMS daily maintenance once after update policy is configured
@@ -3521,7 +3521,7 @@
     - librenms_manage_daily_maintenance | bool
     - librenms_daily_run_once_after_deploy | bool
     - librenms_apply_post_bootstrap_config | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
     - not (librenms_daily_maintenance_bootstrap_marker_stat.stat.exists | default(false))
   block:
@@ -3719,7 +3719,7 @@
       failed_when: false
       when:
         - librenms_db_mode in ['local', 'galera']
-        - ansible_service_mgr == 'systemd'
+        - ansible_facts.service_mgr == 'systemd'
 
     - name: Capture MariaDB journal after runtime DB wait failure
       command:
@@ -3735,7 +3735,7 @@
       failed_when: false
       when:
         - librenms_db_mode in ['local', 'galera']
-        - ansible_service_mgr == 'systemd'
+        - ansible_facts.service_mgr == 'systemd'
 
     - name: Capture TCP listeners after runtime DB wait failure
       command:
@@ -3815,7 +3815,7 @@
     enabled: true
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Trigger scheduler once after final runtime configuration
@@ -3827,7 +3827,7 @@
   failed_when: false
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Queue dispatcher restart after final runtime configuration
@@ -3837,7 +3837,7 @@
   notify: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
     - librenms_redis_mode == 'sentinel'
 
@@ -3845,7 +3845,7 @@
   meta: flush_handlers
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
     - librenms_redis_mode == 'sentinel'
 
@@ -3957,14 +3957,14 @@
     enabled: true
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_apply_post_bootstrap_config | bool
     - librenms_bootstrap_completed_effective | bool
 
 - name: Run LibreNMS scheduler service once after cache validation
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_apply_post_bootstrap_config | bool
     - librenms_bootstrap_completed_effective | bool
   block:
@@ -4069,14 +4069,14 @@
   notify: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Flush dispatcher restart after final cache validation
   meta: flush_handlers
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Verify final LibreNMS Redis Sentinel runtime health
@@ -4099,7 +4099,7 @@
       register: librenms_redis_runtime_dispatcher_status
       changed_when: false
       failed_when: false
-      when: ansible_service_mgr == 'systemd'
+      when: ansible_facts.service_mgr == 'systemd'
 
     - name: Capture LibreNMS dispatcher journal after Redis runtime health failure
       command:
@@ -4113,7 +4113,7 @@
       register: librenms_redis_runtime_dispatcher_journal
       changed_when: false
       failed_when: false
-      when: ansible_service_mgr == 'systemd'
+      when: ansible_facts.service_mgr == 'systemd'
 
     - name: Capture local Redis service status after Redis runtime health failure
       command:
@@ -4127,7 +4127,7 @@
       changed_when: false
       failed_when: false
       when:
-        - ansible_service_mgr == 'systemd'
+        - ansible_facts.service_mgr == 'systemd'
         - inventory_hostname in librenms_active_redis_nodes
 
     - name: Capture local Redis Sentinel service status after Redis runtime health failure
@@ -4142,7 +4142,7 @@
       changed_when: false
       failed_when: false
       when:
-        - ansible_service_mgr == 'systemd'
+        - ansible_facts.service_mgr == 'systemd'
         - inventory_hostname in librenms_active_redis_nodes
 
     - name: Capture listening TCP sockets after Redis runtime health failure
@@ -4190,7 +4190,7 @@
 - name: Verify LibreNMS dispatcher poller registration
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_apply_post_bootstrap_config | bool
     - librenms_bootstrap_completed_effective | bool
   block:
@@ -4279,14 +4279,14 @@
   notify: Restart PHP-FPM
   when:
     - librenms_manage_php_fpm | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_apply_post_bootstrap_config | bool
 
 - name: Flush PHP-FPM restart after final runtime validation
   meta: flush_handlers
   when:
     - librenms_manage_php_fpm | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_apply_post_bootstrap_config | bool
 
 - name: Recover PHP-FPM endpoint before final LibreNMS web probe
@@ -4299,7 +4299,7 @@
       uri:
         url: >-
           http://{{
-            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+            ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
           }}{{ librenms_php_fpm_ping_path }}
         headers:
           Host: "{{ librenms_haproxy_web_check_host_effective }}"
@@ -4343,7 +4343,7 @@
       uri:
         url: >-
           http://{{
-            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+            ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
           }}{{ librenms_php_fpm_ping_path }}
         headers:
           Host: "{{ librenms_haproxy_web_check_host_effective }}"
@@ -4377,7 +4377,7 @@
       vars:
         librenms_web_probe_url: >-
           http://{{
-            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+            ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
           }}{{ librenms_app_probe_path }}
       uri:
         url: "{{ librenms_web_probe_url }}"
@@ -4426,7 +4426,7 @@
       vars:
         librenms_web_probe_url: >-
           http://{{
-            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+            ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
           }}{{ librenms_app_probe_path }}
       uri:
         url: "{{ librenms_web_probe_url }}"
@@ -4626,7 +4626,7 @@
     librenms_dispatcher_registration_nodes_input: "{{ librenms_dispatcher_registration_nodes }}"
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_apply_post_bootstrap_config | bool
     - librenms_bootstrap_completed_effective | bool
     - inventory_hostname == (ansible_play_hosts_all | last)

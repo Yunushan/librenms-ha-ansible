@@ -5,8 +5,8 @@
   vars:
     librenms_backup_common_vars_lookup:
       files:
-        - "{{ ansible_distribution | replace(' ', '') }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 
@@ -250,7 +250,7 @@
     content: |
       backup_run_id: "{{ librenms_backup_run_id }}"
       backup_dir: "{{ librenms_backup_dir }}"
-      generated_at: "{{ ansible_date_time.iso8601 }}"
+      generated_at: "{{ ansible_facts.date_time.iso8601 }}"
       database:
         included: {{ librenms_backup_include_database | bool | to_json }}
         host: "{{ librenms_backup_host_effective }}"

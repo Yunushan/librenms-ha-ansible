@@ -3,7 +3,7 @@
   assert:
     that:
       - librenms_mariadb_repository_mode in ['distro', 'upstream']
-      - librenms_mariadb_repository_mode != 'upstream' or ansible_os_family == 'Debian'
+      - librenms_mariadb_repository_mode != 'upstream' or ansible_facts.os_family == 'Debian'
       - librenms_mariadb_repository_mode != 'upstream' or librenms_mariadb_upstream_series in librenms_mariadb_upstream_supported_series
       - >-
         librenms_mariadb_repository_mode != 'upstream'
@@ -142,8 +142,8 @@
     - librenms_db_mode in ['local', 'galera']
     - >-
       not (
-        ansible_os_family == 'RedHat'
-        and ansible_distribution_major_version | int == 8
+        ansible_facts.os_family == 'RedHat'
+        and ansible_facts.distribution_major_version | int == 8
         and (librenms_rhel8_package_cli_fallback | default(true) | bool)
       )
 
@@ -158,8 +158,8 @@
     (librenms_rhel8_mariadb_package_install.stderr | default('')))
   when:
     - librenms_db_mode in ['local', 'galera']
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Read installed Galera provider package version for MariaDB 12.3
@@ -173,7 +173,7 @@
   changed_when: false
   failed_when: false
   when:
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - librenms_db_mode == 'galera'
     - librenms_mariadb_repository_mode == 'upstream'
     - librenms_mariadb_upstream_series == '12.3'
@@ -190,7 +190,7 @@
   changed_when: false
   failed_when: false
   when:
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - librenms_db_mode == 'galera'
     - librenms_mariadb_repository_mode == 'upstream'
     - librenms_mariadb_upstream_series == '12.3'
@@ -208,7 +208,7 @@
       Configure and approve the provider source from mariadb.com/galera-downloads,
       then rerun package installation before starting MariaDB 12.3.
   when:
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - librenms_db_mode == 'galera'
     - librenms_mariadb_repository_mode == 'upstream'
     - librenms_mariadb_upstream_series == '12.3'
@@ -222,7 +222,7 @@
   changed_when: false
   failed_when: false
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - librenms_db_mode in ['local', 'galera']
 
 - name: Enforce the supported RHEL-family MariaDB server series
@@ -243,7 +243,7 @@
       Select the vendor 10.11 stream or use a separately validated Galera
       upgrade/rollback workflow for a newer stream.
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - librenms_db_mode in ['local', 'galera']
 
 - name: Detect installed Ubuntu distro MariaDB server series
@@ -255,10 +255,10 @@
   changed_when: false
   failed_when: false
   when:
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts.distribution == 'Ubuntu'
     - librenms_db_mode in ['local', 'galera']
     - librenms_mariadb_repository_mode == 'distro'
-    - ansible_distribution_major_version in librenms_ubuntu_mariadb_expected_series
+    - ansible_facts.distribution_major_version in librenms_ubuntu_mariadb_expected_series
 
 - name: Enforce the supported Ubuntu distro MariaDB server series
   ansible.builtin.assert:
@@ -270,19 +270,19 @@
           | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
           | first
           | default('')
-        ) == (librenms_ubuntu_mariadb_expected_series[ansible_distribution_major_version] | string)
+        ) == (librenms_ubuntu_mariadb_expected_series[ansible_facts.distribution_major_version] | string)
     fail_msg: >-
       Ubuntu distro MariaDB stream is outside this role's production contract.
-      Ubuntu {{ ansible_distribution_version }} expects MariaDB
-      {{ librenms_ubuntu_mariadb_expected_series[ansible_distribution_major_version] }},
+      Ubuntu {{ ansible_facts.distribution_version }} expects MariaDB
+      {{ librenms_ubuntu_mariadb_expected_series[ansible_facts.distribution_major_version] }},
       found: {{ librenms_ubuntu_mariadb_version_probe.stdout | default('unavailable') }}.
       Use the matching Ubuntu LTS package stream or select the separately
       validated upstream repository mode on a fresh, non-Galera install.
   when:
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts.distribution == 'Ubuntu'
     - librenms_db_mode in ['local', 'galera']
     - librenms_mariadb_repository_mode == 'distro'
-    - ansible_distribution_major_version in librenms_ubuntu_mariadb_expected_series
+    - ansible_facts.distribution_major_version in librenms_ubuntu_mariadb_expected_series
 
 - name: Deploy MariaDB tuning config
   template:

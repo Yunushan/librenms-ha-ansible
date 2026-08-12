@@ -5,8 +5,8 @@
   vars:
     librenms_production_readiness_vars_lookup:
       files:
-        - "{{ ansible_distribution | replace(' ', '') }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 
@@ -230,7 +230,7 @@
   ansible.builtin.set_fact:
     librenms_production_host_firewall_backend: >-
       {{
-        ('ufw' if ansible_os_family == 'Debian' else 'firewalld')
+        ('ufw' if ansible_facts.os_family == 'Debian' else 'firewalld')
         if librenms_host_firewall_backend == 'auto'
         else librenms_host_firewall_backend
       }}
@@ -669,7 +669,7 @@
   set_fact:
     librenms_production_shared_lock_probe_epoch: >-
       {{
-        ansible_date_time.epoch | int
+        ansible_facts.date_time.epoch | int
         + librenms_production_readiness_shared_lock_probe_start_delay | int
       }}
   run_once: true
@@ -829,7 +829,7 @@
         IFS= read -r response <&3;
         test "${response}" = 'up'
       - --
-      - "{{ ansible_host | default(ansible_default_ipv4.address) }}"
+      - "{{ ansible_host | default(ansible_facts.default_ipv4.address) }}"
       - "{{ librenms_galera_readiness_agent_port }}"
   register: librenms_production_galera_readiness_agent
   changed_when: false
@@ -1176,7 +1176,7 @@
     url: >-
       http://{{
       hostvars[item].ansible_host
-      | default(hostvars[item].ansible_default_ipv4.address | default(item))
+      | default(hostvars[item].ansible_facts.default_ipv4.address | default(item))
       }}{{ librenms_nginx_runtime_health_check_path }}
     headers:
       Host: "{{ librenms_production_haproxy_web_check_host }}"
@@ -1396,7 +1396,7 @@
 - name: Define disposable database restore verification name
   set_fact:
     librenms_production_restore_database: >-
-      librenms_restore_verify_{{ ansible_date_time.epoch }}
+      librenms_restore_verify_{{ ansible_facts.date_time.epoch }}
   delegate_to: "{{ librenms_backup_scheduled_host }}"
   run_once: true
   when:

@@ -1,6 +1,6 @@
 {% set librenms_nginx_listen =
   (
-    (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':80'
+    (ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname))) ~ ':80'
   )
   if inventory_hostname in (
     groups.get('lb_nodes', [])

@@ -5,43 +5,43 @@
   vars:
     lookup_params:
       files:
-        - "{{ ansible_distribution | replace(' ', '') }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
       paths:
         - "{{ role_path }}/vars"
 
 - name: Ensure OS family is supported
   assert:
     that:
-      - ansible_os_family in librenms_allowed_os_families
-    fail_msg: "Unsupported OS family {{ ansible_os_family }} for this repo."
+      - ansible_facts.os_family in librenms_allowed_os_families
+    fail_msg: "Unsupported OS family {{ ansible_facts.os_family }} for this repo."
 
 - name: Set support tier fact
   set_fact:
     librenms_support_tier: >-
       {{
         librenms_support_tier_map.get(
-          ansible_distribution,
-          librenms_support_tier_map.get(ansible_os_family, 'best-effort')
+          ansible_facts.distribution,
+          librenms_support_tier_map.get(ansible_facts.os_family, 'best-effort')
         )
       }}
 
 - name: Validate production platform baseline before package changes
   ansible.builtin.assert:
     that:
-      - ansible_distribution in librenms_supported_distribution_major_versions
+      - ansible_facts.distribution in librenms_supported_distribution_major_versions
       - librenms_support_tier == 'primary'
       - >-
-        (ansible_distribution_major_version | string)
-        in (librenms_supported_distribution_major_versions[ansible_distribution] | default([]))
+        (ansible_facts.distribution_major_version | string)
+        in (librenms_supported_distribution_major_versions[ansible_facts.distribution] | default([]))
       - >-
         librenms_platform_min_version | length == 0
-        or ansible_distribution_version
+        or ansible_facts.distribution_version
         is version(librenms_platform_min_version, '>=')
-      - ansible_architecture in librenms_supported_architectures
+      - ansible_facts.architecture in librenms_supported_architectures
     fail_msg: >-
-      {{ ansible_distribution }} {{ ansible_distribution_version }} on
-      {{ ansible_architecture }} is outside the declared production platform
+      {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} on
+      {{ ansible_facts.architecture }} is outside the declared production platform
       matrix. Supported primary distributions and minimum versions are:
       {{ librenms_supported_distribution_min_versions }}. This check runs
       before repository or package changes. Set
@@ -51,8 +51,8 @@
     librenms_platform_min_version: >-
       {{
         librenms_supported_distribution_min_versions
-        .get(ansible_distribution, {})
-        .get(ansible_distribution_major_version | string, '')
+        .get(ansible_facts.distribution, {})
+        .get(ansible_facts.distribution_major_version | string, '')
       }}
   when: librenms_production_profile | bool
 
@@ -67,7 +67,7 @@
       reviewed NFS/NFSv4 source for HA, or local RRD storage for standalone
       deployments.
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - librenms_rrd_mode == 'glusterfs'
 
 - name: Require shared NFS RRD storage for RHEL-family HA
@@ -82,7 +82,7 @@
       librenms_external_rrd_source, and keep librenms_uid/librenms_gid identical
       on every node.
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - librenms_mode == 'ha'
 
 - name: Build active inventory host lists
@@ -166,7 +166,7 @@
     fi
     awk '
       /^Suites:/ {
-        suite = ($0 ~ /(^|[[:space:]]){{ ansible_distribution_release }}([[:space:]]|$)/)
+        suite = ($0 ~ /(^|[[:space:]]){{ ansible_facts.distribution_release }}([[:space:]]|$)/)
       }
       /^Components:/ && suite && $0 ~ /(^|[[:space:]])universe([[:space:]]|$)/ {
         found = 1
@@ -179,8 +179,8 @@
   changed_when: false
   failed_when: false
   when:
-    - ansible_os_family == 'Debian'
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.distribution == 'Ubuntu'
     - librenms_enable_extra_repos | bool
 
 - name: Check for legacy Ubuntu universe source file
@@ -188,18 +188,18 @@
     path: /etc/apt/sources.list.d/archive_ubuntu_com_ubuntu.list
   register: librenms_ubuntu_legacy_universe_source
   when:
-    - ansible_os_family == 'Debian'
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.distribution == 'Ubuntu'
     - librenms_enable_extra_repos | bool
 
 - name: Remove duplicate Ubuntu universe source when deb822 already provides it
   lineinfile:
     path: /etc/apt/sources.list.d/archive_ubuntu_com_ubuntu.list
-    regexp: "^deb\\s+https?://archive\\.ubuntu\\.com/ubuntu\\s+{{ ansible_distribution_release }}\\s+universe\\s*$"
+    regexp: "^deb\\s+https?://archive\\.ubuntu\\.com/ubuntu\\s+{{ ansible_facts.distribution_release }}\\s+universe\\s*$"
     state: absent
   when:
-    - ansible_os_family == 'Debian'
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.distribution == 'Ubuntu'
     - librenms_enable_extra_repos | bool
     - (librenms_ubuntu_sources_universe.rc | default(1)) == 0
     - librenms_ubuntu_legacy_universe_source.stat.exists | default(false)
@@ -210,8 +210,8 @@
     state: present
     update_cache: false
   when:
-    - ansible_os_family == 'Debian'
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.distribution == 'Ubuntu'
     - librenms_enable_extra_repos | bool
     - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
 
@@ -221,13 +221,13 @@
     types:
       - deb
     uris: http://archive.ubuntu.com/ubuntu
-    suites: "{{ ansible_distribution_release }}"
+    suites: "{{ ansible_facts.distribution_release }}"
     components:
       - universe
     state: present
   when:
-    - ansible_os_family == 'Debian'
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.distribution == 'Ubuntu'
     - librenms_enable_extra_repos | bool
     - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
 
@@ -240,8 +240,8 @@
     state: present
     update_cache: false
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -253,8 +253,8 @@
     group: root
     mode: '0755'
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -263,8 +263,8 @@
     path: /etc/apt/trusted.gpg.d/ondrej-ubuntu-php.gpg
     state: absent
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -276,8 +276,8 @@
   register: librenms_ubuntu_php_legacy_sources
   changed_when: false
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -287,8 +287,8 @@
     state: absent
   loop: "{{ librenms_ubuntu_php_legacy_sources.files | default([]) }}"
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
     - item.path != librenms_ubuntu_php_repository_source_file
@@ -301,8 +301,8 @@
     group: root
     mode: '0644'
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -317,8 +317,8 @@
   changed_when: false
   check_mode: false
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -330,8 +330,8 @@
       The downloaded Ondrej PHP signing key fingerprint does not match the pinned
       fingerprint. Refusing to configure the PHP repository.
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -344,12 +344,12 @@
     content: |
       Types: deb
       URIs: {{ librenms_ubuntu_php_repository_uri }}
-      Suites: {{ ansible_distribution_release }}
+      Suites: {{ ansible_facts.distribution_release }}
       Components: main
       Signed-By: {{ librenms_ubuntu_php_repository_keyring }}
   when:
-    - ansible_distribution == 'Ubuntu'
-    - (ansible_distribution_major_version | int) == 22
+    - ansible_facts.distribution == 'Ubuntu'
+    - (ansible_facts.distribution_major_version | int) == 22
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -357,12 +357,12 @@
   apt:
     update_cache: true
     cache_valid_time: 3600
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Configure RedHat-family supplemental repositories
   include_tasks: redhat_repos.yml
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - librenms_enable_extra_repos | bool
 
 - name: Install base packages
@@ -371,8 +371,8 @@
     state: present
   when: >-
     not (
-      ansible_os_family == 'RedHat'
-      and (ansible_distribution_major_version | int) == 8
+      ansible_facts.os_family == 'RedHat'
+      and (ansible_facts.distribution_major_version | int) == 8
       and (librenms_rhel8_package_cli_fallback | default(true) | bool)
     )
 
@@ -389,8 +389,8 @@
     ((librenms_rhel8_base_package_install.stdout | default('')) ~
     (librenms_rhel8_base_package_install.stderr | default('')))
   when: >-
-    ansible_os_family == 'RedHat'
-    and (ansible_distribution_major_version | int) == 8
+    ansible_facts.os_family == 'RedHat'
+    and (ansible_facts.distribution_major_version | int) == 8
     and (librenms_rhel8_package_cli_fallback | default(true) | bool)
 
 - name: Validate supported operating-system and runtime versions

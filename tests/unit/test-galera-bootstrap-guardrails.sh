@@ -41,6 +41,49 @@ require_text "$RECOVERY_TASKS_FILE" "End Galera recovery after read-only evidenc
 require_text "$RECOVERY_TASKS_FILE" "End Galera recovery after confirmed position collection"
 require_text "$RECOVERY_TASKS_FILE" "librenms_galera_recover_bootstrap_host | default('', true) | trim | length == 0"
 
+require_safe_delegated_result_loop() {
+    local file="$1"
+    local task_name="$2"
+    local task_block
+
+    task_block="$(awk -v target="- name: $task_name" '
+        $0 == target { capture=1 }
+        capture && /^- name:/ && $0 != target { exit }
+        capture { print }
+    ' "$file")"
+
+    if [ -z "$task_block" ]; then
+        printf 'Missing delegated Galera task in %s: %s\n' "$file" "$task_name" >&2
+        exit 1
+    fi
+
+    if ! grep -Fq -- "selectattr('item', 'defined')" <<<"$task_block" ||
+        ! grep -Fq -- "selectattr('rc', 'defined')" <<<"$task_block"; then
+        printf 'Delegated Galera task must reject incomplete loop results in %s: %s\n' \
+            "$file" "$task_name" >&2
+        exit 1
+    fi
+}
+
+require_safe_delegated_result_loop \
+    "$TASKS_FILE" \
+    "Force kill stale MariaDB processes before recovery probes"
+require_safe_delegated_result_loop \
+    "$TASKS_FILE" \
+    "Reset MariaDB unit state after forced recovery stop # noqa: command-instead-of-module"
+require_safe_delegated_result_loop \
+    "$TASKS_FILE" \
+    "Force kill stale MariaDB processes before Galera bootstrap"
+require_safe_delegated_result_loop \
+    "$TASKS_FILE" \
+    "Reset MariaDB unit state after force kill"
+require_safe_delegated_result_loop \
+    "$RECOVERY_TASKS_FILE" \
+    "Force kill stale MariaDB processes before recovery probes"
+require_safe_delegated_result_loop \
+    "$RECOVERY_TASKS_FILE" \
+    "Reset MariaDB unit state after forced recovery stop"
+
 evidence_end_line="$(grep -nF -- '- name: End Galera recovery after read-only evidence collection' "$RECOVERY_TASKS_FILE" | cut -d: -f1)"
 recovery_assert_line="$(grep -nF -- '- name: Require explicit recovery confirmation and selected host' "$RECOVERY_TASKS_FILE" | cut -d: -f1)"
 

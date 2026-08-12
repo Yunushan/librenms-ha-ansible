@@ -5,8 +5,8 @@
   vars:
     librenms_maintenance_common_vars_lookup:
       files:
-        - "{{ ansible_distribution | replace(' ', '') }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 

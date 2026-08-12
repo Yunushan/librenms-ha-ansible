@@ -5,8 +5,8 @@
     state: present
   when: >-
     not (
-      ansible_os_family == 'RedHat'
-      and ansible_distribution_major_version | int == 8
+      ansible_facts.os_family == 'RedHat'
+      and ansible_facts.distribution_major_version | int == 8
       and (librenms_rhel8_package_cli_fallback | default(true) | bool)
     )
 
@@ -20,8 +20,8 @@
     ((librenms_rhel8_lb_package_install.stdout | default('')) ~
     (librenms_rhel8_lb_package_install.stderr | default('')))
   when:
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Determine effective VIP interface
@@ -30,7 +30,7 @@
       {{
         librenms_vip_interface
         if (librenms_vip_interface | default('') | trim | length > 0)
-        else (ansible_default_ipv4.interface | default(''))
+        else (ansible_facts.default_ipv4.interface | default(''))
       }}
   when: librenms_vip_enabled | bool
 
@@ -38,11 +38,11 @@
   assert:
     that:
       - librenms_vip_interface_effective | length > 0
-      - librenms_vip_interface_effective in ansible_interfaces
+      - librenms_vip_interface_effective in ansible_facts.interfaces
     fail_msg: >-
       VIP interface '{{ librenms_vip_interface_effective | default('') }}' is not available on {{ inventory_hostname }}.
       Set librenms_vip_interface to an existing interface, or leave it empty to use the default route interface.
-      Available interfaces: {{ ansible_interfaces | default([]) | join(', ') }}.
+      Available interfaces: {{ ansible_facts.interfaces | default([]) | join(', ') }}.
   when: librenms_vip_enabled | bool
 
 - name: Allow HAProxy to bind the VIP before Keepalived owns it
@@ -154,8 +154,8 @@
     - librenms_letsencrypt_install_certbot | bool
     - >-
       not (
-        ansible_os_family == 'RedHat'
-        and ansible_distribution_major_version | int == 8
+        ansible_facts.os_family == 'RedHat'
+        and ansible_facts.distribution_major_version | int == 8
         and (librenms_rhel8_package_cli_fallback | default(true) | bool)
       )
 
@@ -171,8 +171,8 @@
   when:
     - librenms_letsencrypt_enabled | bool
     - librenms_letsencrypt_install_certbot | bool
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Ensure Let's Encrypt deploy hook directory exists
@@ -612,7 +612,7 @@
       uri:
         url: >-
           http://{{
-            ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))
+            ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
           }}{{ librenms_nginx_health_check_path }}
         method: GET
         status_code: 200

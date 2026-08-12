@@ -100,7 +100,7 @@ require_text "$REDHAT_VARS_FILE" "'/etc/redis/sentinel.conf'"
 require_text "$REDHAT_VARS_FILE" "else '/etc/redis.conf'"
 require_text "$REDHAT_VARS_FILE" "else '/etc/redis-sentinel.conf'"
 require_text "$DEFAULTS_FILE" 'librenms_redis_runtime_dir: /run/redis'
-require_text "$REDHAT_VARS_FILE" "{{ '/run/valkey' if (ansible_distribution_major_version | int) >= 10 else '/run/redis' }}"
+require_text "$REDHAT_VARS_FILE" "{{ '/run/valkey' if (ansible_facts.distribution_major_version | int) >= 10 else '/run/redis' }}"
 require_text "$ROOT_DIR/roles/redis_sentinel/templates/redis.conf.j2" 'librenms_redis_runtime_dir'
 require_text "$ROOT_DIR/roles/redis_sentinel/templates/sentinel.conf.j2" 'librenms_redis_runtime_dir'
 require_text "$ROOT_DIR/roles/redis_sentinel/templates/redis.conf.j2" 'valkey-server.pid'
@@ -251,7 +251,7 @@ require_text "$REDIS_SENTINEL_TASKS_FILE" 'Verify native Redis or Valkey Sentine
 require_text "$REDIS_SENTINEL_TASKS_FILE" 'Fail early when Redis or Valkey Sentinel mapping is incomplete'
 require_text "$REDIS_SENTINEL_TASKS_FILE" 'Deploy project-managed Redis Sentinel unit when native unit is unavailable'
 require_text "$DEFAULTS_FILE" 'librenms_redis_sentinel_allow_custom_service_fallback: true'
-require_text "$GLUSTER_RRD_FILE" "ansible_os_family != 'RedHat'"
+require_text "$GLUSTER_RRD_FILE" "ansible_facts.os_family != 'RedHat'"
 require_text "$GLUSTER_RRD_FILE" 'do not provide a production-supported glusterfs-server package'
 require_text "$LIBRENMS_APP_FILE" '- name: Disable rrdcached on ineligible nodes'
 require_text "$DEFAULTS_FILE" "librenms_rrd_mode in ['glusterfs', 'external']"
@@ -303,7 +303,7 @@ if grep -Fq 'mounted from GlusterFS and launches a short simultaneous lock probe
     exit 1
 fi
 
-if grep -Fq "ansible_os_family == 'Debian'" "$POST_REBOOT_FILE"; then
+if grep -Fq "ansible_facts.os_family == 'Debian'" "$POST_REBOOT_FILE"; then
     printf 'Post-reboot convergence must repair managed services on both primary OS families.\n' >&2
     exit 1
 fi
@@ -313,7 +313,7 @@ rrdcached_runtime_block=$(awk '
     capture { print }
     /- name: Enable nginx/ { exit }
 ' "$LIBRENMS_APP_FILE")
-if grep -Fq "ansible_os_family == 'Debian'" <<< "$rrdcached_runtime_block"; then
+if grep -Fq "ansible_facts.os_family == 'Debian'" <<< "$rrdcached_runtime_block"; then
     printf 'RRDCacheD runtime convergence must not be limited to Debian.\n' >&2
     exit 1
 fi

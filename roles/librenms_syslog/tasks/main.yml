@@ -19,7 +19,7 @@
   apt:
     update_cache: true
     cache_valid_time: 3600
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Install LibreNMS syslog receiver packages
   package:
@@ -27,8 +27,8 @@
     state: present
   when: >-
     not (
-      ansible_os_family == 'RedHat'
-      and ansible_distribution_major_version | int == 8
+      ansible_facts.os_family == 'RedHat'
+      and ansible_facts.distribution_major_version | int == 8
       and (librenms_rhel8_package_cli_fallback | default(true) | bool)
     )
 
@@ -42,8 +42,8 @@
     ((librenms_rhel8_syslog_package_install.stdout | default('')) ~
     (librenms_rhel8_syslog_package_install.stderr | default('')))
   when:
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Gather service facts for syslog firewall detection
@@ -60,7 +60,7 @@
   failed_when: false
   when:
     - librenms_syslog_manage_firewall | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
 
 - name: Allow LibreNMS syslog UDP port with UFW when available
   community.general.ufw:
@@ -70,7 +70,7 @@
   when:
     - librenms_syslog_manage_firewall | bool
     - librenms_syslog_listen_udp | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - librenms_syslog_ufw_status is defined
     - librenms_syslog_ufw_status.rc == 0
 
@@ -82,7 +82,7 @@
   when:
     - librenms_syslog_manage_firewall | bool
     - librenms_syslog_listen_tcp | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - librenms_syslog_ufw_status is defined
     - librenms_syslog_ufw_status.rc == 0
 
@@ -99,7 +99,7 @@
   when:
     - librenms_syslog_manage_firewall | bool
     - librenms_syslog_listen_udp | bool
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - "'firewalld.service' in ansible_facts.services"
     - ansible_facts.services['firewalld.service'].state == 'running'
 
@@ -128,7 +128,7 @@
   when:
     - librenms_syslog_manage_firewall | bool
     - librenms_syslog_listen_tcp | bool
-    - ansible_os_family == 'RedHat'
+    - ansible_facts.os_family == 'RedHat'
     - "'firewalld.service' in ansible_facts.services"
     - ansible_facts.services['firewalld.service'].state == 'running'
 

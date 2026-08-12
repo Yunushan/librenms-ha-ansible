@@ -5,14 +5,14 @@
   vars:
     librenms_diagnostics_common_vars_lookup:
       files:
-        - "{{ ansible_distribution | replace(' ', '') }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 
 - name: Determine diagnostics run id
   set_fact:
-    librenms_diagnostics_run_id_seed: "{{ ansible_date_time.iso8601_basic_short }}"
+    librenms_diagnostics_run_id_seed: "{{ ansible_facts.date_time.iso8601_basic_short }}"
   run_once: true
 
 - name: Set diagnostics run id fact
@@ -20,7 +20,7 @@
     librenms_diagnostics_run_id_effective: >-
       {{
         hostvars[(ansible_play_hosts | first)].librenms_diagnostics_run_id_seed
-        | default(ansible_date_time.iso8601_basic_short)
+        | default(ansible_facts.date_time.iso8601_basic_short)
       }}
 
 - name: Set diagnostics paths
@@ -54,10 +54,10 @@
       run_id={{ librenms_diagnostics_run_id_effective }}
       host={{ inventory_hostname }}
       ansible_host={{ ansible_host | default('') }}
-      distribution={{ ansible_distribution }} {{ ansible_distribution_version }}
-      os_family={{ ansible_os_family }}
-      kernel={{ ansible_kernel }}
-      service_mgr={{ ansible_service_mgr }}
+      distribution={{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+      os_family={{ ansible_facts.os_family }}
+      kernel={{ ansible_facts.kernel }}
+      service_mgr={{ ansible_facts.service_mgr }}
       librenms_mode={{ librenms_mode }}
       db_mode={{ librenms_db_mode }}
       redis_mode={{ librenms_redis_mode }}
@@ -129,7 +129,7 @@
     executable: /bin/sh
   changed_when: false
   failed_when: false
-  when: ansible_service_mgr == 'systemd'
+  when: ansible_facts.service_mgr == 'systemd'
 
 - name: Collect systemd unit definitions
   shell: |
@@ -150,7 +150,7 @@
     executable: /bin/sh
   changed_when: false
   failed_when: false
-  when: ansible_service_mgr == 'systemd'
+  when: ansible_facts.service_mgr == 'systemd'
 
 - name: Collect recent systemd journals
   shell: |
@@ -163,7 +163,7 @@
   loop: "{{ librenms_diagnostics_service_units | reject('equalto', '') | unique | list }}"
   changed_when: false
   failed_when: false
-  when: ansible_service_mgr == 'systemd'
+  when: ansible_facts.service_mgr == 'systemd'
 
 - name: Collect sanitized configuration snippets
   shell: |

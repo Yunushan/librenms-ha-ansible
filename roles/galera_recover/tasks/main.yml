@@ -5,8 +5,8 @@
   vars:
     librenms_galera_recover_common_vars_lookup:
       files:
-        - "{{ ansible_distribution | replace(' ', '') }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 
@@ -219,6 +219,8 @@
   loop: >-
     {{
       librenms_galera_recover_stop_wait.results | default([])
+      | selectattr('item', 'defined')
+      | selectattr('rc', 'defined')
       | selectattr('rc', 'ne', 0)
       | map(attribute='item')
       | list
@@ -241,6 +243,8 @@
   loop: >-
     {{
       librenms_galera_recover_force_kill.results | default([])
+      | selectattr('item', 'defined')
+      | selectattr('rc', 'defined')
       | selectattr('rc', 'equalto', 0)
       | map(attribute='item')
       | list

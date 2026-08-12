@@ -685,6 +685,18 @@ Ansible parses the playbook, then runs `playbooks/site.yml`:
 make site
 ```
 
+`make site` is appropriate when the automation user has passwordless sudo or
+`ansible_become_password` is supplied securely through Ansible Vault. If the
+managed hosts prompt for a sudo password, use the interactive wrapper instead:
+
+```bash
+make site-ask-become-pass
+```
+
+The password must be valid on every target. For unattended production runs,
+configure the automation account consistently on all nodes rather than mixing
+passwordless sudo and interactive sudo policies.
+
 The equivalent explicit command is:
 
 ```bash

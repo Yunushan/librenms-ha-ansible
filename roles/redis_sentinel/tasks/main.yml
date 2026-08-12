@@ -7,8 +7,8 @@
     - librenms_redis_mode in ['local', 'sentinel', 'external']
     - >-
       not (
-        ansible_os_family == 'RedHat'
-        and ansible_distribution_major_version | int == 8
+        ansible_facts.os_family == 'RedHat'
+        and ansible_facts.distribution_major_version | int == 8
         and (librenms_rhel8_package_cli_fallback | default(true) | bool)
       )
 
@@ -23,8 +23,8 @@
     (librenms_rhel8_redis_package_install.stderr | default('')))
   when:
     - librenms_redis_mode in ['local', 'sentinel', 'external']
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Verify Redis or Valkey runtime mapping for Sentinel
@@ -36,7 +36,7 @@
   register: librenms_redis_sentinel_runtime_paths
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Verify native Redis or Valkey Sentinel unit exists
   ansible.builtin.command:
@@ -49,7 +49,7 @@
   failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Determine whether the native Sentinel unit is usable
   ansible.builtin.set_fact:
@@ -64,7 +64,7 @@
       }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Select the native or project-managed Sentinel service
   ansible.builtin.set_fact:
@@ -76,7 +76,7 @@
       }}
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Fail early when Redis or Valkey Sentinel mapping is incomplete
   ansible.builtin.assert:
@@ -91,7 +91,7 @@
         or librenms_redis_sentinel_allow_custom_service_fallback | bool
       - librenms_redis_sentinel_service_name_effective | length > 0
     fail_msg: >-
-      The {{ ansible_distribution }} {{ ansible_distribution_version }} Sentinel
+      The {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} Sentinel
       mapping is incomplete. Expected server={{ librenms_redis_server_binary }},
       cli={{ librenms_redis_cli_binary }}, service={{
       librenms_redis_sentinel_native_service_name }}. The native unit was
@@ -101,7 +101,7 @@
       Confirm the Redis/Valkey binaries and service policy for this exact OS.
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Ensure Redis config parent directory exists when needed
   file:
@@ -157,7 +157,7 @@
   failed_when: false
   when:
     - librenms_redis_mode in ['local', 'sentinel']
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - not (librenms_redis_persistence_enabled | bool)
     - librenms_redis_remove_persistence_files_when_disabled | bool
 
@@ -168,7 +168,7 @@
   failed_when: false
   when:
     - librenms_redis_mode in ['local', 'sentinel']
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - not (librenms_redis_persistence_enabled | bool)
     - librenms_redis_remove_persistence_files_when_disabled | bool
     - >-
@@ -243,7 +243,7 @@
     mode: "0750"
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy Redis server config
   template:
@@ -264,7 +264,7 @@
     mode: "0755"
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy Redis server systemd override for Sentinel writable config
   template:
@@ -276,7 +276,7 @@
   notify: Restart Redis
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Remove Redis server systemd override when Sentinel mode is disabled
   file:
@@ -285,14 +285,14 @@
   notify: Restart Redis
   when:
     - librenms_redis_mode != 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Reload systemd after Redis server unit changes
   systemd:
     daemon_reload: true
   when:
     - librenms_redis_mode in ['local', 'sentinel']
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Check Redis server systemd state before service management
   systemd:
@@ -302,7 +302,7 @@
   failed_when: false
   when:
     - librenms_redis_mode in ['local', 'sentinel']
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Clear Redis server stuck stop job before service management  # noqa: command-instead-of-module
   command: "systemctl kill -s SIGKILL {{ librenms_redis_service_name }}"
@@ -311,7 +311,7 @@
   failed_when: false
   when:
     - librenms_redis_mode in ['local', 'sentinel']
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_clear_stuck_stop_job | bool
     - (librenms_redis_server_systemd_state.status.ActiveState | default('')) == 'deactivating'
     - (librenms_redis_server_systemd_state.status.SubState | default('')) == 'stop-sigterm'
@@ -509,14 +509,14 @@
     owner: >-
       {{
         librenms_redis_runtime_user
-        if ansible_service_mgr == 'systemd'
-        else ('redis' if ansible_os_family == 'Debian' else 'root')
+        if ansible_facts.service_mgr == 'systemd'
+        else ('redis' if ansible_facts.os_family == 'Debian' else 'root')
       }}
     group: >-
       {{
         librenms_redis_runtime_group
-        if ansible_service_mgr == 'systemd'
-        else ('redis' if ansible_os_family == 'Debian' else 'root')
+        if ansible_facts.service_mgr == 'systemd'
+        else ('redis' if ansible_facts.os_family == 'Debian' else 'root')
       }}
     mode: "0640"
   notify: Restart Redis Sentinel
@@ -531,7 +531,7 @@
     mode: "0755"
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_sentinel_native_service_available | bool
 
 - name: Deploy Redis Sentinel native systemd override
@@ -544,7 +544,7 @@
   notify: Restart Redis Sentinel
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_sentinel_native_service_available | bool
 
 - name: Stop legacy LibreNMS Redis Sentinel custom service before native takeover
@@ -554,7 +554,7 @@
   failed_when: false
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_sentinel_native_service_available | bool
 
 - name: Remove legacy LibreNMS Redis Sentinel custom unit
@@ -563,7 +563,7 @@
     state: absent
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_sentinel_native_service_available | bool
 
 - name: Deploy project-managed Redis Sentinel unit when native unit is unavailable
@@ -576,7 +576,7 @@
   notify: Restart Redis Sentinel
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - not (librenms_redis_sentinel_native_service_available | bool)
 
 - name: Reload systemd after sentinel unit changes
@@ -584,7 +584,7 @@
     daemon_reload: true
   when:
     - librenms_redis_mode == 'sentinel'
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Enable and start Redis Sentinel service
   when: librenms_redis_mode == 'sentinel'

@@ -2,13 +2,13 @@
 - name: Require a primary distribution for production profile
   ansible.builtin.assert:
     that:
-      - ansible_distribution in librenms_supported_distribution_major_versions
+      - ansible_facts.distribution in librenms_supported_distribution_major_versions
       - librenms_support_tier == 'primary'
       - >-
-        (ansible_distribution_major_version | string)
-        in (librenms_supported_distribution_major_versions[ansible_distribution] | default([]))
+        (ansible_facts.distribution_major_version | string)
+        in (librenms_supported_distribution_major_versions[ansible_facts.distribution] | default([]))
     fail_msg: >-
-      {{ ansible_distribution }} {{ ansible_distribution_version }} is not a
+      {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} is not a
       primary production target for this repository. Production profile
       deployments require a supported Ubuntu/Debian or RHEL-family primary
       distribution and a supported major release. Set
@@ -19,9 +19,9 @@
 - name: Validate supported target architecture
   ansible.builtin.assert:
     that:
-      - ansible_architecture in librenms_supported_architectures
+      - ansible_facts.architecture in librenms_supported_architectures
     fail_msg: >-
-      {{ ansible_architecture }} is not in the supported production architecture
+      {{ ansible_facts.architecture }} is not in the supported production architecture
       matrix. Supported architectures: {{ librenms_supported_architectures | join(', ') }}.
       Set librenms_runtime_support_enabled=false only for an explicitly reviewed
       lab or vendor-supported exception.
@@ -30,23 +30,23 @@
   ansible.builtin.assert:
     that:
       - >-
-        (ansible_distribution_major_version | string)
-        in (librenms_supported_distribution_major_versions[ansible_distribution] | default([]))
+        (ansible_facts.distribution_major_version | string)
+        in (librenms_supported_distribution_major_versions[ansible_facts.distribution] | default([]))
     fail_msg: >-
-      {{ ansible_distribution }} {{ ansible_distribution_major_version }} is not
+      {{ ansible_facts.distribution }} {{ ansible_facts.distribution_major_version }} is not
       in the supported production matrix. Supported releases for this family:
-      {{ librenms_supported_distribution_major_versions[ansible_distribution] | default([]) | join(', ') }}.
+      {{ librenms_supported_distribution_major_versions[ansible_facts.distribution] | default([]) | join(', ') }}.
       Set librenms_runtime_support_enabled=false only for an explicitly reviewed
       lab or vendor-supported exception.
-  when: ansible_distribution in librenms_supported_distribution_major_versions
+  when: ansible_facts.distribution in librenms_supported_distribution_major_versions
 
 - name: Determine minimum supported distribution release
   ansible.builtin.set_fact:
     librenms_runtime_distribution_min_version: >-
       {{
         librenms_supported_distribution_min_versions
-        .get(ansible_distribution, {})
-        .get(ansible_distribution_major_version | string, '')
+        .get(ansible_facts.distribution, {})
+        .get(ansible_facts.distribution_major_version | string, '')
       }}
 
 - name: Validate supported distribution minor version
@@ -54,10 +54,10 @@
     that:
       - >-
         librenms_runtime_distribution_min_version | length == 0
-        or ansible_distribution_version
+        or ansible_facts.distribution_version
         is version(librenms_runtime_distribution_min_version, '>=')
     fail_msg: >-
-      {{ ansible_distribution }} {{ ansible_distribution_version }} is older
+      {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} is older
       than the supported production baseline
       {{ librenms_runtime_distribution_min_version }}. Upgrade the host before
       deploying this role set.

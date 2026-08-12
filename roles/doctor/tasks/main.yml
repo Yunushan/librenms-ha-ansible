@@ -246,22 +246,22 @@
     librenms_doctor_support_tier: >-
       {{
         librenms_support_tier_map.get(
-          ansible_distribution,
-          librenms_support_tier_map.get(ansible_os_family, 'best-effort')
+          ansible_facts.distribution,
+          librenms_support_tier_map.get(ansible_facts.os_family, 'best-effort')
         )
       }}
 
 - name: Validate OS family is supported
   assert:
     that:
-      - ansible_os_family in librenms_allowed_os_families
-    fail_msg: "Unsupported OS family {{ ansible_os_family }} for this repo."
+      - ansible_facts.os_family in librenms_allowed_os_families
+    fail_msg: "Unsupported OS family {{ ansible_facts.os_family }} for this repo."
 
 - name: Warn for best-effort operating systems
   debug:
     msg: >-
-      {{ inventory_hostname }} is {{ ansible_distribution }}
-      {{ ansible_distribution_version }} with support tier
+      {{ inventory_hostname }} is {{ ansible_facts.distribution }}
+      {{ ansible_facts.distribution_version }} with support tier
       {{ librenms_doctor_support_tier }}. Lab-test this OS before production.
   when: librenms_doctor_support_tier in librenms_doctor_best_effort_support_tiers
 
@@ -278,9 +278,9 @@
 - name: Validate minimum memory
   assert:
     that:
-      - (ansible_memtotal_mb | int) >= (librenms_doctor_min_memory_mb | int)
+      - (ansible_facts.memtotal_mb | int) >= (librenms_doctor_min_memory_mb | int)
     fail_msg: >-
-      {{ inventory_hostname }} has {{ ansible_memtotal_mb }} MB RAM; expected at
+      {{ inventory_hostname }} has {{ ansible_facts.memtotal_mb }} MB RAM; expected at
       least {{ librenms_doctor_min_memory_mb }} MB for {{ librenms_mode }} mode.
 
 - name: Record root filesystem facts
@@ -288,7 +288,7 @@
     librenms_doctor_root_mount: >-
       {{
         (
-          ansible_mounts
+          ansible_facts.mounts
           | selectattr('mount', 'equalto', '/')
           | list
           | first
@@ -367,7 +367,7 @@
   changed_when: false
   failed_when: false
   loop: "{{ librenms_doctor_required_systemd_commands }}"
-  when: ansible_service_mgr == 'systemd'
+  when: ansible_facts.service_mgr == 'systemd'
 
 - name: Validate required systemd commands exist
   assert:
@@ -388,7 +388,7 @@
         | map(attribute='item')
         | join(', ')
       }}.
-  when: ansible_service_mgr == 'systemd'
+  when: ansible_facts.service_mgr == 'systemd'
 
 - name: Check time synchronization state
   command:
@@ -401,7 +401,7 @@
   register: librenms_doctor_time_sync
   changed_when: false
   failed_when: false
-  when: ansible_service_mgr == 'systemd'
+  when: ansible_facts.service_mgr == 'systemd'
 
 - name: Validate time synchronization is active
   assert:
@@ -411,7 +411,7 @@
       Time synchronization is not active on {{ inventory_hostname }}. Enable NTP
       before running Galera, Redis Sentinel, or TLS workflows.
   when:
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_doctor_fail_on_time_unsync | bool
     - librenms_doctor_time_sync.rc == 0
 
@@ -421,7 +421,7 @@
       timedatectl could not verify time synchronization on {{ inventory_hostname }}.
       Check NTP manually before production deployment.
   when:
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_doctor_time_sync.rc != 0
 
 - name: Warn when time synchronization check is skipped on non-systemd hosts
@@ -429,14 +429,14 @@
     msg: >-
       Automatic time synchronization verification is skipped on
       {{ inventory_hostname }} because service manager is
-      {{ ansible_service_mgr }}. Check NTP manually before production
+      {{ ansible_facts.service_mgr }}. Check NTP manually before production
       deployment.
-  when: ansible_service_mgr != 'systemd'
+  when: ansible_facts.service_mgr != 'systemd'
 
 - name: Validate configured VIP interface exists
   assert:
     that:
-      - librenms_vip_interface in ansible_interfaces
+      - librenms_vip_interface in ansible_facts.interfaces
     fail_msg: >-
       librenms_vip_interface={{ librenms_vip_interface }} does not exist on
       {{ inventory_hostname }}.
@@ -743,7 +743,7 @@
   debug:
     msg: >-
       Doctor checks passed on {{ inventory_hostname }}:
-      {{ ansible_distribution }} {{ ansible_distribution_version }},
+      {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }},
       support={{ librenms_doctor_support_tier }},
-      memory={{ ansible_memtotal_mb }}MB,
+      memory={{ ansible_facts.memtotal_mb }}MB,
       mode={{ librenms_mode }}.

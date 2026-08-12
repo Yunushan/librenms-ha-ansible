@@ -2,7 +2,7 @@
 - name: Reject unsupported in-node Gluster server deployment on RHEL-family hosts
   ansible.builtin.assert:
     that:
-      - ansible_os_family != 'RedHat'
+      - ansible_facts.os_family != 'RedHat'
     fail_msg: >-
       The supported RHEL-family 8, 9, and 10 repositories managed by this
       project do not provide a production-supported glusterfs-server package.
@@ -18,8 +18,8 @@
     - librenms_rrd_mode == 'glusterfs'
     - >-
       not (
-        ansible_os_family == 'RedHat'
-        and ansible_distribution_major_version | int == 8
+        ansible_facts.os_family == 'RedHat'
+        and ansible_facts.distribution_major_version | int == 8
         and (librenms_rhel8_package_cli_fallback | default(true) | bool)
       )
 
@@ -34,8 +34,8 @@
     (librenms_rhel8_gluster_package_install.stderr | default('')))
   when:
     - librenms_rrd_mode == 'glusterfs'
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Gather service facts for Gluster firewall detection
@@ -53,7 +53,7 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - librenms_gluster_manage_firewall | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
 
 - name: Ensure Gluster peer name resolution entries exist
   blockinfile:
@@ -110,7 +110,7 @@
           - "{{ librenms_glusterd_service_name }}"
       changed_when: false
       failed_when: false
-      when: ansible_service_mgr == 'systemd'
+      when: ansible_facts.service_mgr == 'systemd'
 
     - name: Start or restart Gluster daemon
       service:
@@ -149,7 +149,7 @@
       changed_when: false
       failed_when: false
       when:
-        - ansible_service_mgr == 'systemd'
+        - ansible_facts.service_mgr == 'systemd'
         - "'start-limit-hit' in (glusterd_service_start_status.stdout | default(''))"
 
     - name: Retry Gluster daemon start after clearing start-limit-hit
@@ -159,7 +159,7 @@
         enabled: true
       register: glusterd_service_retry_start
       when:
-        - ansible_service_mgr == 'systemd'
+        - ansible_facts.service_mgr == 'systemd'
         - "'start-limit-hit' in (glusterd_service_start_status.stdout | default(''))"
 
     - name: Capture Gluster service status after startup failure
@@ -237,7 +237,7 @@
           {{
             librenms_gluster_bind_address
             if librenms_gluster_bind_address | length > 0
-            else (ansible_host | default(ansible_default_ipv4.address | default('127.0.0.1')))
+            else (ansible_host | default(ansible_facts.default_ipv4.address | default('127.0.0.1')))
           }}
         port: 24007
         state: started
@@ -283,7 +283,7 @@
           {{
             librenms_gluster_bind_address
             if librenms_gluster_bind_address | length > 0
-            else (ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)))
+            else (ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname)))
           }}
           for {{ inventory_hostname }}.
 
@@ -309,7 +309,7 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - librenms_gluster_manage_firewall | bool
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - gluster_ufw_status is defined
     - gluster_ufw_status.rc == 0
 
@@ -407,7 +407,7 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - (gluster_unreachable_peers | default([]) | length) > 0
 
 - name: Fail with Gluster peer reachability diagnostics
@@ -658,7 +658,7 @@
   when:
     - librenms_rrd_mode == 'glusterfs'
     - inventory_hostname == librenms_gluster_bootstrap_host
-    - ansible_os_family == 'Debian'
+    - ansible_facts.os_family == 'Debian'
     - (gluster_transport_restart_unreachable_peers | default([]) | length) > 0
 
 - name: Fail with Gluster restart recovery diagnostics

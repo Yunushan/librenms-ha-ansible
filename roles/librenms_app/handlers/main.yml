@@ -68,7 +68,7 @@
   listen: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Wait for LibreNMS dispatcher service after restart
@@ -85,7 +85,7 @@
   listen: Restart LibreNMS dispatcher
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Restart LibreNMS scheduler timer
@@ -95,7 +95,7 @@
     enabled: true
   when:
     - librenms_manage_scheduler | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Restart LibreNMS daily maintenance timer
@@ -105,7 +105,7 @@
     enabled: true
   when:
     - librenms_manage_daily_maintenance | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
 
 - name: Restart LibreNMS backup timers
@@ -121,6 +121,6 @@
   when:
     - librenms_manage_scheduled_backups | bool
     - item.enabled | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - librenms_bootstrap_completed_effective | bool
     - inventory_hostname == librenms_backup_scheduled_host

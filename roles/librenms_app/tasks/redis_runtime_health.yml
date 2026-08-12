@@ -11,7 +11,7 @@
     ).get('librenms.service', {}).get('state', '') == 'running'
   when:
     - librenms_manage_dispatcher | bool
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Verify Redis Sentinel quorum TCP endpoints are reachable
   command:

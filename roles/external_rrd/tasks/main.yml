@@ -16,12 +16,12 @@
 
 - name: Install external NFS client package
   ansible.builtin.package:
-    name: "{{ 'nfs-common' if ansible_os_family == 'Debian' else 'nfs-utils' }}"
+    name: "{{ 'nfs-common' if ansible_facts.os_family == 'Debian' else 'nfs-utils' }}"
     state: present
   when: >-
     not (
-      ansible_os_family == 'RedHat'
-      and ansible_distribution_major_version | int == 8
+      ansible_facts.os_family == 'RedHat'
+      and ansible_facts.distribution_major_version | int == 8
       and (librenms_rhel8_package_cli_fallback | default(true) | bool)
     )
 
@@ -38,8 +38,8 @@
     ((librenms_rhel8_nfs_package_install.stdout | default('')) ~
     (librenms_rhel8_nfs_package_install.stderr | default('')))
   when:
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Create fixed LibreNMS group for shared RRD ownership

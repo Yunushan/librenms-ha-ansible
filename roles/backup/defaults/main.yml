@@ -1,6 +1,6 @@
 ---
 librenms_backup_root: /var/backups/librenms-ha
-librenms_backup_run_id: "{{ ansible_date_time.iso8601_basic_short }}"
+librenms_backup_run_id: "{{ ansible_facts.date_time.iso8601_basic_short }}"
 librenms_backup_dir: "{{ librenms_backup_root }}/{{ librenms_backup_run_id }}"
 
 librenms_backup_host: ""

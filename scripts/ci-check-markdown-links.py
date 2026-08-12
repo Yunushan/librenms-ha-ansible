@@ -21,8 +21,12 @@ DEFAULT_EXCLUDE_DIRS = {
     ".git",
     ".mypy_cache",
     ".pytest_cache",
+    ".venv",
     "__pycache__",
     "diagnostics",
+    "dist-packages",
+    "site-packages",
+    "venv",
 }
 
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*]\(([^)\n]+)\)")

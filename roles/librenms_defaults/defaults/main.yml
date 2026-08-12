@@ -296,11 +296,11 @@ librenms_syslog_selinux_wrapper_path: /usr/libexec/rsyslog/librenms-syslog
 librenms_syslog_omprog_binary: >-
   {{
     librenms_syslog_selinux_wrapper_path
-    if ansible_os_family == 'RedHat'
+    if ansible_facts.os_family == 'RedHat'
     else librenms_syslog_php_binary ~ ' ' ~ librenms_install_dir ~ '/syslog.php'
   }}
-librenms_syslog_manage_apparmor: "{{ ansible_os_family == 'Debian' }}"
-librenms_syslog_manage_selinux: "{{ ansible_os_family == 'RedHat' }}"
+librenms_syslog_manage_apparmor: "{{ ansible_facts.os_family == 'Debian' }}"
+librenms_syslog_manage_selinux: "{{ ansible_facts.os_family == 'RedHat' }}"
 librenms_syslog_apparmor_profile_path: /etc/apparmor.d/usr.sbin.rsyslogd
 librenms_syslog_apparmor_local_path: /etc/apparmor.d/local/usr.sbin.rsyslogd
 librenms_syslog_runtime_user: syslog
@@ -405,7 +405,7 @@ librenms_db_port: 3306
 librenms_db_name: librenms
 librenms_db_user: librenms
 librenms_db_password: CHANGE_ME_DB_PASSWORD
-librenms_db_bind_address: "{{ ansible_host | default(ansible_default_ipv4.address | default('127.0.0.1')) }}"
+librenms_db_bind_address: "{{ ansible_host | default(ansible_facts.default_ipv4.address | default('127.0.0.1')) }}"
 librenms_mariadb_log_warnings: 1
 librenms_db_user_host: "%"
 librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname]) | first) }}"
@@ -479,8 +479,8 @@ librenms_redis_server_binary: /usr/bin/redis-server
 librenms_redis_cli_binary: >-
   {{
     '/usr/bin/valkey-cli'
-    if ansible_os_family == 'RedHat'
-    and (ansible_distribution_major_version | int) >= 10
+    if ansible_facts.os_family == 'RedHat'
+    and (ansible_facts.distribution_major_version | int) >= 10
     else '/usr/bin/redis-cli'
   }}
 librenms_redis_restart_sec: 3
@@ -496,7 +496,7 @@ librenms_redis_custom_conf_path: "{{ librenms_redis_data_dir }}/librenms-redis.c
 librenms_redis_conf_path_effective: >-
   {{
     librenms_redis_custom_conf_path
-    if ansible_service_mgr == 'systemd' and librenms_redis_mode == 'sentinel'
+    if ansible_facts.service_mgr == 'systemd' and librenms_redis_mode == 'sentinel'
     else librenms_redis_conf_path
   }}
 librenms_redis_systemd_override_dir: >-
@@ -548,7 +548,7 @@ librenms_redis_sentinel_service_name_effective: "{{ librenms_redis_sentinel_nati
 librenms_redis_sentinel_conf_path_effective: >-
   {{
     librenms_redis_sentinel_custom_conf_path
-    if ansible_service_mgr == 'systemd'
+    if ansible_facts.service_mgr == 'systemd'
     else librenms_redis_sentinel_conf_path
   }}
 librenms_redis_sentinel_systemd_override_dir: >-
@@ -934,7 +934,7 @@ librenms_rrdcached_network_enabled: "{{ librenms_rrdcached_endpoint_strategy != 
 librenms_rrdcached_network_bind_address: >-
   {{
     ansible_host
-    | default(ansible_default_ipv4.address | default(inventory_hostname))
+    | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
   }}
 librenms_rrdcached_socket: /run/rrdcached.sock
 librenms_rrdcached_socket_mode: "0660"
@@ -945,7 +945,7 @@ librenms_rrdcached_write_threads: 4
 librenms_rrdcached_journal_path: /var/lib/rrdcached/journal
 librenms_rrdcached_default_config_path: /etc/default/rrdcached
 librenms_rrdcached_service_name: rrdcached
-librenms_manage_rrdcached_systemd_override: "{{ ansible_service_mgr == 'systemd' }}"
+librenms_manage_rrdcached_systemd_override: "{{ ansible_facts.service_mgr == 'systemd' }}"
 librenms_rrdcached_systemd_override_dir: >-
   /etc/systemd/system/{{ librenms_rrdcached_service_name }}.service.d
 librenms_rrdcached_systemd_override_path: >-
@@ -969,7 +969,8 @@ librenms_ubuntu_php_repository_enabled: true
 librenms_ubuntu_php_repository: ppa:ondrej/php
 librenms_ubuntu_php_repository_uri: https://ppa.launchpadcontent.net/ondrej/php/ubuntu
 librenms_ubuntu_php_repository_source_pattern: 'ppa.launchpadcontent.net/ondrej/php'
-librenms_ubuntu_php_repository_key_url: 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6&options=mr'
+librenms_ubuntu_php_repository_key_url: >-
+  https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6&options=mr
 librenms_ubuntu_php_repository_key_fingerprint: B8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6
 librenms_ubuntu_php_repository_keyring: /etc/apt/keyrings/ondrej-php.asc
 librenms_ubuntu_php_repository_source_file: /etc/apt/sources.list.d/ondrej-php.sources

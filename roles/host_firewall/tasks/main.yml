@@ -3,7 +3,7 @@
   ansible.builtin.set_fact:
     librenms_host_firewall_backend_effective: >-
       {{
-        ('ufw' if ansible_os_family == 'Debian' else 'firewalld')
+        ('ufw' if ansible_facts.os_family == 'Debian' else 'firewalld')
         if librenms_host_firewall_backend == 'auto'
         else librenms_host_firewall_backend
       }}
@@ -12,9 +12,9 @@
   ansible.builtin.assert:
     that:
       - >-
-        (ansible_os_family == 'Debian' and librenms_host_firewall_backend_effective == 'ufw')
+        (ansible_facts.os_family == 'Debian' and librenms_host_firewall_backend_effective == 'ufw')
         or
-        (ansible_os_family == 'RedHat' and librenms_host_firewall_backend_effective == 'firewalld')
+        (ansible_facts.os_family == 'RedHat' and librenms_host_firewall_backend_effective == 'firewalld')
       - librenms_host_firewall_management_sources | length > 0
       - librenms_host_firewall_cluster_sources | length > 0
       - librenms_host_firewall_ssh_port | int > 0

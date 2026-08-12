@@ -10,6 +10,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+LEGACY_INJECTED_FACTS = (
+    "ansible_architecture",
+    "ansible_date_time",
+    "ansible_default_ipv4",
+    "ansible_distribution",
+    "ansible_distribution_major_version",
+    "ansible_distribution_release",
+    "ansible_distribution_version",
+    "ansible_interfaces",
+    "ansible_kernel",
+    "ansible_memtotal_mb",
+    "ansible_mounts",
+    "ansible_os_family",
+    "ansible_selinux",
+    "ansible_service_mgr",
+)
+
 
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
@@ -32,6 +49,34 @@ def pinned_python_requirement(content: str, package: str) -> str | None:
 
 def main() -> int:
     failures: list[str] = []
+    failures += require(
+        "Makefile",
+        "site-ask-become-pass:",
+        "Interactive site convergence must remain available for password-based sudo",
+    )
+    failures += require(
+        "Makefile",
+        "playbooks/site.yml --ask-become-pass",
+        "Interactive site convergence must request the become password",
+    )
+    failures += require(
+        "ansible.cfg",
+        "inject_facts_as_vars = False",
+        "Ansible must exercise the explicit ansible_facts namespace",
+    )
+    legacy_fact_pattern = re.compile(
+        rf"\b(?:{'|'.join(map(re.escape, LEGACY_INJECTED_FACTS))})\b"
+    )
+    for source_root in ("inventories", "playbooks", "roles"):
+        for path in (ROOT / source_root).rglob("*"):
+            if path.suffix not in {".j2", ".yaml", ".yml"}:
+                continue
+            match = legacy_fact_pattern.search(path.read_text(encoding="utf-8"))
+            if match:
+                failures.append(
+                    f"{path.relative_to(ROOT)} uses deprecated injected fact "
+                    f"{match.group(0)!r}; use ansible_facts instead"
+                )
     failures += require(
         "roles/librenms_defaults/defaults/main.yml",
         "librenms_daily_global_lock_enabled",
@@ -758,7 +803,8 @@ def main() -> int:
         if (
             "ppa:ondrej/php" not in (common_tasks + default_values)
             or "librenms_ubuntu_php_repository_enabled" not in common_tasks
-            or "(ansible_distribution_major_version | int) == 22" not in common_tasks
+            or "(ansible_facts.distribution_major_version | int) == 22"
+            not in common_tasks
         ):
             failures.append(
                 "Ubuntu repository management must use deb822_repository except for the explicit Ubuntu 22 PHP PPA"

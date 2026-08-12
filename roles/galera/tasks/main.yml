@@ -7,8 +7,8 @@
     - librenms_db_mode == 'galera'
     - >-
       not (
-        ansible_os_family == 'RedHat'
-        and ansible_distribution_major_version | int == 8
+        ansible_facts.os_family == 'RedHat'
+        and ansible_facts.distribution_major_version | int == 8
         and (librenms_rhel8_package_cli_fallback | default(true) | bool)
       )
 
@@ -23,8 +23,8 @@
     (librenms_rhel8_galera_package_install.stderr | default('')))
   when:
     - librenms_db_mode == 'galera'
-    - ansible_os_family == 'RedHat'
-    - ansible_distribution_major_version | int == 8
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
 - name: Deploy Galera readiness agent
@@ -322,6 +322,8 @@
   loop: >-
     {{
       librenms_galera_recovery_stop_wait.results | default([])
+      | selectattr('item', 'defined')
+      | selectattr('rc', 'defined')
       | selectattr('rc', 'ne', 0)
       | map(attribute='item')
       | list
@@ -348,6 +350,8 @@
   loop: >-
     {{
       librenms_galera_recovery_force_kill_mariadb.results | default([])
+      | selectattr('item', 'defined')
+      | selectattr('rc', 'defined')
       | selectattr('rc', 'equalto', 0)
       | map(attribute='item')
       | list
@@ -808,6 +812,8 @@
   loop: >-
     {{
       librenms_galera_stop_process_check.results | default([])
+      | selectattr('item', 'defined')
+      | selectattr('rc', 'defined')
       | selectattr('rc', 'equalto', 0)
       | map(attribute='item')
       | list
@@ -840,6 +846,8 @@
   loop: >-
     {{
       librenms_galera_force_kill_mariadb.results | default([])
+      | selectattr('item', 'defined')
+      | selectattr('rc', 'defined')
       | selectattr('rc', 'equalto', 0)
       | map(attribute='item')
       | list
@@ -1524,7 +1532,7 @@
     librenms_galera_backend_tcp_host: >-
       {{
         ansible_host
-        | default(ansible_default_ipv4.address | default(inventory_hostname))
+        | default(ansible_facts.default_ipv4.address | default(inventory_hostname))
       }}
   when:
     - librenms_db_mode == 'galera'

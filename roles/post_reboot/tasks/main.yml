@@ -5,8 +5,8 @@
   vars:
     librenms_post_reboot_common_vars_lookup:
       files:
-        - "{{ ansible_distribution | replace(' ', '') }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 
@@ -310,7 +310,7 @@
   systemd:
     daemon_reload: true
   when:
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
 
 - name: Reset failed managed RRDCacheD state after reboot # noqa command-instead-of-module
@@ -322,7 +322,7 @@
   changed_when: false
   failed_when: false
   when:
-    - ansible_service_mgr == 'systemd'
+    - ansible_facts.service_mgr == 'systemd'
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
 
 - name: Enable and start managed RRDCacheD after reboot
