@@ -2,6 +2,7 @@
 extends: default
 ignore: |
   .ansible/
+  lib/
 
 rules:
   line-length:

@@ -1380,6 +1380,7 @@ checking that database, config, and optional RRD archives can be read.
 - The SSH automation user needs a real shell plus root-equivalent privilege via `sudo`, because the playbooks install packages, write under `/etc`, manage services, mount GlusterFS, create system users, and manage ACLs.
 - Passwordless `sudo` is recommended for unattended runs. If you intentionally keep a sudo password, use `--ask-become-pass` / `-K` or store `ansible_become_password` securely with Ansible Vault.
 - SSH login passwords and sudo passwords are separate in Ansible. If SSH key authentication is not configured, also pass `--ask-pass` / `-k`; `--ask-become-pass` only answers the later sudo prompt after SSH has already connected.
+- `make site-ask-become-pass` serializes managed hosts and allows 120 seconds for each SSH/sudo handshake. Override those bounded defaults with `INTERACTIVE_BECOME_TIMEOUT=<seconds>` or `INTERACTIVE_BECOME_FORKS=<count>` only when necessary.
 - A typical sudoers entry for an automation account is:
 
 ```text
@@ -1397,8 +1398,34 @@ ansible -i inventories/ha/hosts.yml all -m ping -k
 Check sudo/become after SSH login succeeds:
 
 ```bash
-ansible -i inventories/ha/hosts.yml all -m command -a whoami -b -k -K
+.ansible/controller-venv/bin/ansible librenms_nodes \
+  -i inventories/ha/hosts.yml -b -f 1 -T 120 \
+  -m ansible.builtin.raw -a 'id -u' -k -K
 ```
+
+Using `raw` here is intentional: it can verify sudo even when the managed
+Python interpreter needs to be rebuilt. A result of `0` confirms root
+privilege. If key-based SSH is already configured, omit `-k`.
+
+If only one host reports `Timeout (...) waiting for privilege escalation
+prompt`, SSH reached that host but sudo/PAM did not answer inside the bounded
+window. Retry that host with `-vvv`; if it succeeds, recover any missing managed
+Python and then converge the cluster:
+
+```bash
+.ansible/controller-venv/bin/ansible lnms3 \
+  -i inventories/ha/hosts.yml -b -f 1 -T 120 \
+  -m ansible.builtin.raw -a 'id -u' -K -vvv
+
+make platform-bootstrap-ask-become-pass \
+  ANSIBLE_EXTRA_ARGS='--limit lnms1'
+make site-ask-become-pass
+```
+
+Repeated sudo-prompt delays are a host authentication problem, not a Python
+bootstrap problem. Check that host's SSH, sudo, PAM, DNS/NSS, and system load.
+For unattended production convergence, use SSH keys and a narrowly controlled
+`NOPASSWD` sudo policy instead of an interactive prompt.
 
 Run a playbook with both an SSH password and a sudo password:
 

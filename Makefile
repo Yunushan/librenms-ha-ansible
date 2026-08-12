@@ -1,4 +1,4 @@
-.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone site site-ask-become-pass cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
+.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -11,6 +11,8 @@ GALERA_RECOVER_CONFIRM ?= false
 PLAYBOOK_FLAGS ?=
 ANSIBLE_EXTRA_ARGS ?=
 ANSIBLE_PLAYBOOK ?= ./scripts/ansible-playbook.sh
+INTERACTIVE_BECOME_TIMEOUT ?= 120
+INTERACTIVE_BECOME_FORKS ?= 1
 DOCKER_ANSIBLE ?= docker compose run --rm -v $(SSH_DIR):/root/.ssh:ro ansible
 
 controller-bootstrap:
@@ -121,11 +123,14 @@ integration-redis-sentinel:
 standalone:
 	$(ANSIBLE_PLAYBOOK) -i $(STANDALONE_INVENTORY) playbooks/standalone.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
+platform-bootstrap-ask-become-pass:
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/platform-bootstrap.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
 site:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/site.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 site-ask-become-pass:
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/site.yml --ask-become-pass $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/site.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 cluster:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/cluster.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)

@@ -56,8 +56,30 @@ def main() -> int:
     )
     failures += require(
         "Makefile",
-        "playbooks/site.yml --ask-become-pass",
-        "Interactive site convergence must request the become password",
+        "playbooks/site.yml --ask-become-pass --timeout "
+        "$(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS)",
+        "Interactive site convergence must use the hardened become settings",
+    )
+    failures += require(
+        "Makefile",
+        "INTERACTIVE_BECOME_TIMEOUT ?= 120",
+        "Interactive become must tolerate bounded sudo/PAM prompt delays",
+    )
+    failures += require(
+        "Makefile",
+        "INTERACTIVE_BECOME_FORKS ?= 1",
+        "Interactive become must serialize hosts by default",
+    )
+    failures += require(
+        "Makefile",
+        "platform-bootstrap-ask-become-pass:",
+        "Managed Python recovery must remain available with password-based sudo",
+    )
+    failures += require(
+        "Makefile",
+        "playbooks/platform-bootstrap.yml --ask-become-pass --timeout "
+        "$(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS)",
+        "Managed Python recovery must use the hardened become settings",
     )
     failures += require(
         "ansible.cfg",
