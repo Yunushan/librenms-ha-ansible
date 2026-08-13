@@ -885,6 +885,19 @@ then runs the HA status checks in fail mode:
 ansible-playbook -i inventories/ha/hosts.yml playbooks/post-reboot.yml --ask-become-pass
 ```
 
+For shared RRD storage, post-reboot convergence now gates RRDCacheD on an
+accessible, writable mount. In Gluster mode it runs the startup repair, then
+boundedly detaches an inaccessible stale client mount, restores the managed
+mount definition, remounts it with a per-attempt timeout, and repairs write
+permissions before RRDCacheD can start. If recovery is not safe or does not
+converge, RRDCacheD remains stopped and the play fails with `findmnt`, path,
+service, and Gluster diagnostics instead of allowing writes to the local
+mountpoint directory.
+
+The final HA status collection runs as a separate play. If one node cannot
+converge, Ansible still inspects it during the status pass so the report contains
+its actual service and cluster state instead of cascading `unknown` values.
+
 For each active LibreNMS node, it reports whether the runtime gate can reach
 the database frontend, Redis runtime path, and RRD mount. It also reports the
 startup repair timer, dispatcher recovery timer, and current dispatcher rows in

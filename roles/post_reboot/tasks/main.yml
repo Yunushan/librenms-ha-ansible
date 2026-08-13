@@ -308,7 +308,304 @@
   when:
     - librenms_rrd_mode in ['glusterfs', 'external']
     - librenms_startup_repair_enabled | bool
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Probe shared RRD mount after startup repair
+  shell: |
+    set -eu
+    rrd_path={{ librenms_rrdcached_base_path | quote }}
+    fstype="$(
+      timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+        findmnt --raw --noheadings --output FSTYPE \
+        --mountpoint "${rrd_path}" 2>/dev/null || true
+    )"
+
+    case {{ librenms_rrd_mode | quote }}:"${fstype}" in
+      glusterfs:glusterfs|glusterfs:fuse.glusterfs|external:?*) ;;
+      *)
+        printf 'unexpected or missing filesystem: %s\n' "${fstype:-unavailable}" >&2
+        exit 2
+        ;;
+    esac
+
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      stat --dereference --format=%F -- "${rrd_path}" >/dev/null || exit 3
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      runuser -u {{ librenms_user | quote }} -- test -w "${rrd_path}" || exit 4
+    printf '%s\n' "${fstype}"
+  args:
+    executable: /bin/bash
+  register: librenms_post_reboot_rrd_mount_initial
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode in ['glusterfs', 'external']
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Stop managed RRDCacheD before shared RRD mount recovery
+  service:
+    name: "{{ librenms_rrdcached_service_name }}"
+    state: stopped
+  register: librenms_post_reboot_rrdcached_mount_recovery_stop
+  failed_when: false
+  when:
+    - librenms_manage_rrdcached | bool
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) != 0
+
+- name: Detect mounted RRD path before Gluster recovery
+  command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - TARGET
+      - --nocanonicalize
+      - --mountpoint
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_post_reboot_rrd_active_mount
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+
+- name: Lazily detach inaccessible Gluster RRD mount after reboot
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_gluster_stale_unmount_timeout | int }}s"
+      - umount
+      - --lazy
+      - --
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_post_reboot_rrd_stale_unmount
+  changed_when: (librenms_post_reboot_rrd_stale_unmount.rc | int) == 0
+  failed_when: false
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - librenms_gluster_recover_stale_client_mounts | bool
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+    - (librenms_post_reboot_rrd_active_mount.rc | default(1) | int) == 0
+
+- name: Wait for inaccessible Gluster RRD mount to detach
+  command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - TARGET
+      - --nocanonicalize
+      - --mountpoint
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_post_reboot_rrd_mount_after_detach
+  changed_when: false
+  failed_when: false
+  until: (librenms_post_reboot_rrd_mount_after_detach.rc | int) != 0
+  retries: "{{ librenms_gluster_mount_health_retries | int }}"
+  delay: "{{ librenms_gluster_mount_health_retry_delay | int }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_stale_unmount.rc | default(1) | int) == 0
+
+- name: Record safe Gluster RRD mountpoint recovery state
+  set_fact:
+    librenms_post_reboot_rrd_mount_detached: >-
+      {{
+        (librenms_post_reboot_rrd_active_mount.rc | default(1) | int) != 0
+        or
+        (
+          (librenms_post_reboot_rrd_stale_unmount.rc | default(1) | int) == 0
+          and
+          (librenms_post_reboot_rrd_mount_after_detach.rc | default(0) | int) != 0
+        )
+      }}
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+
+- name: Inspect unmounted post-reboot RRD mountpoint
+  stat:
+    path: "{{ librenms_gluster_mountpoint }}"
+    follow: false
+  register: librenms_post_reboot_rrd_mountpoint_stat
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+    - librenms_post_reboot_rrd_mount_detached | default(false) | bool
+
+- name: Refuse unsafe post-reboot RRD mountpoint paths
+  assert:
+    that:
+      - >-
+        not (librenms_post_reboot_rrd_mountpoint_stat.stat.exists | default(false)) or
+        (librenms_post_reboot_rrd_mountpoint_stat.stat.isdir | default(false)) or
+        (librenms_post_reboot_rrd_mountpoint_stat.stat.islnk | default(false))
+    fail_msg: >-
+      Refusing to replace {{ librenms_gluster_mountpoint }} because it exists
+      and is neither a directory nor a symbolic link.
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+    - librenms_post_reboot_rrd_mount_detached | default(false) | bool
+
+- name: Remove legacy post-reboot RRD mountpoint symlink
+  file:
+    path: "{{ librenms_gluster_mountpoint }}"
+    state: absent
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+    - librenms_post_reboot_rrd_mount_detached | default(false) | bool
+    - librenms_post_reboot_rrd_mountpoint_stat.stat.islnk | default(false) | bool
+
+- name: Prepare literal post-reboot RRD mountpoint directory
+  file:
+    path: "{{ librenms_gluster_mountpoint }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+    - librenms_post_reboot_rrd_mount_detached | default(false) | bool
+
+- name: Restore Gluster RRD mount definition after reboot
+  ansible.posix.mount:
+    path: "{{ librenms_gluster_mountpoint }}"
+    src: >-
+      {{
+        hostvars[librenms_gluster_bootstrap_host].ansible_host
+        | default(librenms_gluster_bootstrap_host)
+      }}:/{{ librenms_gluster_volume_name }}
+    fstype: glusterfs
+    opts: defaults,_netdev
+    state: present
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+    - librenms_post_reboot_rrd_mount_detached | default(false) | bool
+
+- name: Remount Gluster RRD path after reboot
+  command:
+    argv:
+      - timeout
+      - "{{ librenms_gluster_mount_attempt_timeout | int }}s"
+      - mount
+      - "{{ librenms_gluster_mountpoint }}"
+  register: librenms_post_reboot_rrd_mount_restore
+  changed_when: (librenms_post_reboot_rrd_mount_restore.rc | int) == 0
+  failed_when: false
+  until: (librenms_post_reboot_rrd_mount_restore.rc | int) == 0
+  retries: "{{ librenms_post_reboot_gluster_retries | int }}"
+  delay: "{{ librenms_post_reboot_gluster_delay | int }}"
+  when:
+    - librenms_rrd_mode == 'glusterfs'
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) in [2, 3]
+    - librenms_post_reboot_rrd_mount_detached | default(false) | bool
+
+- name: Repair post-reboot RRD write permissions
+  command:
+    argv:
+      - "{{ librenms_rrd_permission_repair_path }}"
+  register: librenms_post_reboot_rrd_permission_repair
+  changed_when: >-
+    'fixing ownership' in
+    (librenms_post_reboot_rrd_permission_repair.stdout | default(''))
+  failed_when: false
+  when:
+    - librenms_rrd_mode in ['glusterfs', 'external']
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - >-
+      (librenms_post_reboot_rrd_mount_initial.rc | default(0) | int) == 4
+      or
+      (librenms_post_reboot_rrd_mount_restore.rc | default(1) | int) == 0
+
+- name: Verify shared RRD mount before managed RRDCacheD startup
+  shell: |
+    set -eu
+    rrd_path={{ librenms_rrdcached_base_path | quote }}
+    fstype="$(
+      timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+        findmnt --raw --noheadings --output FSTYPE \
+        --mountpoint "${rrd_path}" 2>/dev/null || true
+    )"
+
+    case {{ librenms_rrd_mode | quote }}:"${fstype}" in
+      glusterfs:glusterfs|glusterfs:fuse.glusterfs|external:?*) ;;
+      *)
+        printf 'unexpected or missing filesystem: %s\n' "${fstype:-unavailable}" >&2
+        exit 2
+        ;;
+    esac
+
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      stat --dereference --format=%F -- "${rrd_path}" >/dev/null || exit 3
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      runuser -u {{ librenms_user | quote }} -- test -w "${rrd_path}" || exit 4
+    printf '%s\n' "${fstype}"
+  args:
+    executable: /bin/bash
+  register: librenms_post_reboot_rrd_mount_ready
+  changed_when: false
+  failed_when: false
+  until: (librenms_post_reboot_rrd_mount_ready.rc | int) == 0
+  retries: "{{ librenms_post_reboot_gluster_retries | int }}"
+  delay: "{{ librenms_post_reboot_gluster_delay | int }}"
+  when:
+    - librenms_rrd_mode in ['glusterfs', 'external']
+    - inventory_hostname in librenms_post_reboot_active_nodes
+
+- name: Capture shared RRD mount diagnostics after failed recovery
+  shell: |
+    set +e
+    printf '%s\n' '--- findmnt ---'
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      findmnt --target {{ librenms_rrdcached_base_path | quote }}
+    printf '%s\n' '--- path ---'
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      stat --dereference -- {{ librenms_rrdcached_base_path | quote }}
+    printf '%s\n' '--- services ---'
+    systemctl --no-pager --full status \
+      {{ librenms_glusterd_service_name | quote }} \
+      librenms-ha-startup-repair.service \
+      {{ librenms_rrdcached_service_name | quote }}
+    printf '%s\n' '--- Gluster volume ---'
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      gluster volume status {{ librenms_gluster_volume_name | quote }}
+  args:
+    executable: /bin/bash
+  register: librenms_post_reboot_rrd_mount_diagnostics
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_rrd_mode in ['glusterfs', 'external']
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_ready.rc | default(1) | int) != 0
+
+- name: Fail when shared RRD mount recovery does not converge
+  fail:
+    msg: |-
+      Shared RRD storage remains unavailable on {{ inventory_hostname }} after
+      bounded post-reboot recovery. RRDCacheD has been left stopped to prevent
+      writes to the local mountpoint directory.
+
+      {{ librenms_post_reboot_rrd_mount_diagnostics.stdout | default('No diagnostics returned.') }}
+  when:
+    - librenms_rrd_mode in ['glusterfs', 'external']
+    - inventory_hostname in librenms_post_reboot_active_nodes
+    - (librenms_post_reboot_rrd_mount_ready.rc | default(1) | int) != 0
 
 - name: Reload systemd before managed RRDCacheD convergence
   systemd:
@@ -339,6 +636,9 @@
   when:
     - librenms_manage_rrdcached | bool
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - >-
+      librenms_rrd_mode not in ['glusterfs', 'external'] or
+      (librenms_post_reboot_rrd_mount_ready.rc | default(1) | int) == 0
 
 - name: Verify managed RRDCacheD is active after reboot # noqa command-instead-of-module
   command:
@@ -355,6 +655,9 @@
   when:
     - librenms_manage_rrdcached | bool
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - >-
+      librenms_rrd_mode not in ['glusterfs', 'external'] or
+      (librenms_post_reboot_rrd_mount_ready.rc | default(1) | int) == 0
 
 - name: Capture RRDCacheD status after failed post-reboot repair # noqa command-instead-of-module
   command:
@@ -370,6 +673,9 @@
   when:
     - librenms_manage_rrdcached | bool
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - >-
+      librenms_rrd_mode not in ['glusterfs', 'external'] or
+      (librenms_post_reboot_rrd_mount_ready.rc | default(1) | int) == 0
     - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
 
 - name: Capture RRDCacheD journal after failed post-reboot repair # noqa command-instead-of-module
@@ -387,6 +693,9 @@
   when:
     - librenms_manage_rrdcached | bool
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - >-
+      librenms_rrd_mode not in ['glusterfs', 'external'] or
+      (librenms_post_reboot_rrd_mount_ready.rc | default(1) | int) == 0
     - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
 
 - name: Fail when managed RRDCacheD remains unavailable after reboot repair
@@ -403,6 +712,9 @@
   when:
     - librenms_manage_rrdcached | bool
     - inventory_hostname in librenms_post_reboot_rrdcached_nodes
+    - >-
+      librenms_rrd_mode not in ['glusterfs', 'external'] or
+      (librenms_post_reboot_rrd_mount_ready.rc | default(1) | int) == 0
     - (librenms_post_reboot_rrdcached_state.stdout | default('')) != 'active'
 
 - name: Wait for LibreNMS dispatcher after reboot

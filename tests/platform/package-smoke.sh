@@ -83,6 +83,29 @@ get_mariadb_series() {
         head -n 1
 }
 
+dnf_retry() {
+    local max_attempts="${DNF_RETRY_ATTEMPTS:-4}"
+    local retry_delay="${DNF_RETRY_DELAY_SECONDS:-5}"
+    local attempt
+
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        if dnf --setopt=retries=10 --setopt=timeout=30 "$@"; then
+            return 0
+        fi
+
+        if ((attempt == max_attempts)); then
+            printf 'DNF command failed after %s attempts: dnf %s\n' \
+                "${max_attempts}" "$*" >&2
+            return 1
+        fi
+
+        printf 'DNF command failed (attempt %s/%s); refreshing metadata and retrying in %ss.\n' \
+            "${attempt}" "${max_attempts}" "${retry_delay}" >&2
+        dnf clean expire-cache >/dev/null 2>&1 || true
+        sleep "${retry_delay}"
+    done
+}
+
 configure_ondrej_php_repository() {
     local key_url='https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6&options=mr'
     local keyring=/etc/apt/keyrings/ondrej-php.asc
@@ -201,14 +224,14 @@ case "${ID}" in
             exit 1
         fi
 
-        dnf -y install dnf-plugins-core
+        dnf_retry -y install dnf-plugins-core
 
         if [ "${ID}" = "rhel" ]; then
             # Public CI cannot authenticate to Red Hat subscription services.
             # A subscribed RHEL target must already expose CodeReady Builder;
             # install EPEL from its signed upstream release package just as
             # the production role does.
-            dnf -y install \
+            dnf_retry -y install \
                 "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${major}.noarch.rpm"
             if ! dnf repolist --enabled | grep -Eqi 'codeready-builder|crb'; then
                 printf 'RHEL %s requires an enabled CodeReady Builder repository.\n' \
@@ -217,16 +240,16 @@ case "${ID}" in
             fi
         else
             if [ "${major}" = "8" ]; then
-                dnf config-manager --set-enabled powertools
+                dnf_retry config-manager --set-enabled powertools
             else
-                dnf config-manager --set-enabled crb
+                dnf_retry config-manager --set-enabled crb
             fi
-            dnf -y install epel-release
+            dnf_retry -y install epel-release
         fi
 
         if [ "${major}" -lt 10 ]; then
-            dnf -y module reset php mariadb
-            dnf -y module enable php:8.2 mariadb:10.11
+            dnf_retry -y module reset php mariadb
+            dnf_retry -y module enable php:8.2 mariadb:10.11
             cache_packages=(redis python3-redis)
         else
             cache_packages=(valkey)
@@ -238,7 +261,7 @@ case "${ID}" in
             curl_package="curl"
         fi
 
-        dnf -y --setopt=install_weak_deps=False install \
+        dnf_retry -y --setopt=install_weak_deps=False install \
             acl bash-completion ca-certificates chrony cronie \
             "${curl_package}" firewalld \
             fping git graphviz haproxy ImageMagick iproute keepalived mariadb \
@@ -273,7 +296,7 @@ case "${ID}" in
         check_any_path /etc/php.ini
 
         if [ "${major}" = "8" ]; then
-            dnf -y install python3.11 python3.11-pip
+            dnf_retry -y install python3.11 python3.11-pip
             test -x /usr/libexec/platform-python
             /usr/libexec/platform-python -c 'import dnf, pymysql'
             python3.11 -m venv --system-site-packages \
