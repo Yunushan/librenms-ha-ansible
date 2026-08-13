@@ -909,21 +909,19 @@ If Galera has no `Primary` component, do not randomly bootstrap a node. Use the
 guarded recovery workflow:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml --ask-become-pass
+make galera-recover-ask-become-pass
 ```
 
-The equivalent Make target is `make galera-recover`. Without recovery variables
-it runs evidence mode only and exits without stopping MariaDB or changing
-Galera state.
+Use `make galera-recover` when passwordless sudo is configured. Without recovery
+variables, both targets run evidence mode only and exit without stopping MariaDB
+or changing Galera state.
 
 If no node has `safe_to_bootstrap: 1`, collect `galera_recovery` evidence. This
 stops MariaDB on reachable Galera nodes and reports the highest recovered
 `seqno` candidate without bootstrapping:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
-  --ask-become-pass \
-  -e librenms_galera_recover_confirm=true
+make galera-recover-ask-become-pass GALERA_RECOVER_CONFIRM=true
 ```
 
 site.yml also fails closed in this state after the first successful cluster
@@ -935,11 +933,14 @@ recovery tie-breaker is manual.
 Bootstrap only the selected host reported by the playbook:
 
 ```bash
-ansible-playbook -i inventories/ha/hosts.yml playbooks/galera-recover.yml \
-  --ask-become-pass \
-  -e librenms_galera_recover_confirm=true \
-  -e librenms_galera_recover_bootstrap_host=lnms2
+make galera-recover-ask-become-pass \
+  GALERA_RECOVER_CONFIRM=true \
+  GALERA_RECOVER_BOOTSTRAP_HOST=lnms2
 ```
+
+When recovered positions tie, the named host is accepted only if it is one of
+the highest-seqno candidates printed by the preceding run. The playbook rejects
+an arbitrary or lower-seqno host.
 
 After recovery, run `post-reboot.yml`, then `validate.yml`.
 

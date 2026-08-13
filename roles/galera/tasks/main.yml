@@ -582,6 +582,14 @@
       with librenms_galera_recover_confirm=true, then explicitly set
       librenms_galera_recover_bootstrap_host to the selected host.
 
+      With interactive sudo, run:
+      make galera-recover-ask-become-pass
+
+      If no node is already marked safe, collect stopped-node positions with:
+      make galera-recover-ask-become-pass GALERA_RECOVER_CONFIRM=true
+
+      Then rerun the exact confirmed command printed by that playbook.
+
       Set librenms_galera_auto_recover_unsafe_bootstrap=true only for an
       operator-reviewed exception. Tied recovered positions still require an
       explicit recovery tie-break policy.

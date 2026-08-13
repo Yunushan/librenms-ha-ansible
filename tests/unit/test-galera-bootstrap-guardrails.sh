@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 TASKS_FILE="$ROOT_DIR/roles/galera/tasks/main.yml"
 DEFAULTS_FILE="$ROOT_DIR/roles/librenms_defaults/defaults/main.yml"
 RECOVERY_TASKS_FILE="$ROOT_DIR/roles/galera_recover/tasks/main.yml"
+MAKEFILE="$ROOT_DIR/Makefile"
 
 require_text() {
     local file="$1"
@@ -40,6 +41,20 @@ require_text "$TASKS_FILE" "librenms_galera_bootstrap_effective_host in (librenm
 require_text "$RECOVERY_TASKS_FILE" "End Galera recovery after read-only evidence collection"
 require_text "$RECOVERY_TASKS_FILE" "End Galera recovery after confirmed position collection"
 require_text "$RECOVERY_TASKS_FILE" "librenms_galera_recover_bootstrap_host | default('', true) | trim | length == 0"
+require_text "$RECOVERY_TASKS_FILE" "Determine highest recovered Galera candidate hosts"
+require_text "$RECOVERY_TASKS_FILE" "librenms_galera_recover_bootstrap_host in ("
+require_text "$RECOVERY_TASKS_FILE" "librenms_galera_recover_highest_candidate_hosts | default([])"
+require_text "$RECOVERY_TASKS_FILE" "a lower-seqno host is rejected"
+require_text "$MAKEFILE" "galera-recover-ask-become-pass:"
+require_text "$MAKEFILE" '--timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS)'
+require_text "$MAKEFILE" 'GALERA_RECOVER_TIE_BREAKER ?='
+require_text "$MAKEFILE" 'GALERA_RECOVER_TIE_BREAKER_ARG = $(if $(strip $(GALERA_RECOVER_TIE_BREAKER))'
+require_text "$MAKEFILE" '$(GALERA_RECOVER_TIE_BREAKER_ARG)'
+
+if grep -Fq -- 'GALERA_RECOVER_TIE_BREAKER ?= manual' "$MAKEFILE"; then
+    printf 'Make recovery targets must preserve the inventory tie-break policy by default.\n' >&2
+    exit 1
+fi
 
 require_safe_delegated_result_loop() {
     local file="$1"
