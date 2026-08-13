@@ -32,6 +32,9 @@ last_line_number() {
 
 main() {
     local mount_wait_line
+    local active_nodes_line
+    local rrdcached_nodes_task_line
+    local rrdcached_nodes_line
     local writable_repair_line
     local rrdcached_start_line
     local rrdcached_verify_line
@@ -43,6 +46,8 @@ main() {
 
     require_file_text "$POST_REBOOT_TASKS" \
         'librenms_post_reboot_rrdcached_nodes'
+    require_file_text "$POST_REBOOT_TASKS" \
+        'Build managed RRDCacheD host list for post-reboot convergence'
     require_file_text "$POST_REBOOT_TASKS" \
         'Trigger RRD mount repair before managed RRDCacheD convergence'
     require_file_text "$POST_REBOOT_TASKS" \
@@ -63,6 +68,21 @@ main() {
     require_file_text "$RRDCACHED_OVERRIDE" 'RestartSec=5s'
     require_file_text "$RRDCACHED_OVERRIDE" 'StartLimitIntervalSec=300'
     require_file_text "$RRDCACHED_OVERRIDE" 'StartLimitBurst=6'
+
+    active_nodes_line="$(line_number "$POST_REBOOT_TASKS" \
+        'librenms_post_reboot_active_nodes:')"
+    rrdcached_nodes_task_line="$(line_number "$POST_REBOOT_TASKS" \
+        'Build managed RRDCacheD host list for post-reboot convergence')"
+    rrdcached_nodes_line="$(line_number "$POST_REBOOT_TASKS" \
+        'librenms_post_reboot_rrdcached_nodes:')"
+
+    [[ -n "$active_nodes_line" && -n "$rrdcached_nodes_task_line" \
+        && -n "$rrdcached_nodes_line" ]] || \
+        fail 'could not locate post-reboot host-list fact boundaries'
+
+    ((active_nodes_line < rrdcached_nodes_task_line \
+        && rrdcached_nodes_task_line < rrdcached_nodes_line)) || \
+        fail 'RRDCacheD host selection must run after active-node facts are committed'
 
     skip_line="$(line_number "$STARTUP_REPAIR_TEMPLATE" \
         'if [ "${RRD_MODE}" = "glusterfs" ] && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then')"
