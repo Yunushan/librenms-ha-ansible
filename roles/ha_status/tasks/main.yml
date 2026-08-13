@@ -224,8 +224,15 @@
 - name: Check shared RRD mount type and write access
   ansible.builtin.shell: |
     set -eu
-    findmnt -n -o FSTYPE --target {{ (librenms_install_dir ~ '/rrd') | quote }}
-    runuser -u {{ librenms_user | quote }} -- test -w {{ (librenms_install_dir ~ '/rrd') | quote }}
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      findmnt --raw --noheadings --output FSTYPE \
+      --mountpoint {{ (librenms_install_dir ~ '/rrd') | quote }}
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      stat --dereference --format=%F -- {{ (librenms_install_dir ~ '/rrd') | quote }} \
+      >/dev/null
+    timeout {{ librenms_gluster_mount_health_timeout | int }}s \
+      runuser -u {{ librenms_user | quote }} -- \
+      test -w {{ (librenms_install_dir ~ '/rrd') | quote }}
   args:
     executable: /bin/sh
   register: librenms_status_shared_rrd_mount
@@ -810,7 +817,7 @@
           hostvars[item].librenms_status_shared_rrd_mount.stdout
           | default('')
           | trim
-        ) != 'fuse.glusterfs'
+        ) not in ['glusterfs', 'fuse.glusterfs']
       )
       or
       (
@@ -1283,6 +1290,8 @@
       - (librenms_status_degraded_reasons | length) == 0
     fail_msg: |-
       LibreNMS HA status is degraded:
-      {{ librenms_status_degraded_reasons | join('\n') }}
+      {% for reason in librenms_status_degraded_reasons %}
+      - {{ reason }}
+      {% endfor %}
   when: librenms_status_alert_fail_on_degraded | bool
   run_once: true

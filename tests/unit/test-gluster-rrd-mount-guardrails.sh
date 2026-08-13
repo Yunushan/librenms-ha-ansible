@@ -99,7 +99,7 @@ startup_stop_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
 startup_unmount_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
     'umount --lazy -- "${RRD_PATH}"')"
 startup_mount_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
-    'mount "${RRD_PATH}"')"
+    'mount_rrd_path || return 1')"
 startup_start_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
     'systemctl start "${RRDCACHED_SERVICE}"')"
 

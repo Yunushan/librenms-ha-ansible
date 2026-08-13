@@ -3,6 +3,9 @@ set -euo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly POST_REBOOT_TASKS="${ROOT_DIR}/roles/post_reboot/tasks/main.yml"
+readonly POST_REBOOT_PLAYBOOK="${ROOT_DIR}/playbooks/post-reboot.yml"
+readonly DEFAULTS="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
+readonly HA_STATUS_TASKS="${ROOT_DIR}/roles/ha_status/tasks/main.yml"
 readonly STARTUP_REPAIR_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2"
 readonly RRDCACHED_OVERRIDE="${ROOT_DIR}/roles/librenms_app/templates/rrdcached.systemd-override.conf.j2"
 
@@ -32,6 +35,7 @@ last_line_number() {
 
 main() {
     local mount_wait_line
+    local mount_verify_line
     local active_nodes_line
     local rrdcached_nodes_task_line
     local rrdcached_nodes_line
@@ -43,6 +47,9 @@ main() {
     local startup_mount_line
     local startup_writable_line
     local startup_start_line
+    local post_reboot_role_line
+    local ha_status_play_line
+    local ha_status_role_line
 
     require_file_text "$POST_REBOOT_TASKS" \
         'librenms_post_reboot_rrdcached_nodes'
@@ -50,6 +57,18 @@ main() {
         'Build managed RRDCacheD host list for post-reboot convergence'
     require_file_text "$POST_REBOOT_TASKS" \
         'Trigger RRD mount repair before managed RRDCacheD convergence'
+    require_file_text "$POST_REBOOT_TASKS" \
+        'Lazily detach inaccessible Gluster RRD mount after reboot'
+    require_file_text "$POST_REBOOT_TASKS" \
+        'librenms_post_reboot_rrd_mount_detached'
+    require_file_text "$POST_REBOOT_TASKS" \
+        'Restore Gluster RRD mount definition after reboot'
+    require_file_text "$POST_REBOOT_TASKS" \
+        'librenms_gluster_mount_attempt_timeout'
+    require_file_text "$POST_REBOOT_TASKS" \
+        'Verify shared RRD mount before managed RRDCacheD startup'
+    require_file_text "$POST_REBOOT_TASKS" \
+        'Fail when shared RRD mount recovery does not converge'
     require_file_text "$POST_REBOOT_TASKS" \
         'Reset failed managed RRDCacheD state after reboot'
     require_file_text "$POST_REBOOT_TASKS" \
@@ -61,6 +80,8 @@ main() {
     require_file_text "$STARTUP_REPAIR_TEMPLATE" \
         'wait_for_rrd_mount || true'
     require_file_text "$STARTUP_REPAIR_TEMPLATE" \
+        'timeout "${GLUSTER_MOUNT_ATTEMPT_TIMEOUT}"'
+    require_file_text "$STARTUP_REPAIR_TEMPLATE" \
         'repair_writable_paths'
     require_file_text "$STARTUP_REPAIR_TEMPLATE" \
         'ensure_rrdcached || true'
@@ -68,6 +89,28 @@ main() {
     require_file_text "$RRDCACHED_OVERRIDE" 'RestartSec=5s'
     require_file_text "$RRDCACHED_OVERRIDE" 'StartLimitIntervalSec=300'
     require_file_text "$RRDCACHED_OVERRIDE" 'StartLimitBurst=6'
+    require_file_text "$DEFAULTS" 'librenms_gluster_mount_attempt_timeout: 30'
+    require_file_text "$HA_STATUS_TASKS" \
+        '--mountpoint {{ (librenms_install_dir ~ '\''/rrd'\'') | quote }}'
+    require_file_text "$HA_STATUS_TASKS" \
+        ") not in ['glusterfs', 'fuse.glusterfs']"
+    require_file_text "$POST_REBOOT_PLAYBOOK" \
+        'Verify LibreNMS HA status after post-reboot convergence'
+
+    post_reboot_role_line="$(line_number "$POST_REBOOT_PLAYBOOK" \
+        '    - role: post_reboot')"
+    ha_status_play_line="$(line_number "$POST_REBOOT_PLAYBOOK" \
+        'Verify LibreNMS HA status after post-reboot convergence')"
+    ha_status_role_line="$(line_number "$POST_REBOOT_PLAYBOOK" \
+        '    - role: ha_status')"
+
+    [[ -n "$post_reboot_role_line" && -n "$ha_status_play_line" \
+        && -n "$ha_status_role_line" ]] || \
+        fail 'could not locate post-reboot convergence and HA status play boundaries'
+
+    ((post_reboot_role_line < ha_status_play_line \
+        && ha_status_play_line < ha_status_role_line)) || \
+        fail 'HA status must run in a separate play after post-reboot convergence'
 
     active_nodes_line="$(line_number "$POST_REBOOT_TASKS" \
         'librenms_post_reboot_active_nodes:')"
@@ -105,6 +148,8 @@ main() {
 
     mount_wait_line="$(line_number "$POST_REBOOT_TASKS" \
         'Trigger RRD mount repair before managed RRDCacheD convergence')"
+    mount_verify_line="$(line_number "$POST_REBOOT_TASKS" \
+        'Verify shared RRD mount before managed RRDCacheD startup')"
     rrdcached_start_line="$(line_number "$POST_REBOOT_TASKS" \
         'Enable and start managed RRDCacheD after reboot')"
     rrdcached_verify_line="$(line_number "$POST_REBOOT_TASKS" \
@@ -112,14 +157,16 @@ main() {
     rrdcached_fail_line="$(line_number "$POST_REBOOT_TASKS" \
         'Fail when managed RRDCacheD remains unavailable after reboot repair')"
 
-    [[ -n "$mount_wait_line" && -n "$rrdcached_start_line" \
+    [[ -n "$mount_wait_line" && -n "$mount_verify_line" \
+        && -n "$rrdcached_start_line" \
         && -n "$rrdcached_verify_line" && -n "$rrdcached_fail_line" ]] || \
         fail 'could not locate post-reboot RRDCacheD ordering markers'
 
-    ((mount_wait_line < rrdcached_start_line \
+    ((mount_wait_line < mount_verify_line \
+        && mount_verify_line < rrdcached_start_line \
         && rrdcached_start_line < rrdcached_verify_line \
         && rrdcached_verify_line < rrdcached_fail_line)) || \
-        fail 'post-reboot RRDCacheD repair must run before verification and HA status'
+        fail 'post-reboot shared RRD verification must gate RRDCacheD startup'
 
     printf 'Post-reboot RRDCacheD guardrail test passed.\n'
 }
