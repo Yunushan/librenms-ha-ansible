@@ -263,6 +263,17 @@ the playbook fails. The timeout and
 `librenms_galera_web_drain_unit_kill_grace` may be raised for unusually long
 polling jobs, but should remain bounded.
 
+The database backend is first given `librenms_galera_backend_drain_timeout`
+seconds to drain naturally. If persistent application sessions remain during
+this planned operation, the helper disconnects only those non-system sessions
+and verifies the result for
+`librenms_galera_backend_force_disconnect_timeout` seconds. Set
+`librenms_galera_backend_force_disconnect_clients: false` to fail closed
+instead. Empty and unauthenticated connection-setup probes are not treated as
+established workload sessions. This planned-maintenance behavior does not
+enable HAProxy's broad `on-marked-down shutdown-sessions` policy for transient
+health-check failures.
+
 ### After a full cluster restart
 
 When all nodes were powered off and then started again, do not run a full

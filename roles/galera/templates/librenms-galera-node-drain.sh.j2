@@ -17,6 +17,8 @@ SYSTEMCTL_TIMEOUT={{ librenms_galera_web_drain_systemctl_timeout | int }}
 BACKEND_DRAIN_TIMEOUT={{ librenms_galera_backend_drain_timeout | int }}
 BACKEND_DRAIN_POLL_DELAY={{ librenms_galera_backend_drain_poll_delay | int }}
 BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS={{ librenms_galera_backend_drain_max_client_connections | int }}
+BACKEND_FORCE_DISCONNECT_CLIENTS={{ (librenms_galera_backend_force_disconnect_clients | bool) | ternary('1', '0') }}
+BACKEND_FORCE_DISCONNECT_TIMEOUT={{ librenms_galera_backend_force_disconnect_timeout | int }}
 BACKEND_REJOIN_DELAY={{ librenms_galera_backend_rejoin_delay | int }}
 QUERY_TIMEOUT={{ librenms_galera_readiness_agent_query_timeout | int }}
 MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
@@ -257,10 +259,13 @@ active_client_connections() {
 
   count=$(timeout "${QUERY_TIMEOUT}" \
     mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
-    "SELECT GREATEST(COUNT(*) - 1, 0)
+    "SELECT COUNT(*)
        FROM information_schema.PROCESSLIST
-      WHERE COALESCE(USER, '') NOT IN ('system user', 'event_scheduler')
-        AND COALESCE(USER, '') <> '${HAPROXY_HEALTH_USER}';" \
+      WHERE ID <> CONNECTION_ID()
+        AND COALESCE(USER, '') NOT IN (
+          '', 'unauthenticated user', 'system user', 'event_scheduler',
+          '${HAPROXY_HEALTH_USER}'
+        );" \
     2>/dev/null || true)
 
   if [[ "${count}" =~ ^[0-9]+$ ]]; then
@@ -269,6 +274,58 @@ active_client_connections() {
   fi
 
   return 1
+}
+
+force_disconnect_client_connections() {
+  local client_count
+  local kill_statements
+
+  kill_statements=$(timeout "${QUERY_TIMEOUT}" \
+    mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+    "SELECT CONCAT('KILL CONNECTION ', ID, ';')
+       FROM information_schema.PROCESSLIST
+      WHERE ID <> CONNECTION_ID()
+        AND COALESCE(USER, '') NOT IN (
+          '', 'unauthenticated user', 'system user', 'event_scheduler',
+          '${HAPROXY_HEALTH_USER}'
+        );" \
+    2>/dev/null || true)
+
+  client_count=$(printf '%s\n' "${kill_statements}" \
+    | grep -Ec '^KILL CONNECTION [0-9]+;$' || true)
+  if [ "${client_count}" -eq 0 ]; then
+    return 0
+  fi
+
+  log "graceful database drain expired; disconnecting ${client_count} lingering client(s)"
+  printf '%s\n' "${kill_statements}" \
+    | timeout "${QUERY_TIMEOUT}" \
+      mysql --force --protocol=socket --socket="${MARIADB_SOCKET}" \
+        >/dev/null 2>&1 || true
+}
+
+wait_for_forced_client_disconnects() {
+  local connections
+  local deadline
+
+  deadline=$((SECONDS + BACKEND_FORCE_DISCONNECT_TIMEOUT))
+  while systemctl is-active --quiet "${MARIADB_SERVICE}" 2>/dev/null; do
+    connections=$(active_client_connections || true)
+    if [[ "${connections}" =~ ^[0-9]+$ ]] \
+        && [ "${connections}" -le "${BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS}" ]; then
+      log "lingering database clients disconnected (${connections} active)"
+      return 0
+    fi
+
+    if [ "${SECONDS}" -ge "${deadline}" ]; then
+      log "database clients remained after forced disconnect (${connections:-unknown} active)"
+      return 1
+    fi
+
+    sleep "${BACKEND_DRAIN_POLL_DELAY}"
+  done
+
+  return 0
 }
 
 wait_for_client_connections_to_drain() {
@@ -355,8 +412,12 @@ enter_drain() {
     return 1
   fi
   if ! wait_for_client_connections_to_drain; then
-    rollback_drain
-    return 1
+    if [ "${BACKEND_FORCE_DISCONNECT_CLIENTS}" != '1' ] \
+        || ! force_disconnect_client_connections \
+        || ! wait_for_forced_client_disconnects; then
+      rollback_drain
+      return 1
+    fi
   fi
 
   if [ "${already_entered}" -eq 1 ]; then

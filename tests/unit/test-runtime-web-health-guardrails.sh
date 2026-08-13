@@ -233,6 +233,22 @@ main() {
         "The drain helper must wait for established database clients to quiesce."
     require_contains \
         "${galera_drain}" \
+        "'unauthenticated user'" \
+        "Transient HAProxy handshake probes must not block a planned database drain."
+    require_contains \
+        "${defaults}" \
+        "librenms_galera_backend_force_disconnect_clients: true" \
+        "Planned Galera convergence must retire persistent clients after its grace period."
+    require_contains \
+        "${galera_drain}" \
+        "KILL CONNECTION" \
+        "Planned Galera convergence must disconnect only lingering client sessions."
+    require_contains \
+        "${galera_drain}" \
+        "wait_for_forced_client_disconnects" \
+        "Galera convergence must verify lingering clients disconnected before disruption."
+    require_contains \
+        "${galera_drain}" \
         'rm -f "${BACKEND_DRAIN_PATH}"' \
         "The HAProxy backend drain marker must be removed only by a guarded recovery path."
     require_contains \
