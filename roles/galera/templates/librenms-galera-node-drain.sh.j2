@@ -14,6 +14,8 @@ DRAIN_DELAY={{ librenms_galera_web_drain_delay | int }}
 UNIT_STOP_TIMEOUT={{ librenms_galera_web_drain_unit_stop_timeout | int }}
 UNIT_KILL_GRACE={{ librenms_galera_web_drain_unit_kill_grace | int }}
 SYSTEMCTL_TIMEOUT={{ librenms_galera_web_drain_systemctl_timeout | int }}
+SYSTEMD_RECOVERY_TIMEOUT={{ librenms_galera_web_drain_systemd_recovery_timeout | int }}
+SYSTEMD_RECOVERY_POLL_DELAY={{ librenms_galera_web_drain_systemd_recovery_poll_delay | int }}
 BACKEND_DRAIN_TIMEOUT={{ librenms_galera_backend_drain_timeout | int }}
 BACKEND_DRAIN_POLL_DELAY={{ librenms_galera_backend_drain_poll_delay | int }}
 BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS={{ librenms_galera_backend_drain_max_client_connections | int }}
@@ -43,28 +45,110 @@ log() {
   printf '%s\n' "$*" >&2
 }
 
+systemctl_bounded() {
+  timeout "${SYSTEMCTL_TIMEOUT}" systemctl "$@"
+}
+
+systemd_manager_ready() {
+  systemctl_bounded show --property=Version --value >/dev/null 2>&1
+}
+
+wait_for_systemd_manager() {
+  local context="${1:-continuing Galera maintenance}"
+  local deadline
+  local waiting=0
+
+  deadline=$((SECONDS + SYSTEMD_RECOVERY_TIMEOUT))
+  while ! systemd_manager_ready; do
+    if [ "${waiting}" -eq 0 ]; then
+      log "systemd manager is not responding while ${context}; waiting up to ${SYSTEMD_RECOVERY_TIMEOUT}s"
+      waiting=1
+    fi
+    if [ "${SECONDS}" -ge "${deadline}" ]; then
+      log "systemd manager did not recover while ${context}"
+      return 1
+    fi
+    sleep "${SYSTEMD_RECOVERY_POLL_DELAY}"
+  done
+
+  if [ "${waiting}" -eq 1 ]; then
+    log "systemd manager recovered; ${context}"
+  fi
+}
+
+unit_active_state() {
+  local state
+  local unit="$1"
+
+  state=$(systemctl_bounded show --property=ActiveState --value "${unit}" 2>/dev/null || true)
+  case "${state}" in
+    active|reloading|inactive|failed|activating|deactivating|maintenance|refreshing)
+      printf '%s\n' "${state}"
+      ;;
+    *)
+      printf '%s\n' 'unknown'
+      return 1
+      ;;
+  esac
+}
+
+queue_unit_action() {
+  local action="$1"
+  local unit="$2"
+
+  if ! wait_for_systemd_manager "preparing to ${action} ${unit}"; then
+    return 1
+  fi
+  if systemctl_bounded "${action}" --no-block "${unit}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log "systemd did not accept ${action} for ${unit}; waiting for manager recovery before one retry"
+  if ! wait_for_systemd_manager "retrying ${action} for ${unit}"; then
+    return 1
+  fi
+  if ! systemctl_bounded "${action}" --no-block "${unit}" >/dev/null 2>&1; then
+    log "systemd did not accept ${action} for ${unit} after recovery"
+    return 1
+  fi
+}
+
 managed_here() {
   [ "${ENABLED}" = '1' ]
 }
 
 assert_no_conflicting_units() {
+  local state
   local unit
 
+  wait_for_systemd_manager 'checking conflicting maintenance units'
   for unit in "${CONFLICTING_UNITS[@]}"; do
-    if systemctl is-active --quiet "${unit}" 2>/dev/null; then
-      log "refusing Galera drain while conflicting unit ${unit} is active"
-      return 1
-    fi
+    state=$(unit_active_state "${unit}" || true)
+    case "${state}" in
+      inactive|failed)
+        ;;
+      *)
+        log "refusing Galera drain while conflicting unit ${unit} is ${state}"
+        return 1
+        ;;
+    esac
   done
 }
 
 assert_unit_inactive() {
+  local state
   local unit="$1"
 
-  if systemctl is-active --quiet "${unit}" 2>/dev/null; then
-    log "refusing Galera drain while conflicting unit ${unit} is active"
-    return 1
-  fi
+  wait_for_systemd_manager "checking ${unit}"
+  state=$(unit_active_state "${unit}" || true)
+  case "${state}" in
+    inactive|failed)
+      ;;
+    *)
+      log "refusing Galera drain while conflicting unit ${unit} is ${state}"
+      return 1
+      ;;
+  esac
 }
 
 activate_web_drain_markers() {
@@ -102,20 +186,24 @@ galera_ready() {
 }
 
 active_php_fpm_services() {
+  local state
   local unit
 
-  if [ -n "${PHP_FPM_SERVICE}" ] \
-      && systemctl is-active --quiet "${PHP_FPM_SERVICE}" 2>/dev/null; then
-    printf '%s\n' "${PHP_FPM_SERVICE}"
+  if [ -n "${PHP_FPM_SERVICE}" ]; then
+    state=$(unit_active_state "${PHP_FPM_SERVICE}" || true)
+    if [ "${state}" = 'active' ]; then
+      printf '%s\n' "${PHP_FPM_SERVICE}"
+    fi
   fi
 
   while IFS= read -r unit; do
     [ -n "${unit}" ] || continue
-    if systemctl is-active --quiet "${unit}" 2>/dev/null; then
+    state=$(unit_active_state "${unit}" || true)
+    if [ "${state}" = 'active' ]; then
       printf '%s\n' "${unit}"
     fi
   done < <(
-    systemctl list-unit-files --type=service --no-legend \
+    systemctl_bounded list-unit-files --type=service --no-legend \
       'php*-fpm.service' 'php-fpm.service' 2>/dev/null \
       | awk '{print $1}' \
       | sort -u
@@ -123,20 +211,30 @@ active_php_fpm_services() {
 }
 
 record_active_units() {
+  local state
   local temporary_state
   local unit
 
+  wait_for_systemd_manager 'recording active LibreNMS units before drain'
   temporary_state="${STATE_PATH}.tmp.$$"
   umask 077
   : > "${temporary_state}"
 
   if [ "${LOCAL_WEB_MEMBER}" = '1' ]; then
     for unit in "${DAILY_TIMER_UNIT}" "${QUIESCE_UNITS[@]}"; do
-      if systemctl is-active --quiet "${unit}" 2>/dev/null; then
-        if ! grep -Fqx -- "${unit}" "${temporary_state}"; then
-          printf '%s\n' "${unit}" >> "${temporary_state}"
-        fi
-      fi
+      state=$(unit_active_state "${unit}" || true)
+      case "${state}" in
+        active|reloading|activating)
+          if ! grep -Fqx -- "${unit}" "${temporary_state}"; then
+            printf '%s\n' "${unit}" >> "${temporary_state}"
+          fi
+          ;;
+        unknown)
+          rm -f "${temporary_state}"
+          log "could not confirm ${unit} state before Galera drain"
+          return 1
+          ;;
+      esac
     done
   fi
 
@@ -149,26 +247,31 @@ recorded_unit() {
   [ -r "${STATE_PATH}" ] && grep -Fqx -- "${unit}" "${STATE_PATH}"
 }
 
-unit_active_state() {
-  local unit="$1"
-
-  timeout "${SYSTEMCTL_TIMEOUT}" \
-    systemctl show --property=ActiveState --value "${unit}" 2>/dev/null \
-    || printf '%s\n' 'unknown'
-}
-
 wait_for_unit_to_stop() {
   local unit="$1"
   local wait_seconds="$2"
   local deadline
+  local manager_recovered=0
   local state
 
   deadline=$((SECONDS + wait_seconds))
   while true; do
-    state=$(unit_active_state "${unit}")
+    state=$(unit_active_state "${unit}" || true)
     case "${state}" in
       inactive|failed)
         return 0
+        ;;
+      unknown)
+        if [ "${manager_recovered}" -eq 1 ] \
+            || ! wait_for_systemd_manager "checking whether ${unit} stopped"; then
+          return 1
+        fi
+        manager_recovered=1
+        if ! queue_unit_action stop "${unit}"; then
+          return 1
+        fi
+        deadline=$((SECONDS + wait_seconds))
+        continue
         ;;
     esac
 
@@ -183,28 +286,41 @@ stop_unit_bounded() {
   local unit="$1"
   local state
 
-  timeout "${SYSTEMCTL_TIMEOUT}" systemctl stop --no-block "${unit}" || true
+  if ! queue_unit_action stop "${unit}"; then
+    return 1
+  fi
   if wait_for_unit_to_stop "${unit}" "${UNIT_STOP_TIMEOUT}"; then
     return 0
   fi
 
-  state=$(unit_active_state "${unit}")
-  log "${unit} remained ${state} after ${UNIT_STOP_TIMEOUT}s; sending SIGTERM to its cgroup"
-  timeout "${SYSTEMCTL_TIMEOUT}" \
-    systemctl kill --kill-whom=all --signal=TERM "${unit}" 2>/dev/null || true
+  state=$(unit_active_state "${unit}" || true)
+  if [ "${state}" = 'unknown' ]; then
+    log "failed to stop ${unit} because systemd could not confirm its state"
+    return 1
+  fi
+  case "${unit}" in
+    *.service)
+      ;;
+    *)
+      log "${unit} remained ${state} after ${UNIT_STOP_TIMEOUT}s; refusing cgroup signals for non-service unit"
+      return 1
+      ;;
+  esac
+
+  log "${unit} remained ${state} after ${UNIT_STOP_TIMEOUT}s; sending SIGTERM to its service cgroup"
+  systemctl_bounded kill --kill-whom=all --signal=TERM "${unit}" 2>/dev/null || true
   if wait_for_unit_to_stop "${unit}" "${UNIT_KILL_GRACE}"; then
     return 0
   fi
 
-  log "${unit} did not stop after SIGTERM; sending SIGKILL to its cgroup"
-  timeout "${SYSTEMCTL_TIMEOUT}" \
-    systemctl kill --kill-whom=all --signal=KILL "${unit}" 2>/dev/null || true
-  timeout "${SYSTEMCTL_TIMEOUT}" systemctl stop --no-block "${unit}" 2>/dev/null || true
+  log "${unit} did not stop after SIGTERM; sending SIGKILL to its service cgroup"
+  systemctl_bounded kill --kill-whom=all --signal=KILL "${unit}" 2>/dev/null || true
+  queue_unit_action stop "${unit}" || true
   if wait_for_unit_to_stop "${unit}" "${UNIT_KILL_GRACE}"; then
     return 0
   fi
 
-  state=$(unit_active_state "${unit}")
+  state=$(unit_active_state "${unit}" || true)
   log "failed to stop ${unit}; final ActiveState=${state}"
   return 1
 }
@@ -221,7 +337,7 @@ start_recorded_unit() {
   local unit="$1"
 
   if recorded_unit "${unit}"; then
-    systemctl start "${unit}"
+    queue_unit_action start "${unit}"
   fi
 }
 
@@ -245,13 +361,27 @@ stop_recorded_units() {
 }
 
 start_recorded_units() {
+  local failed=0
   local unit
 
   [ -r "${STATE_PATH}" ] || return 0
+  if ! wait_for_systemd_manager 'restoring recorded LibreNMS units'; then
+    return 1
+  fi
   while IFS= read -r unit; do
     [ -n "${unit}" ] || continue
-    systemctl start "${unit}"
+    if ! queue_unit_action start "${unit}"; then
+      failed=1
+      if ! systemd_manager_ready; then
+        break
+      fi
+    fi
   done < "${STATE_PATH}"
+
+  if [ "${failed}" -ne 0 ]; then
+    log 'one or more recorded LibreNMS units could not be restored'
+    return 1
+  fi
 }
 
 active_client_connections() {
@@ -307,9 +437,23 @@ force_disconnect_client_connections() {
 wait_for_forced_client_disconnects() {
   local connections
   local deadline
+  local state
 
   deadline=$((SECONDS + BACKEND_FORCE_DISCONNECT_TIMEOUT))
-  while systemctl is-active --quiet "${MARIADB_SERVICE}" 2>/dev/null; do
+  while true; do
+    state=$(unit_active_state "${MARIADB_SERVICE}" || true)
+    case "${state}" in
+      inactive|failed)
+        return 0
+        ;;
+      unknown)
+        if ! wait_for_systemd_manager 'checking MariaDB after forced client disconnect'; then
+          return 1
+        fi
+        continue
+        ;;
+    esac
+
     connections=$(active_client_connections || true)
     if [[ "${connections}" =~ ^[0-9]+$ ]] \
         && [ "${connections}" -le "${BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS}" ]; then
@@ -324,16 +468,29 @@ wait_for_forced_client_disconnects() {
 
     sleep "${BACKEND_DRAIN_POLL_DELAY}"
   done
-
-  return 0
 }
 
 wait_for_client_connections_to_drain() {
   local connections
   local deadline
+  local state
 
   deadline=$((SECONDS + BACKEND_DRAIN_TIMEOUT))
-  while systemctl is-active --quiet "${MARIADB_SERVICE}" 2>/dev/null; do
+  while true; do
+    state=$(unit_active_state "${MARIADB_SERVICE}" || true)
+    case "${state}" in
+      inactive|failed)
+        log 'MariaDB is already stopped; no client sessions remain'
+        return 0
+        ;;
+      unknown)
+        if ! wait_for_systemd_manager 'checking MariaDB client drain'; then
+          return 1
+        fi
+        continue
+        ;;
+    esac
+
     connections=$(active_client_connections || true)
     if [[ "${connections}" =~ ^[0-9]+$ ]] \
         && [ "${connections}" -le "${BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS}" ]; then
@@ -348,9 +505,6 @@ wait_for_client_connections_to_drain() {
 
     sleep "${BACKEND_DRAIN_POLL_DELAY}"
   done
-
-  log 'MariaDB is already stopped; no client sessions remain'
-  return 0
 }
 
 rollback_drain() {
@@ -359,10 +513,17 @@ rollback_drain() {
     return 0
   fi
 
+  if ! start_recorded_units; then
+    log 'leaving traffic drained because recorded LibreNMS units could not be restored'
+    return 1
+  fi
+  if ! wait_for_systemd_manager 'confirming rollback restoration before reopening traffic'; then
+    log 'leaving traffic drained because systemd restoration could not be confirmed'
+    return 1
+  fi
   rm -f "${BACKEND_DRAIN_PATH}"
   sleep "${BACKEND_REJOIN_DELAY}"
   clear_web_drain_markers
-  start_recorded_units
   rm -f "${STATE_PATH}"
   log 'cancelled Galera maintenance and restored traffic without restarting MariaDB'
 }
@@ -447,17 +608,28 @@ exit_drain() {
     return 1
   fi
 
+  wait_for_systemd_manager 'restoring LibreNMS units after Galera maintenance'
   if [ "${LOCAL_WEB_MEMBER}" = '1' ]; then
     while IFS= read -r php_service; do
       [ -n "${php_service}" ] || continue
-      systemctl try-reload-or-restart "${php_service}"
+      if ! systemctl_bounded try-reload-or-restart --no-block "${php_service}"; then
+        log "failed to queue PHP-FPM refresh for ${php_service}; leaving traffic drained"
+        return 1
+      fi
     done < <(active_php_fpm_services | sort -u)
   fi
 
+  if ! start_recorded_units; then
+    log 'recorded LibreNMS units were not restored; leaving traffic drained'
+    return 1
+  fi
+  if ! wait_for_systemd_manager 'confirming restored units before reopening traffic'; then
+    log 'systemd restoration could not be confirmed; leaving traffic drained'
+    return 1
+  fi
   rm -f "${BACKEND_DRAIN_PATH}"
   sleep "${BACKEND_REJOIN_DELAY}"
   clear_web_drain_markers
-  start_recorded_units
   rm -f "${STATE_PATH}"
   log 'left Galera drain after readiness and HAProxy rejoin verification'
   printf '%s\n' 'exited'

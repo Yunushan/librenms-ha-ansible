@@ -258,8 +258,12 @@ make docker-post-change PLAYBOOK_FLAGS=--ask-become-pass
 During serialized Galera convergence, the node-drain helper gives active
 LibreNMS workers `librenms_galera_web_drain_unit_stop_timeout` seconds to stop
 cleanly. If a worker remains stuck, the helper sends TERM and then KILL only to
-that unit's cgroup. An unsuccessful stop rolls the traffic drain back before
-the playbook fails. The timeout and
+that service unit's cgroup; timer units are never signalled. If the systemd
+manager temporarily stops answering, the helper waits up to
+`librenms_galera_web_drain_systemd_recovery_timeout` seconds and retries the
+queued action instead of treating an unknown state as a stuck process. An
+unsuccessful stop restores recorded units before reopening traffic, or leaves
+the node drained when restoration cannot be confirmed. The timeout and
 `librenms_galera_web_drain_unit_kill_grace` may be raised for unusually long
 polling jobs, but should remain bounded.
 

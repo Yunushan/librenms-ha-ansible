@@ -168,6 +168,10 @@ librenms_galera_web_drain_lock_timeout: 30
 librenms_galera_web_drain_unit_stop_timeout: 30
 librenms_galera_web_drain_unit_kill_grace: 5
 librenms_galera_web_drain_systemctl_timeout: 10
+# A transient PID 1 D-Bus stall must not be mistaken for a worker refusing to
+# stop. Wait for the manager to answer again before retrying the queued action.
+librenms_galera_web_drain_systemd_recovery_timeout: 180
+librenms_galera_web_drain_systemd_recovery_poll_delay: 2
 # The readiness agent reports "drain" while this marker exists. HAProxy then
 # stops assigning new DB sessions without treating the node as failed or
 # terminating established sessions.

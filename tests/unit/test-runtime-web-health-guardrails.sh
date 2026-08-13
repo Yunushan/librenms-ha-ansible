@@ -169,21 +169,45 @@ main() {
         "librenms_galera_web_drain_unit_stop_timeout: 30" \
         "Galera drain must bound graceful worker shutdown."
     require_contains \
+        "${defaults}" \
+        "librenms_galera_web_drain_systemd_recovery_timeout: 180" \
+        "Galera drain must bound systemd manager recovery."
+    require_contains \
         "${galera_drain}" \
-        'systemctl stop --no-block "${unit}"' \
+        'wait_for_systemd_manager' \
+        "Galera drain must recover transient systemd manager outages."
+    require_contains \
+        "${galera_drain}" \
+        'systemctl_bounded "${action}" --no-block "${unit}"' \
         "Galera drain must not block indefinitely on a systemd stop job."
     require_contains \
         "${galera_drain}" \
-        'systemctl kill --kill-whom=all --signal=TERM "${unit}"' \
+        'systemctl_bounded kill --kill-whom=all --signal=TERM "${unit}"' \
         "Galera drain must terminate a worker cgroup that ignores graceful stop."
     require_contains \
         "${galera_drain}" \
-        'systemctl kill --kill-whom=all --signal=KILL "${unit}"' \
+        'systemctl_bounded kill --kill-whom=all --signal=KILL "${unit}"' \
         "Galera drain must have a final bounded kill for a stuck worker cgroup."
+    require_contains \
+        "${galera_drain}" \
+        'refusing cgroup signals for non-service unit' \
+        "Galera drain must never signal processless timer units."
     require_contains \
         "${galera_drain}" \
         "failed to quiesce a recorded unit; rolling back Galera drain" \
         "A failed worker stop must restore traffic before convergence aborts."
+    require_contains \
+        "${galera_drain}" \
+        'queue_unit_action start "${unit}"' \
+        "Rollback must use bounded, retryable systemd start requests."
+    require_contains \
+        "${galera_drain}" \
+        'confirming rollback restoration before reopening traffic' \
+        "Rollback must confirm systemd recovery before reopening traffic."
+    require_contains \
+        "${galera_drain}" \
+        'leaving traffic drained because recorded LibreNMS units could not be restored' \
+        "Rollback must fail closed when worker restoration cannot be confirmed."
     local daily_quiesce_line
     local drain_marker_line
     daily_quiesce_line="$(grep -n -m1 -- 'if ! quiesce_daily_timer; then' "${GALERA_DRAIN_TEMPLATE}" | cut -d: -f1)"
