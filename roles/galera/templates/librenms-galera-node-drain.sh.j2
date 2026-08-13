@@ -11,6 +11,9 @@ COMPAT_OWNERSHIP_PATH="${STATE_PATH}.compat-owned"
 LOCK_PATH={{ librenms_galera_web_drain_lock_path | quote }}
 LOCK_TIMEOUT={{ librenms_galera_web_drain_lock_timeout | int }}
 DRAIN_DELAY={{ librenms_galera_web_drain_delay | int }}
+UNIT_STOP_TIMEOUT={{ librenms_galera_web_drain_unit_stop_timeout | int }}
+UNIT_KILL_GRACE={{ librenms_galera_web_drain_unit_kill_grace | int }}
+SYSTEMCTL_TIMEOUT={{ librenms_galera_web_drain_systemctl_timeout | int }}
 BACKEND_DRAIN_TIMEOUT={{ librenms_galera_backend_drain_timeout | int }}
 BACKEND_DRAIN_POLL_DELAY={{ librenms_galera_backend_drain_poll_delay | int }}
 BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS={{ librenms_galera_backend_drain_max_client_connections | int }}
@@ -144,11 +147,71 @@ recorded_unit() {
   [ -r "${STATE_PATH}" ] && grep -Fqx -- "${unit}" "${STATE_PATH}"
 }
 
+unit_active_state() {
+  local unit="$1"
+
+  timeout "${SYSTEMCTL_TIMEOUT}" \
+    systemctl show --property=ActiveState --value "${unit}" 2>/dev/null \
+    || printf '%s\n' 'unknown'
+}
+
+wait_for_unit_to_stop() {
+  local unit="$1"
+  local wait_seconds="$2"
+  local deadline
+  local state
+
+  deadline=$((SECONDS + wait_seconds))
+  while true; do
+    state=$(unit_active_state "${unit}")
+    case "${state}" in
+      inactive|failed)
+        return 0
+        ;;
+    esac
+
+    if [ "${SECONDS}" -ge "${deadline}" ]; then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+stop_unit_bounded() {
+  local unit="$1"
+  local state
+
+  timeout "${SYSTEMCTL_TIMEOUT}" systemctl stop --no-block "${unit}" || true
+  if wait_for_unit_to_stop "${unit}" "${UNIT_STOP_TIMEOUT}"; then
+    return 0
+  fi
+
+  state=$(unit_active_state "${unit}")
+  log "${unit} remained ${state} after ${UNIT_STOP_TIMEOUT}s; sending SIGTERM to its cgroup"
+  timeout "${SYSTEMCTL_TIMEOUT}" \
+    systemctl kill --kill-whom=all --signal=TERM "${unit}" 2>/dev/null || true
+  if wait_for_unit_to_stop "${unit}" "${UNIT_KILL_GRACE}"; then
+    return 0
+  fi
+
+  log "${unit} did not stop after SIGTERM; sending SIGKILL to its cgroup"
+  timeout "${SYSTEMCTL_TIMEOUT}" \
+    systemctl kill --kill-whom=all --signal=KILL "${unit}" 2>/dev/null || true
+  timeout "${SYSTEMCTL_TIMEOUT}" systemctl stop --no-block "${unit}" 2>/dev/null || true
+  if wait_for_unit_to_stop "${unit}" "${UNIT_KILL_GRACE}"; then
+    return 0
+  fi
+
+  state=$(unit_active_state "${unit}")
+  log "failed to stop ${unit}; final ActiveState=${state}"
+  return 1
+}
+
 stop_recorded_unit() {
   local unit="$1"
 
   if recorded_unit "${unit}"; then
-    systemctl stop "${unit}"
+    stop_unit_bounded "${unit}"
   fi
 }
 
@@ -173,7 +236,9 @@ stop_recorded_units() {
   [ -r "${STATE_PATH}" ] || return 0
   while IFS= read -r unit; do
     [ -n "${unit}" ] || continue
-    systemctl stop "${unit}"
+    if ! stop_unit_bounded "${unit}"; then
+      return 1
+    fi
   done < "${STATE_PATH}"
 }
 
@@ -284,7 +349,11 @@ enter_drain() {
     sleep "${DRAIN_DELAY}"
   fi
 
-  stop_recorded_units
+  if ! stop_recorded_units; then
+    log 'failed to quiesce a recorded unit; rolling back Galera drain'
+    rollback_drain
+    return 1
+  fi
   if ! wait_for_client_connections_to_drain; then
     rollback_drain
     return 1

@@ -88,6 +88,19 @@
   notify: Restart MariaDB
   when: librenms_db_mode == 'galera'
 
+- name: Validate local Galera drain stop timeouts
+  ansible.builtin.assert:
+    that:
+      - librenms_galera_web_drain_unit_stop_timeout | int > 0
+      - librenms_galera_web_drain_unit_kill_grace | int > 0
+      - librenms_galera_web_drain_systemctl_timeout | int > 0
+    fail_msg: >-
+      Galera drain stop, kill-grace, and systemctl timeouts must all be
+      positive whole seconds.
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_web_drain_enabled | bool
+
 - name: Deploy local Galera backend drain helper
   template:
     src: librenms-galera-node-drain.sh.j2

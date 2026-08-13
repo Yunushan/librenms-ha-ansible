@@ -164,6 +164,26 @@ main() {
         "${galera_drain}" \
         'assert_unit_inactive "${DAILY_SERVICE_UNIT}"' \
         "Galera convergence must recheck the daily service after stopping its timer."
+    require_contains \
+        "${defaults}" \
+        "librenms_galera_web_drain_unit_stop_timeout: 30" \
+        "Galera drain must bound graceful worker shutdown."
+    require_contains \
+        "${galera_drain}" \
+        'systemctl stop --no-block "${unit}"' \
+        "Galera drain must not block indefinitely on a systemd stop job."
+    require_contains \
+        "${galera_drain}" \
+        'systemctl kill --kill-whom=all --signal=TERM "${unit}"' \
+        "Galera drain must terminate a worker cgroup that ignores graceful stop."
+    require_contains \
+        "${galera_drain}" \
+        'systemctl kill --kill-whom=all --signal=KILL "${unit}"' \
+        "Galera drain must have a final bounded kill for a stuck worker cgroup."
+    require_contains \
+        "${galera_drain}" \
+        "failed to quiesce a recorded unit; rolling back Galera drain" \
+        "A failed worker stop must restore traffic before convergence aborts."
     local daily_quiesce_line
     local drain_marker_line
     daily_quiesce_line="$(grep -n -m1 -- 'if ! quiesce_daily_timer; then' "${GALERA_DRAIN_TEMPLATE}" | cut -d: -f1)"
