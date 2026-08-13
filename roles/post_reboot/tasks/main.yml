@@ -37,6 +37,10 @@
         groups.get('gluster_nodes', [])
         | difference(librenms_inactive_inventory_nodes)
       }}
+  run_once: true
+
+- name: Build managed RRDCacheD host list for post-reboot convergence
+  set_fact:
     librenms_post_reboot_rrdcached_nodes: >-
       {{
         (
