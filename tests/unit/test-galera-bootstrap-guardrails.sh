@@ -47,7 +47,14 @@ require_text "$RECOVERY_TASKS_FILE" "librenms_galera_recover_highest_candidate_h
 require_text "$RECOVERY_TASKS_FILE" "a lower-seqno host is rejected"
 require_text "$MAKEFILE" "galera-recover-ask-become-pass:"
 require_text "$MAKEFILE" '--timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS)'
-require_text "$MAKEFILE" '-e librenms_galera_recover_tie_breaker=$(GALERA_RECOVER_TIE_BREAKER)'
+require_text "$MAKEFILE" 'GALERA_RECOVER_TIE_BREAKER ?='
+require_text "$MAKEFILE" 'GALERA_RECOVER_TIE_BREAKER_ARG = $(if $(strip $(GALERA_RECOVER_TIE_BREAKER))'
+require_text "$MAKEFILE" '$(GALERA_RECOVER_TIE_BREAKER_ARG)'
+
+if grep -Fq -- 'GALERA_RECOVER_TIE_BREAKER ?= manual' "$MAKEFILE"; then
+    printf 'Make recovery targets must preserve the inventory tie-break policy by default.\n' >&2
+    exit 1
+fi
 
 require_safe_delegated_result_loop() {
     local file="$1"

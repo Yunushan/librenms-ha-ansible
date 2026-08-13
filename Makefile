@@ -8,7 +8,8 @@ RESTORE_TEST_BACKUP_DIR ?=
 MAINTENANCE_TARGET ?=
 GALERA_RECOVER_BOOTSTRAP_HOST ?=
 GALERA_RECOVER_CONFIRM ?= false
-GALERA_RECOVER_TIE_BREAKER ?= manual
+GALERA_RECOVER_TIE_BREAKER ?=
+GALERA_RECOVER_TIE_BREAKER_ARG = $(if $(strip $(GALERA_RECOVER_TIE_BREAKER)),-e librenms_galera_recover_tie_breaker=$(GALERA_RECOVER_TIE_BREAKER))
 PLAYBOOK_FLAGS ?=
 ANSIBLE_EXTRA_ARGS ?=
 ANSIBLE_PLAYBOOK ?= ./scripts/ansible-playbook.sh
@@ -158,10 +159,10 @@ maintenance-exit:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/maintenance-exit.yml $(PLAYBOOK_FLAGS) -e librenms_maintenance_target=$(MAINTENANCE_TARGET) -e librenms_maintenance_confirm=true $(ANSIBLE_EXTRA_ARGS)
 
 galera-recover:
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/galera-recover.yml $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) -e librenms_galera_recover_tie_breaker=$(GALERA_RECOVER_TIE_BREAKER) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/galera-recover.yml $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) $(GALERA_RECOVER_TIE_BREAKER_ARG) $(ANSIBLE_EXTRA_ARGS)
 
 galera-recover-ask-become-pass:
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/galera-recover.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) -e librenms_galera_recover_tie_breaker=$(GALERA_RECOVER_TIE_BREAKER) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/galera-recover.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) $(GALERA_RECOVER_TIE_BREAKER_ARG) $(ANSIBLE_EXTRA_ARGS)
 
 ha-failover-test:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/ha-failover-test.yml $(PLAYBOOK_FLAGS) -e librenms_failover_test_confirm=true $(ANSIBLE_EXTRA_ARGS)
@@ -256,7 +257,7 @@ docker-maintenance-exit:
 	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/maintenance-exit.yml $(PLAYBOOK_FLAGS) -e librenms_maintenance_target=$(MAINTENANCE_TARGET) -e librenms_maintenance_confirm=true $(ANSIBLE_EXTRA_ARGS)
 
 docker-galera-recover:
-	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/galera-recover.yml $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) -e librenms_galera_recover_tie_breaker=$(GALERA_RECOVER_TIE_BREAKER) $(ANSIBLE_EXTRA_ARGS)
+	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/galera-recover.yml $(PLAYBOOK_FLAGS) -e librenms_galera_recover_bootstrap_host=$(GALERA_RECOVER_BOOTSTRAP_HOST) -e librenms_galera_recover_confirm=$(GALERA_RECOVER_CONFIRM) $(GALERA_RECOVER_TIE_BREAKER_ARG) $(ANSIBLE_EXTRA_ARGS)
 
 docker-ha-failover-test:
 	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/ha-failover-test.yml $(PLAYBOOK_FLAGS) -e librenms_failover_test_confirm=true $(ANSIBLE_EXTRA_ARGS)
