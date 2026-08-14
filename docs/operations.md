@@ -260,8 +260,9 @@ LibreNMS workers `librenms_galera_web_drain_unit_stop_timeout` seconds to stop
 cleanly. If a worker remains stuck, the helper sends TERM and then KILL only to
 that service unit's cgroup; timer units are never signalled. If the systemd
 manager temporarily stops answering, the helper waits up to
-`librenms_galera_web_drain_systemd_recovery_timeout` seconds and retries the
-queued action instead of treating an unknown state as a stuck process. An
+`librenms_galera_web_drain_systemd_recovery_timeout` seconds and retries both
+individual unit-state reads and queued actions instead of treating an unknown
+state as a stopped or stuck process. An
 unsuccessful stop restores recorded units before reopening traffic, or leaves
 the node drained when restoration cannot be confirmed. The timeout and
 `librenms_galera_web_drain_unit_kill_grace` may be raised for unusually long
