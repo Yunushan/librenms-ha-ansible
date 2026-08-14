@@ -40,6 +40,19 @@ for repair_fact in \
         || fail "repair render-safety fact is not initialized: ${repair_fact}"
 done
 
+if grep -Fq \
+    'inventory_hostname == librenms_redis_sentinel_consensus_controller_host' \
+    <<< "${repair_initialization_block}"; then
+    fail 'repair render-safety facts are initialized only on the consensus controller'
+fi
+
+promotion_block=$(sed -n \
+    '/- name: Promote configured Redis master after failed consensus write/,/- name: Point Redis replicas at configured master after failed consensus write/p' \
+    "${TASKS_FILE}")
+
+grep -Fq '| default(librenms_redis_master_host, true)' <<< "${promotion_block}" \
+    || fail 'configured-master promotion delegation is not render-safe'
+
 if sed -n '/^- name: Determine Redis Sentinel consensus master/,/^- name: Set Redis Sentinel consensus endpoint/p' \
     "${TASKS_FILE}" | grep -Fq '^- name: Verify Redis Sentinels agree on one master'; then
     fail 'initial Sentinel disagreement still aborts before automatic repair'
