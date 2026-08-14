@@ -178,6 +178,14 @@ main() {
         "Galera drain must recover transient systemd manager outages."
     require_contains \
         "${galera_drain}" \
+        'unit_active_state_with_recovery()' \
+        "Galera drain must retry transient per-unit state query failures."
+    require_contains \
+        "${galera_drain}" \
+        'recording active LibreNMS units before drain' \
+        "Pre-drain active-unit discovery must use bounded state-query recovery."
+    require_contains \
+        "${galera_drain}" \
         'systemctl_bounded "${action}" --no-block "${unit}"' \
         "Galera drain must not block indefinitely on a systemd stop job."
     require_contains \

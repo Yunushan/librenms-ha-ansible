@@ -78,6 +78,8 @@
 
 ### Changed
 
+- Made Galera's pre-disruption drain retry transient per-unit systemd state
+  query failures for the configured recovery window before failing closed.
 - Made Gluster-backed RRD mount preparation idempotent when the mount is
   already active, and safely replaces only legacy mountpoint symlinks while
   refusing unexpected files; active symlink targets no longer bypass the

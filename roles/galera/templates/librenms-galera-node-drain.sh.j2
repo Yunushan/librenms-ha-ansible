@@ -92,6 +92,37 @@ unit_active_state() {
   esac
 }
 
+unit_active_state_with_recovery() {
+  local context="${2:-checking ${1} state}"
+  local deadline
+  local state
+  local unit="$1"
+  local waiting=0
+
+  deadline=$((SECONDS + SYSTEMD_RECOVERY_TIMEOUT))
+  while true; do
+    state=$(unit_active_state "${unit}" || true)
+    if [ "${state}" != 'unknown' ]; then
+      if [ "${waiting}" -eq 1 ]; then
+        log "systemd unit-state query recovered for ${unit}; ${context}"
+      fi
+      printf '%s\n' "${state}"
+      return 0
+    fi
+
+    if [ "${waiting}" -eq 0 ]; then
+      log "systemd could not confirm ${unit} state while ${context}; retrying for up to ${SYSTEMD_RECOVERY_TIMEOUT}s"
+      waiting=1
+    fi
+    if [ "${SECONDS}" -ge "${deadline}" ]; then
+      log "systemd could not confirm ${unit} state while ${context} after ${SYSTEMD_RECOVERY_TIMEOUT}s"
+      printf '%s\n' 'unknown'
+      return 1
+    fi
+    sleep "${SYSTEMD_RECOVERY_POLL_DELAY}"
+  done
+}
+
 queue_unit_action() {
   local action="$1"
   local unit="$2"
@@ -123,7 +154,8 @@ assert_no_conflicting_units() {
 
   wait_for_systemd_manager 'checking conflicting maintenance units'
   for unit in "${CONFLICTING_UNITS[@]}"; do
-    state=$(unit_active_state "${unit}" || true)
+    state=$(unit_active_state_with_recovery \
+      "${unit}" 'checking conflicting maintenance units' || true)
     case "${state}" in
       inactive|failed)
         ;;
@@ -140,7 +172,8 @@ assert_unit_inactive() {
   local unit="$1"
 
   wait_for_systemd_manager "checking ${unit}"
-  state=$(unit_active_state "${unit}" || true)
+  state=$(unit_active_state_with_recovery \
+    "${unit}" "checking ${unit}" || true)
   case "${state}" in
     inactive|failed)
       ;;
@@ -190,7 +223,8 @@ active_php_fpm_services() {
   local unit
 
   if [ -n "${PHP_FPM_SERVICE}" ]; then
-    state=$(unit_active_state "${PHP_FPM_SERVICE}" || true)
+    state=$(unit_active_state_with_recovery \
+      "${PHP_FPM_SERVICE}" 'discovering active PHP-FPM services' || true)
     if [ "${state}" = 'active' ]; then
       printf '%s\n' "${PHP_FPM_SERVICE}"
     fi
@@ -198,7 +232,8 @@ active_php_fpm_services() {
 
   while IFS= read -r unit; do
     [ -n "${unit}" ] || continue
-    state=$(unit_active_state "${unit}" || true)
+    state=$(unit_active_state_with_recovery \
+      "${unit}" 'discovering active PHP-FPM services' || true)
     if [ "${state}" = 'active' ]; then
       printf '%s\n' "${unit}"
     fi
@@ -222,7 +257,8 @@ record_active_units() {
 
   if [ "${LOCAL_WEB_MEMBER}" = '1' ]; then
     for unit in "${DAILY_TIMER_UNIT}" "${QUIESCE_UNITS[@]}"; do
-      state=$(unit_active_state "${unit}" || true)
+      state=$(unit_active_state_with_recovery \
+        "${unit}" 'recording active LibreNMS units before drain' || true)
       case "${state}" in
         active|reloading|activating)
           if ! grep -Fqx -- "${unit}" "${temporary_state}"; then
