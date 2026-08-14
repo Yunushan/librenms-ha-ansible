@@ -557,6 +557,17 @@
     - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_sentinel_native_service_available | bool
 
+- name: Inspect native Sentinel service after legacy custom-service stop
+  ansible.builtin.systemd_service:
+    name: "{{ librenms_redis_sentinel_native_service_name }}"
+  register: librenms_redis_sentinel_native_state_after_custom_stop
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_redis_sentinel_native_service_available | bool
+
 - name: Wait for legacy custom Sentinel listener to stop before native takeover
   ansible.builtin.wait_for:
     host: 127.0.0.1
@@ -567,7 +578,9 @@
     - librenms_redis_mode == 'sentinel'
     - ansible_facts.service_mgr == 'systemd'
     - librenms_redis_sentinel_native_service_available | bool
-    - librenms_redis_sentinel_custom_service_stop is changed
+    - >-
+      (librenms_redis_sentinel_native_state_after_custom_stop.status.ActiveState
+      | default('inactive')) not in ['active', 'activating', 'reloading']
 
 - name: Remove legacy LibreNMS Redis Sentinel custom unit
   file:
@@ -603,6 +616,17 @@
     - ansible_facts.service_mgr == 'systemd'
     - not (librenms_redis_sentinel_native_service_available | bool)
 
+- name: Inspect project-managed Sentinel service after native-service stop
+  ansible.builtin.systemd_service:
+    name: "{{ librenms_redis_sentinel_custom_service_name }}"
+  register: librenms_redis_sentinel_custom_state_after_native_stop
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode == 'sentinel'
+    - ansible_facts.service_mgr == 'systemd'
+    - not (librenms_redis_sentinel_native_service_available | bool)
+
 - name: Wait for native Sentinel listener to stop before project-managed takeover
   ansible.builtin.wait_for:
     host: 127.0.0.1
@@ -613,7 +637,9 @@
     - librenms_redis_mode == 'sentinel'
     - ansible_facts.service_mgr == 'systemd'
     - not (librenms_redis_sentinel_native_service_available | bool)
-    - librenms_redis_sentinel_native_service_stop is changed
+    - >-
+      (librenms_redis_sentinel_custom_state_after_native_stop.status.ActiveState
+      | default('inactive')) not in ['active', 'activating', 'reloading']
 
 - name: Reload systemd after sentinel unit changes
   systemd:
