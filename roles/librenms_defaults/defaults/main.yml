@@ -402,6 +402,10 @@ librenms_schema_galera_backend_wait_timeout: 30
 librenms_manage_web_validation_json_filter: true
 librenms_web_validation_json_filter_path: /etc/librenms/web-validation-json-filter.php
 librenms_web_validation_filter_transient_rrd_lock_errors: "{{ librenms_rrd_mode == 'glusterfs' }}"
+# All validation result endpoints can perform database, filesystem, and RRD
+# checks. Keep them on the dedicated backend long enough to return valid JSON.
+# The older RRD-specific variable remains the compatibility/default source.
+librenms_web_validation_timeout: "{{ librenms_web_validation_rrd_check_timeout }}"
 librenms_web_validation_rrd_check_timeout: 900s
 librenms_php_fpm_web_validation_max_execution_time: 900
 librenms_manage_bash_completion: true

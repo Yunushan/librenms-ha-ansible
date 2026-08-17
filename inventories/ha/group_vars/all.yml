@@ -208,6 +208,10 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 # only when an external process manager owns PHP-FPM recovery.
 # librenms_startup_repair_restart_php_fpm_on_db_gone_away: false
 # librenms_startup_repair_reload_php_fpm_after_db_recovery: false
+# All /validate/results/* requests use the dedicated HAProxy/Nginx validation
+# path. Override this only if validation checks need a different upper bound.
+# librenms_web_validation_timeout: 900s
+# The older RRD-specific name remains supported for compatibility.
 # librenms_web_validation_rrd_check_timeout: 900s
 # librenms_haproxy_db_tcp_keepalive: true
 # librenms_haproxy_db_shutdown_sessions_on_backend_down: false

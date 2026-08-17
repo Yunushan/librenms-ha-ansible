@@ -114,14 +114,14 @@ server {
         try_files $uri $uri/ /index.php?$query_string;
     }
 
-    location ~* ^/(?:index\.php/)?validate/results/rrdcheck/?$ {
+    location ~* ^/(?:index\.php/)?validate/results(?:/|$) {
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root/index.php;
         fastcgi_param SCRIPT_NAME /index.php;
         fastcgi_param PHP_VALUE "max_execution_time={{ librenms_php_fpm_web_validation_max_execution_time }}";
         fastcgi_connect_timeout {{ librenms_nginx_fastcgi_connect_timeout }};
-        fastcgi_send_timeout {{ librenms_web_validation_rrd_check_timeout }};
-        fastcgi_read_timeout {{ librenms_web_validation_rrd_check_timeout }};
+        fastcgi_send_timeout {{ librenms_web_validation_timeout }};
+        fastcgi_read_timeout {{ librenms_web_validation_timeout }};
         fastcgi_pass unix:{{ librenms_php_fpm_socket }};
     }
 

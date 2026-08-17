@@ -124,8 +124,8 @@ frontend librenms_web_http
     http-request redirect scheme https code 301
 {% else %}
     http-request set-header X-Forwarded-Proto http
-    acl librenms_rrdcheck_validation path_reg -i ^/(?:index\.php/)?validate/results/rrdcheck/?$
-    use_backend librenms_web_validation_nodes if librenms_rrdcheck_validation
+    acl librenms_validation path_reg -i ^/(?:index\.php/)?validate/results(?:/|$)
+    use_backend librenms_web_validation_nodes if librenms_validation
     default_backend librenms_web_nodes
 {% endif %}
 
@@ -141,8 +141,8 @@ frontend librenms_web_https
 {% endif %}
     http-request set-header X-Forwarded-Proto https
     http-request set-header X-Forwarded-Ssl on
-    acl librenms_rrdcheck_validation path_reg -i ^/(?:index\.php/)?validate/results/rrdcheck/?$
-    use_backend librenms_web_validation_nodes if librenms_rrdcheck_validation
+    acl librenms_validation path_reg -i ^/(?:index\.php/)?validate/results(?:/|$)
+    use_backend librenms_web_validation_nodes if librenms_validation
     default_backend librenms_web_nodes
 {% endif %}
 
@@ -162,7 +162,7 @@ backend librenms_web_nodes
 backend librenms_web_validation_nodes
     mode http
     balance roundrobin
-    timeout server {{ librenms_web_validation_rrd_check_timeout }}
+    timeout server {{ librenms_web_validation_timeout }}
 {% if librenms_bootstrap_completed_effective | bool %}
     default-server {{ librenms_haproxy_web_default_server }}
     option httpchk

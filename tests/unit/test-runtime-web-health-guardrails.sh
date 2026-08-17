@@ -307,6 +307,26 @@ main() {
         "HAProxy must use the runtime health URI instead of a static response."
     require_contains \
         "${defaults}" \
+        "librenms_web_validation_timeout: \"{{ librenms_web_validation_rrd_check_timeout }}\"" \
+        "All validation result endpoints must share the long-running validation timeout."
+    require_contains \
+        "${haproxy}" \
+        "acl librenms_validation path_reg -i ^/(?:index\\.php/)?validate/results(?:/|$)" \
+        "Every validation result request must use the isolated validation backend."
+    require_contains \
+        "${haproxy}" \
+        "timeout server {{ librenms_web_validation_timeout }}" \
+        "The isolated validation backend must allow slow database and filesystem checks to finish."
+    require_contains \
+        "${nginx}" \
+        "location ~* ^/(?:index\\.php/)?validate/results(?:/|$)" \
+        "Nginx must apply the validation timeout to every validation result endpoint."
+    require_contains \
+        "${nginx}" \
+        "fastcgi_read_timeout {{ librenms_web_validation_timeout }}" \
+        "Nginx must not terminate non-RRD validation requests at the normal web timeout."
+    require_contains \
+        "${defaults}" \
         "librenms_startup_repair_restart_php_fpm_on_db_gone_away: >-" \
         "HA mode must enable guarded recovery for fresh SQLSTATE 2006 errors."
     require_contains \
