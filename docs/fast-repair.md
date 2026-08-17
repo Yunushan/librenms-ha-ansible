@@ -12,7 +12,8 @@ cd /home/ansible/librenms-ha-ansible
 make repair-ask-become-pass FAST_REPAIR_CONFIRM=true FAST_REPAIR_LIMIT=lnms3
 ```
 
-The target gives the sudo prompt up to 60 seconds by default. If it still
+The ask-become target gives Ansible's SSH and sudo prompt up to 60 seconds by
+default. If it still
 reports `Timeout waiting for privilege escalation prompt`, the repair has not
 run: SSH succeeded but `ansible` could not become root on that host. Check the
 host without changing anything:

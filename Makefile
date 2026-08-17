@@ -150,7 +150,7 @@ repair:
 
 repair-ask-become-pass:
 	@test "$(FAST_REPAIR_CONFIRM)" = "true" || (echo "Refusing repair: set FAST_REPAIR_CONFIRM=true after reviewing docs/fast-repair.md" && exit 2)
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --ask-become-pass --become-method sudo --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --ask-become-pass --become-method sudo --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_BECOME_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 repair-check:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair-check.yml --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
