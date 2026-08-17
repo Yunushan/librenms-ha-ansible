@@ -20,6 +20,8 @@ FAST_REPAIR_LIMIT ?= librenms_nodes
 FAST_REPAIR_TIMEOUT ?= 30
 FAST_REPAIR_FORKS ?= 1
 FAST_REPAIR_BECOME_TIMEOUT ?= 60
+FAST_REPAIR_MANAGER_ATTEMPTS ?= 12
+FAST_REPAIR_MANAGER_PROBE_TIMEOUT ?= 10
 DOCKER_ANSIBLE ?= docker compose run --rm -v $(SSH_DIR):/root/.ssh:ro ansible
 
 controller-bootstrap:
@@ -146,11 +148,11 @@ site-ask-become-pass:
 # Galera, run migrations, or alter MariaDB data.
 repair:
 	@test "$(FAST_REPAIR_CONFIRM)" = "true" || (echo "Refusing repair: set FAST_REPAIR_CONFIRM=true after reviewing docs/fast-repair.md" && exit 2)
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) -e librenms_fast_repair_manager_attempts=$(FAST_REPAIR_MANAGER_ATTEMPTS) -e librenms_fast_repair_manager_probe_timeout=$(FAST_REPAIR_MANAGER_PROBE_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 repair-ask-become-pass:
 	@test "$(FAST_REPAIR_CONFIRM)" = "true" || (echo "Refusing repair: set FAST_REPAIR_CONFIRM=true after reviewing docs/fast-repair.md" && exit 2)
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --ask-become-pass --become-method sudo --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_BECOME_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --ask-become-pass --become-method sudo --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_BECOME_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) -e librenms_fast_repair_manager_attempts=$(FAST_REPAIR_MANAGER_ATTEMPTS) -e librenms_fast_repair_manager_probe_timeout=$(FAST_REPAIR_MANAGER_PROBE_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 repair-check:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair-check.yml --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)

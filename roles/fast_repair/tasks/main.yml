@@ -8,6 +8,7 @@
     POLL_DELAY={{ librenms_fast_repair_poll_delay | int }}
     MAX_ATTEMPTS={{ librenms_fast_repair_max_attempts | int }}
     MANAGER_ATTEMPTS={{ librenms_fast_repair_manager_attempts | int }}
+    MANAGER_PROBE_TIMEOUT={{ librenms_fast_repair_manager_probe_timeout | int }}
     RRD_PATH={{ librenms_fast_repair_rrd_mountpoint | quote }}
     RRD_MODE={{ librenms_fast_repair_rrd_mode | quote }}
     LIBRENMS_USER={{ librenms_fast_repair_user | quote }}
@@ -34,7 +35,8 @@
     }
 
     manager_ready() {
-      probe systemctl show --property=Version --value >/dev/null 2>&1
+      timeout --foreground --kill-after=2s "${MANAGER_PROBE_TIMEOUT}s" \
+        systemctl show --property=Version --value >/dev/null 2>&1
     }
 
     wait_for_manager() {

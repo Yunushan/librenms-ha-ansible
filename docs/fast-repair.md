@@ -13,7 +13,8 @@ make repair-ask-become-pass FAST_REPAIR_CONFIRM=true FAST_REPAIR_LIMIT=lnms3
 ```
 
 The ask-become target gives Ansible's SSH and sudo prompt up to 60 seconds by
-default. If it still
+default. The repair also waits through transient systemd manager stalls for
+up to 12 bounded probes. If it still
 reports `Timeout waiting for privilege escalation prompt`, the repair has not
 run: SSH succeeded but `ansible` could not become root on that host. Check the
 host without changing anything:
@@ -35,6 +36,16 @@ You can override the timeout for a slow but healthy sudo/PAM path:
 ```sh
 make repair-ask-become-pass FAST_REPAIR_CONFIRM=true FAST_REPAIR_LIMIT=lnms3 FAST_REPAIR_BECOME_TIMEOUT=120
 ```
+
+If privilege escalation succeeds but the repair reports that systemd is not
+responsive, inspect the host instead of starting the full site playbook:
+
+```sh
+ssh -tt ansible@<lnms3-ip> 'sudo systemctl is-system-running; sudo systemctl list-jobs --no-pager'
+```
+
+After systemd responds again, rerun the bounded repair. The repair never
+bootstraps Galera or restarts a healthy MariaDB service.
 
 After repairing one node, verify it, then repair the remaining nodes one at a
 time:
