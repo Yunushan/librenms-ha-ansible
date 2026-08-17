@@ -102,6 +102,14 @@
 - name: Ensure Gluster daemon is enabled and started
   when: librenms_rrd_mode == 'glusterfs'
   block:
+    - name: Validate bounded Gluster service operation timeout
+      ansible.builtin.assert:
+        that:
+          - librenms_gluster_service_operation_timeout | int > 0
+        fail_msg: >-
+          librenms_gluster_service_operation_timeout must be a positive number
+          of seconds.
+
     - name: Reset failed Gluster daemon state before start or restart
       command:
         argv:
@@ -112,21 +120,58 @@
       failed_when: false
       when: ansible_facts.service_mgr == 'systemd'
 
-    - name: Start or restart Gluster daemon
-      service:
-        name: "{{ librenms_glusterd_service_name }}"
-        state: >-
+    - name: Determine requested Gluster daemon action
+      ansible.builtin.set_fact:
+        glusterd_service_desired_action: >-
           {{
-            'restarted'
+            'restart'
             if (
               (gluster_hosts_entries is defined and gluster_hosts_entries.changed) or
               (glusterd_transport_address_family_cleanup is defined and glusterd_transport_address_family_cleanup.changed) or
               (glusterd_socket_bind_address_config is defined and glusterd_socket_bind_address_config.changed) or
               (glusterd_socket_bind_address_cleanup is defined and glusterd_socket_bind_address_cleanup.changed)
             )
-            else 'started'
+            else 'start'
           }}
+
+    - name: Enable Gluster daemon with a bounded systemd wait # noqa command-instead-of-module
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - --foreground
+          - --kill-after=5s
+          - "{{ librenms_gluster_service_operation_timeout | int }}s"
+          - systemctl
+          - enable
+          - "{{ librenms_glusterd_service_name }}"
+      register: glusterd_service_enable_command
+      changed_when: >-
+        'Created symlink' in (glusterd_service_enable_command.stdout | default('')) or
+        'Synchronizing state' in (glusterd_service_enable_command.stdout | default(''))
+      failed_when: glusterd_service_enable_command.rc != 0
+      when: ansible_facts.service_mgr == 'systemd'
+
+    - name: Start or restart Gluster daemon with a bounded systemd wait # noqa command-instead-of-module
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - --foreground
+          - --kill-after=5s
+          - "{{ librenms_gluster_service_operation_timeout | int }}s"
+          - systemctl
+          - "{{ glusterd_service_desired_action }}"
+          - "{{ librenms_glusterd_service_name }}"
+      register: glusterd_service_start_command
+      changed_when: glusterd_service_start_command.rc == 0
+      failed_when: glusterd_service_start_command.rc != 0
+      when: ansible_facts.service_mgr == 'systemd'
+
+    - name: Start or restart Gluster daemon on non-systemd hosts
+      ansible.builtin.service:
+        name: "{{ librenms_glusterd_service_name }}"
+        state: "{{ 'restarted' if glusterd_service_desired_action == 'restart' else 'started' }}"
         enabled: true
+      when: ansible_facts.service_mgr != 'systemd'
   rescue:
     - name: Capture Gluster service status after startup failure
       command:
@@ -152,12 +197,19 @@
         - ansible_facts.service_mgr == 'systemd'
         - "'start-limit-hit' in (glusterd_service_start_status.stdout | default(''))"
 
-    - name: Retry Gluster daemon start after clearing start-limit-hit
-      service:
-        name: "{{ librenms_glusterd_service_name }}"
-        state: started
-        enabled: true
+    - name: Retry Gluster daemon start after clearing start-limit-hit # noqa command-instead-of-module
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - --foreground
+          - --kill-after=5s
+          - "{{ librenms_gluster_service_operation_timeout | int }}s"
+          - systemctl
+          - start
+          - "{{ librenms_glusterd_service_name }}"
       register: glusterd_service_retry_start
+      changed_when: glusterd_service_retry_start.rc == 0
+      failed_when: false
       when:
         - ansible_facts.service_mgr == 'systemd'
         - "'start-limit-hit' in (glusterd_service_start_status.stdout | default(''))"

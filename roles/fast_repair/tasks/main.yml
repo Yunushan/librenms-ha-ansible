@@ -1,0 +1,322 @@
+---
+- name: Run bounded LibreNMS HA runtime repair without database bootstrap
+  ansible.builtin.raw: |
+    set -u
+
+    REPAIR_TIMEOUT={{ librenms_fast_repair_command_timeout | int }}
+    PROBE_TIMEOUT={{ librenms_fast_repair_probe_timeout | int }}
+    POLL_DELAY={{ librenms_fast_repair_poll_delay | int }}
+    MAX_ATTEMPTS={{ librenms_fast_repair_max_attempts | int }}
+    MANAGER_ATTEMPTS={{ librenms_fast_repair_manager_attempts | int }}
+    RRD_PATH={{ librenms_fast_repair_rrd_mountpoint | quote }}
+    RRD_MODE={{ librenms_fast_repair_rrd_mode | quote }}
+    LIBRENMS_USER={{ librenms_fast_repair_user | quote }}
+    REPAIR_MOUNT={{ librenms_fast_repair_mount_repair_enabled | bool | ternary('true', 'false') | quote }}
+    LAZY_UNMOUNT={{ librenms_fast_repair_lazy_unmount_enabled | bool | ternary('true', 'false') | quote }}
+    CONFIRM={{ librenms_fast_repair_confirm | bool | ternary('true', 'false') | quote }}
+    DB_MODE={{ librenms_db_mode | default('local') | quote }}
+    REDIS_MODE={{ librenms_redis_mode | default('local') | quote }}
+
+    REPAIR_FAILURE=0
+    REPAIR_CHANGED=0
+    RRD_MOUNT_CHANGED=0
+    RRD_SHARED=false
+    case "${RRD_MODE}" in
+      glusterfs|external|external_nfs|nfs) RRD_SHARED=true ;;
+    esac
+
+    bounded() {
+      timeout --foreground --kill-after=5s "${REPAIR_TIMEOUT}s" "$@"
+    }
+
+    probe() {
+      timeout --foreground --kill-after=2s "${PROBE_TIMEOUT}s" "$@"
+    }
+
+    manager_ready() {
+      probe systemctl show --property=Version --value >/dev/null 2>&1
+    }
+
+    wait_for_manager() {
+      attempt=1
+      while [ "${attempt}" -le "${MANAGER_ATTEMPTS}" ]; do
+        if manager_ready; then
+          return 0
+        fi
+        sleep "${POLL_DELAY}"
+        attempt=$((attempt + 1))
+      done
+      return 1
+    }
+
+    systemctl_bounded() {
+      if ! wait_for_manager; then
+        echo "systemd manager did not become responsive before: systemctl $*" >&2
+        return 124
+      fi
+      bounded systemctl "$@"
+    }
+
+    unit_exists() {
+      probe systemctl list-unit-files "$1" --no-legend >/dev/null 2>&1
+    }
+
+    unit_state() {
+      state="$(probe systemctl show "$1" --property=ActiveState --value 2>/dev/null || true)"
+      printf '%s\n' "${state:-unknown}"
+    }
+
+    unit_is_active() {
+      [ "$(unit_state "$1")" = active ]
+    }
+
+    wait_until_active() {
+      attempt=1
+      while [ "${attempt}" -le "${MAX_ATTEMPTS}" ]; do
+        state="$(unit_state "$1")"
+        case "${state}" in
+          active) return 0 ;;
+          failed|inactive|unknown) return 1 ;;
+        esac
+        sleep "${POLL_DELAY}"
+        attempt=$((attempt + 1))
+      done
+      return 1
+    }
+
+    ensure_started() {
+      unit="$1"
+      unit_exists "${unit}" || return 0
+      state="$(unit_state "${unit}")"
+      case "${state}" in
+        active) return 0 ;;
+        activating)
+          if wait_until_active "${unit}"; then
+            return 0
+          fi
+          ;;
+      esac
+      if [ "${state}" = failed ]; then
+        systemctl_bounded reset-failed "${unit}" >/dev/null 2>&1 || true
+      fi
+      echo "starting ${unit}"
+      if ! systemctl_bounded start "${unit}"; then
+        echo "failed to start ${unit}" >&2
+        return 1
+      fi
+      REPAIR_CHANGED=1
+      wait_until_active "${unit}"
+    }
+
+    print_jobs() {
+      probe systemctl list-jobs --no-legend --no-pager 2>/dev/null |
+        awk '$2 ~ /^(librenms-(scheduler|dispatcher-ha-recover|ha-startup-repair)\\.(service|timer)|librenms\\.service)$/ {print}' || true
+    }
+
+    cancel_stale_jobs() {
+      jobs="$(print_jobs)"
+      [ -n "${jobs}" ] || return 0
+      echo "stale LibreNMS systemd jobs before repair:"
+      printf '%s\n' "${jobs}"
+      REPAIR_CHANGED=1
+      printf '%s\n' "${jobs}" | while read -r job _rest; do
+        [ -n "${job}" ] || continue
+        systemctl_bounded cancel "${job}" >/dev/null 2>&1 || true
+      done
+    }
+
+    quiesce_stuck_units() {
+      for unit in \
+        librenms.service \
+        librenms-scheduler.service \
+        librenms-dispatcher-ha-recover.service \
+        librenms-ha-startup-repair.service; do
+        unit_exists "${unit}" || continue
+        state="$(unit_state "${unit}")"
+        case "${state}" in
+          activating|deactivating)
+            echo "stopping stuck ${unit} (${state})"
+            systemctl_bounded stop "${unit}" >/dev/null 2>&1 || true
+            REPAIR_CHANGED=1
+            ;;
+        esac
+        systemctl_bounded reset-failed "${unit}" >/dev/null 2>&1 || true
+      done
+    }
+
+    mount_fstype() {
+      probe findmnt --noheadings --mountpoint "${RRD_PATH}" --output FSTYPE 2>/dev/null || true
+    }
+
+    mount_is_healthy() {
+      [ -d "${RRD_PATH}" ] || return 1
+      fstype="$(mount_fstype | tr -d '[:space:]')"
+      case "${RRD_MODE}" in
+        glusterfs)
+          case "${fstype}" in
+            glusterfs|fuse.glusterfs) ;;
+            *) return 1 ;;
+          esac
+          ;;
+        external|external_nfs|nfs)
+          case "${fstype}" in
+            nfs|nfs4) ;;
+            *) return 1 ;;
+          esac
+          ;;
+        *)
+          fstype="local"
+          ;;
+      esac
+      probe runuser -u "${LIBRENMS_USER}" -- test -w "${RRD_PATH}"
+    }
+
+    repair_rrd_mount() {
+      if [ "${RRD_SHARED}" != true ]; then
+        bounded mkdir -p "${RRD_PATH}" || return 1
+        mount_is_healthy
+        return $?
+      fi
+
+      if mount_is_healthy; then
+        echo "RRD mount is healthy: ${RRD_PATH} ($(mount_fstype | tr -d '[:space:]'))"
+        return 0
+      fi
+      [ "${REPAIR_MOUNT}" = true ] || {
+        echo "RRD mount is not healthy and mount repair is disabled: ${RRD_PATH}" >&2
+        return 1
+      }
+
+      if unit_is_active rrdcached; then
+        systemctl_bounded stop rrdcached >/dev/null 2>&1 || true
+        RRD_MOUNT_CHANGED=1
+      fi
+
+      current_fstype="$(mount_fstype | tr -d '[:space:]')"
+      if [ -n "${current_fstype}" ] && [ "${LAZY_UNMOUNT}" = true ]; then
+        echo "detaching stale RRD mount ${RRD_PATH} (${current_fstype})"
+        bounded umount --lazy "${RRD_PATH}" || true
+        RRD_MOUNT_CHANGED=1
+      fi
+
+      bounded mkdir -p "${RRD_PATH}" || return 1
+      echo "mounting the configured RRD filesystem at ${RRD_PATH}"
+      bounded mount "${RRD_PATH}" || return 1
+      RRD_MOUNT_CHANGED=1
+      mount_is_healthy
+    }
+
+    if [ "${CONFIRM}" != true ]; then
+      echo "Refusing fast repair without -e librenms_fast_repair_confirm=true" >&2
+      exit 2
+    fi
+    case "${RRD_PATH}" in
+      ''|/|/opt|/opt/librenms|/var|/home)
+        echo "Refusing unsafe RRD repair path: ${RRD_PATH:-<empty>}" >&2
+        exit 2
+        ;;
+    esac
+
+    echo "FAST_REPAIR_HOST=$(hostname)"
+    echo "FAST_REPAIR_SCOPE=runtime-only; MariaDB/Galera bootstrap is never attempted"
+    echo "systemd jobs before repair:"
+    print_jobs
+
+    if ! wait_for_manager; then
+      echo "systemd manager is not responsive; refusing to make runtime changes" >&2
+      exit 1
+    fi
+
+    cancel_stale_jobs
+    quiesce_stuck_units
+
+    if [ "${RRD_MODE}" = glusterfs ]; then
+      if ! ensure_started glusterd; then
+        REPAIR_FAILURE=1
+      fi
+    fi
+
+    RRD_MOUNT_CHANGED=0
+    if [ "${RRD_SHARED}" = true ]; then
+      if ! repair_rrd_mount; then
+        echo "RRD mount repair failed for ${RRD_PATH}" >&2
+        REPAIR_FAILURE=1
+      else
+        if [ "${RRD_MOUNT_CHANGED}" -ne 0 ]; then
+          REPAIR_CHANGED=1
+        fi
+      fi
+    else
+      if ! repair_rrd_mount; then
+        echo "local RRD directory is not writable: ${RRD_PATH}" >&2
+        REPAIR_FAILURE=1
+      fi
+    fi
+
+    if ! mount_is_healthy && [ "${RRD_SHARED}" = true ]; then
+      REPAIR_FAILURE=1
+    fi
+
+    for unit in nginx haproxy keepalived librenms.service; do
+      if ! ensure_started "${unit}"; then
+        REPAIR_FAILURE=1
+      fi
+    done
+
+    if [ "${REDIS_MODE}" = sentinel ]; then
+      for unit in redis-server redis-sentinel; do
+        if ! ensure_started "${unit}"; then
+          REPAIR_FAILURE=1
+        fi
+      done
+    elif [ "${REDIS_MODE}" = local ]; then
+      if ! ensure_started redis-server; then
+        REPAIR_FAILURE=1
+      fi
+    fi
+
+    if [ "${RRD_SHARED}" = true ] || mount_is_healthy; then
+      if ! ensure_started rrdcached; then
+        REPAIR_FAILURE=1
+      fi
+    fi
+
+    php_units="$(probe systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}' || true)"
+    for unit in ${php_units}; do
+      if ! ensure_started "${unit}"; then
+        REPAIR_FAILURE=1
+      fi
+    done
+
+    for timer in \
+      librenms-scheduler.timer \
+      librenms-ha-startup-repair.timer \
+      librenms-dispatcher-ha-recover.timer; do
+      if ! ensure_started "${timer}"; then
+        REPAIR_FAILURE=1
+      fi
+    done
+
+    if [ "${DB_MODE}" = galera ] && command -v mysql >/dev/null 2>&1; then
+      wsrep="$(bounded mysql --protocol=socket --batch --skip-column-names -e \
+        "SELECT CONCAT(@@wsrep_cluster_status, '|', @@wsrep_local_state_comment);" \
+        2>/dev/null || true)"
+      if printf '%s\n' "${wsrep}" | grep -qx 'Primary|Synced'; then
+        echo "Galera local state: Primary|Synced"
+      else
+        echo "Galera is not Primary/Synced; fast repair will not bootstrap it (state: ${wsrep:-unavailable})" >&2
+        REPAIR_FAILURE=1
+      fi
+    fi
+
+    echo "systemd jobs after repair:"
+    print_jobs
+    echo "FAST_REPAIR_CHANGED=${REPAIR_CHANGED}"
+    if [ "${REPAIR_FAILURE}" -ne 0 ]; then
+      echo "FAST_REPAIR_RESULT=failed" >&2
+      exit 1
+    fi
+    echo "FAST_REPAIR_RESULT=ok"
+  register: fast_repair_result
+  changed_when: "'FAST_REPAIR_CHANGED=1' in fast_repair_result.stdout"
+  failed_when: fast_repair_result.rc != 0

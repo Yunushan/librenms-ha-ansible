@@ -626,6 +626,10 @@ librenms_gluster_mount_attempt_timeout: 30
 librenms_gluster_mount_health_retries: 3
 librenms_gluster_mount_health_retry_delay: 2
 librenms_gluster_stale_unmount_timeout: 15
+# Keep a wedged glusterd/systemd start from blocking site convergence forever.
+# This bounds the systemd-backed start/restart command; the subsequent port
+# check still verifies that Gluster actually became usable.
+librenms_gluster_service_operation_timeout: 120
 librenms_gluster_repair_rrd_permissions: true
 librenms_gluster_repair_rrd_acls: true
 

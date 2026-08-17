@@ -1,0 +1,9 @@
+---
+- name: Bounded LibreNMS HA runtime repair
+  hosts: librenms_nodes:!maintenance_nodes
+  become: true
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: librenms_defaults
+    - role: fast_repair

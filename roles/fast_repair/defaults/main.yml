@@ -1,0 +1,14 @@
+---
+# This role is intentionally opt-in. It is a runtime recovery tool, not a
+# replacement for site.yml or galera-recover.yml.
+librenms_fast_repair_confirm: false
+librenms_fast_repair_command_timeout: 20
+librenms_fast_repair_probe_timeout: 5
+librenms_fast_repair_poll_delay: 1
+librenms_fast_repair_max_attempts: 20
+librenms_fast_repair_manager_attempts: 3
+librenms_fast_repair_mount_repair_enabled: true
+librenms_fast_repair_lazy_unmount_enabled: true
+librenms_fast_repair_rrd_mountpoint: "{{ librenms_gluster_mountpoint | default(librenms_install_dir ~ '/rrd') }}"
+librenms_fast_repair_rrd_mode: "{{ librenms_rrd_mode | default('local') }}"
+librenms_fast_repair_user: "{{ librenms_user | default('librenms') }}"
