@@ -96,6 +96,7 @@
       - librenms_galera_web_drain_systemctl_timeout | int > 0
       - librenms_galera_web_drain_systemd_recovery_timeout | int > 0
       - librenms_galera_web_drain_systemd_recovery_poll_delay | int > 0
+      - librenms_galera_web_drain_systemd_recovery_retries | int > 0
       - >-
         not (librenms_galera_backend_force_disconnect_clients | bool)
         or librenms_galera_backend_force_disconnect_timeout | int > 0
@@ -103,9 +104,9 @@
         not (librenms_galera_backend_force_disconnect_clients | bool)
         or librenms_galera_backend_force_disconnect_stable_polls | int > 0
     fail_msg: >-
-      Galera drain stop, kill-grace, systemctl, systemd-recovery, poll-delay,
-      enabled forced-disconnect timeout, and stable-poll count must all be
-      positive whole seconds.
+      Galera drain stop, kill-grace, systemctl/systemd-recovery timeouts,
+      poll delays, and enabled forced-disconnect timeout must be positive whole
+      seconds; recovery-retry and stable-poll counts must be positive.
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_web_drain_enabled | bool

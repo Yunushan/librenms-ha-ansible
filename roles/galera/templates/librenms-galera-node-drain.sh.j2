@@ -16,6 +16,7 @@ UNIT_KILL_GRACE={{ librenms_galera_web_drain_unit_kill_grace | int }}
 SYSTEMCTL_TIMEOUT={{ librenms_galera_web_drain_systemctl_timeout | int }}
 SYSTEMD_RECOVERY_TIMEOUT={{ librenms_galera_web_drain_systemd_recovery_timeout | int }}
 SYSTEMD_RECOVERY_POLL_DELAY={{ librenms_galera_web_drain_systemd_recovery_poll_delay | int }}
+SYSTEMD_RECOVERY_RETRIES={{ librenms_galera_web_drain_systemd_recovery_retries | int }}
 BACKEND_DRAIN_TIMEOUT={{ librenms_galera_backend_drain_timeout | int }}
 BACKEND_DRAIN_POLL_DELAY={{ librenms_galera_backend_drain_poll_delay | int }}
 BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS={{ librenms_galera_backend_drain_max_client_connections | int }}
@@ -299,7 +300,7 @@ wait_for_unit_to_stop() {
   local unit="$1"
   local wait_seconds="$2"
   local deadline
-  local manager_recovered=0
+  local manager_recovery_attempts=0
   local state
 
   deadline=$((SECONDS + wait_seconds))
@@ -310,11 +311,14 @@ wait_for_unit_to_stop() {
         return 0
         ;;
       unknown)
-        if [ "${manager_recovered}" -eq 1 ] \
-            || ! wait_for_systemd_manager "checking whether ${unit} stopped"; then
+        if [ "${manager_recovery_attempts}" -ge "${SYSTEMD_RECOVERY_RETRIES}" ]; then
           return 1
         fi
-        manager_recovered=1
+        manager_recovery_attempts=$((manager_recovery_attempts + 1))
+        if ! wait_for_systemd_manager \
+            "checking whether ${unit} stopped (recovery attempt ${manager_recovery_attempts}/${SYSTEMD_RECOVERY_RETRIES})"; then
+          return 1
+        fi
         if ! queue_unit_action stop "${unit}"; then
           return 1
         fi

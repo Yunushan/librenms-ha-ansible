@@ -172,6 +172,9 @@ librenms_galera_web_drain_systemctl_timeout: 10
 # worker. Retry unit-state queries and queued actions during this window.
 librenms_galera_web_drain_systemd_recovery_timeout: 180
 librenms_galera_web_drain_systemd_recovery_poll_delay: 2
+# A manager can recover and briefly stall again while a queued stop is being
+# applied. Allow several bounded recovery attempts before failing closed.
+librenms_galera_web_drain_systemd_recovery_retries: 3
 # The readiness agent reports "drain" while this marker exists. HAProxy then
 # stops assigning new DB sessions without treating the node as failed or
 # terminating established sessions.

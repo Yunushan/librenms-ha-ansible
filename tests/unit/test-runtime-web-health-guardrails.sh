@@ -288,9 +288,17 @@ main() {
         "active_php_fpm_services | sort -u" \
         "Galera convergence must quiesce active PHP-FPM units before draining database sessions."
     require_contains \
+        "${galera_drain}" \
+        "SYSTEMD_RECOVERY_RETRIES" \
+        "Galera convergence must bound repeated systemd recovery attempts."
+    require_contains \
         "${defaults}" \
         "librenms_galera_backend_force_disconnect_stable_polls: 2" \
         "Galera convergence must require stable zero-session observations before disruption."
+    require_contains \
+        "${defaults}" \
+        "librenms_galera_web_drain_systemd_recovery_retries: 3" \
+        "Galera convergence must configure a bounded systemd recovery retry budget."
     require_contains \
         "${galera_drain}" \
         'rm -f "${BACKEND_DRAIN_PATH}"' \

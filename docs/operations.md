@@ -281,6 +281,9 @@ leave active PHP-FPM workers running: active PHP-FPM units are recorded and
 quiesced with the other local LibreNMS units, then restored from the same state
 file after the database rejoins. It does not enable HAProxy's broad
 `on-marked-down shutdown-sessions` policy for transient health-check failures.
+Transient systemd manager stalls are retried with a bounded recovery-attempt
+budget; the helper still fails closed if the manager cannot confirm a unit after
+that budget.
 
 ### After a full cluster restart
 
