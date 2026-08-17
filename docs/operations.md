@@ -271,13 +271,16 @@ polling jobs, but should remain bounded.
 The database backend is first given `librenms_galera_backend_drain_timeout`
 seconds to drain naturally. If persistent application sessions remain during
 this planned operation, the helper disconnects only those non-system sessions
-and verifies the result for
-`librenms_galera_backend_force_disconnect_timeout` seconds. Set
+and repeatedly reaps replacement sessions for the bounded
+`librenms_galera_backend_force_disconnect_timeout` grace period. It requires
+the configured stable zero-session polls before continuing. Set
 `librenms_galera_backend_force_disconnect_clients: false` to fail closed
 instead. Empty and unauthenticated connection-setup probes are not treated as
 established workload sessions. This planned-maintenance behavior does not
-enable HAProxy's broad `on-marked-down shutdown-sessions` policy for transient
-health-check failures.
+leave active PHP-FPM workers running: active PHP-FPM units are recorded and
+quiesced with the other local LibreNMS units, then restored from the same state
+file after the database rejoins. It does not enable HAProxy's broad
+`on-marked-down shutdown-sessions` policy for transient health-check failures.
 
 ### After a full cluster restart
 

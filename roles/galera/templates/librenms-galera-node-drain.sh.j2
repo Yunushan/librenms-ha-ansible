@@ -21,6 +21,7 @@ BACKEND_DRAIN_POLL_DELAY={{ librenms_galera_backend_drain_poll_delay | int }}
 BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS={{ librenms_galera_backend_drain_max_client_connections | int }}
 BACKEND_FORCE_DISCONNECT_CLIENTS={{ (librenms_galera_backend_force_disconnect_clients | bool) | ternary('1', '0') }}
 BACKEND_FORCE_DISCONNECT_TIMEOUT={{ librenms_galera_backend_force_disconnect_timeout | int }}
+BACKEND_FORCE_DISCONNECT_STABLE_POLLS={{ librenms_galera_backend_force_disconnect_stable_polls | int }}
 BACKEND_REJOIN_DELAY={{ librenms_galera_backend_rejoin_delay | int }}
 QUERY_TIMEOUT={{ librenms_galera_readiness_agent_query_timeout | int }}
 MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
@@ -272,6 +273,17 @@ record_active_units() {
           ;;
       esac
     done
+
+    # PHP-FPM workers can retain or recreate MariaDB sessions after the
+    # dispatcher and scheduler have stopped. Record active FPM units with the
+    # other local application units so planned Galera maintenance can quiesce
+    # the source of those sessions and restore it from the same state file.
+    while IFS= read -r unit; do
+      [ -n "${unit}" ] || continue
+      if ! grep -Fqx -- "${unit}" "${temporary_state}"; then
+        printf '%s\n' "${unit}" >> "${temporary_state}"
+      fi
+    done < <(active_php_fpm_services | sort -u)
   fi
 
   mv -f "${temporary_state}" "${STATE_PATH}"
@@ -443,36 +455,62 @@ active_client_connections() {
 }
 
 force_disconnect_client_connections() {
+  local deadline
+  local force_timeout="${1:-${BACKEND_FORCE_DISCONNECT_TIMEOUT}}"
   local client_count
   local kill_statements
+  local stable_zero_polls=0
 
-  kill_statements=$(timeout "${QUERY_TIMEOUT}" \
-    mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
-    "SELECT CONCAT('KILL CONNECTION ', ID, ';')
-       FROM information_schema.PROCESSLIST
-      WHERE ID <> CONNECTION_ID()
-        AND COALESCE(USER, '') NOT IN (
-          '', 'unauthenticated user', 'system user', 'event_scheduler',
-          '${HAPROXY_HEALTH_USER}'
-        );" \
-    2>/dev/null || true)
+  deadline=$((SECONDS + force_timeout))
+  while true; do
+    # A worker can open a replacement connection between two checks. Reap
+    # eligible sessions repeatedly until the count is stable at the allowed
+    # threshold, but keep the whole operation bounded.
+    if ! kill_statements=$(timeout "${QUERY_TIMEOUT}" \
+      mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+      "SELECT CONCAT('KILL CONNECTION ', ID, ';')
+         FROM information_schema.PROCESSLIST
+        WHERE ID <> CONNECTION_ID()
+          AND COALESCE(USER, '') NOT IN (
+            '', 'unauthenticated user', 'system user', 'event_scheduler',
+            '${HAPROXY_HEALTH_USER}'
+          );" \
+      2>/dev/null); then
+      log 'could not inspect MariaDB client sessions during forced drain'
+      return 1
+    fi
 
-  client_count=$(printf '%s\n' "${kill_statements}" \
-    | grep -Ec '^KILL CONNECTION [0-9]+;$' || true)
-  if [ "${client_count}" -eq 0 ]; then
-    return 0
-  fi
+    client_count=$(printf '%s\n' "${kill_statements}" \
+      | grep -Ec '^KILL CONNECTION [0-9]+;$' || true)
+    if [ "${client_count}" -le "${BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS}" ]; then
+      stable_zero_polls=$((stable_zero_polls + 1))
+      if [ "${stable_zero_polls}" -ge "${BACKEND_FORCE_DISCONNECT_STABLE_POLLS}" ] \
+          || [ "${SECONDS}" -ge "${deadline}" ]; then
+        log "lingering database clients cleared (${client_count} active)"
+        return 0
+      fi
+    else
+      stable_zero_polls=0
+      log "graceful database drain expired; disconnecting ${client_count} lingering client(s)"
+      printf '%s\n' "${kill_statements}" \
+        | timeout "${QUERY_TIMEOUT}" \
+          mysql --force --protocol=socket --socket="${MARIADB_SOCKET}" \
+            >/dev/null 2>&1 || true
+    fi
 
-  log "graceful database drain expired; disconnecting ${client_count} lingering client(s)"
-  printf '%s\n' "${kill_statements}" \
-    | timeout "${QUERY_TIMEOUT}" \
-      mysql --force --protocol=socket --socket="${MARIADB_SOCKET}" \
-        >/dev/null 2>&1 || true
+    if [ "${SECONDS}" -ge "${deadline}" ]; then
+      log "database clients remained after forced disconnect (${client_count} active)"
+      return 1
+    fi
+
+    sleep "${BACKEND_DRAIN_POLL_DELAY}"
+  done
 }
 
 wait_for_forced_client_disconnects() {
   local connections
   local deadline
+  local remaining
   local state
 
   deadline=$((SECONDS + BACKEND_FORCE_DISCONNECT_TIMEOUT))
@@ -495,6 +533,18 @@ wait_for_forced_client_disconnects() {
         && [ "${connections}" -le "${BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS}" ]; then
       log "lingering database clients disconnected (${connections} active)"
       return 0
+    fi
+
+    if [[ "${connections}" =~ ^[0-9]+$ ]] \
+        && [ "${BACKEND_FORCE_DISCONNECT_CLIENTS}" = '1' ]; then
+      # A connection may be recreated after the forced-reap loop's last clean
+      # poll. Re-enter the same bounded reap path before declaring failure.
+      remaining=$((deadline - SECONDS))
+      if [ "${remaining}" -le 0 ] \
+          || ! force_disconnect_client_connections "${remaining}"; then
+        return 1
+      fi
+      continue
     fi
 
     if [ "${SECONDS}" -ge "${deadline}" ]; then

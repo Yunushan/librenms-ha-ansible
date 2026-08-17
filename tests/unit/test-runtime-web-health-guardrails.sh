@@ -281,6 +281,18 @@ main() {
         "Galera convergence must verify lingering clients disconnected before disruption."
     require_contains \
         "${galera_drain}" \
+        "stable_zero_polls" \
+        "Galera convergence must tolerate replacement sessions during the bounded forced-drain grace period."
+    require_contains \
+        "${galera_drain}" \
+        "active_php_fpm_services | sort -u" \
+        "Galera convergence must quiesce active PHP-FPM units before draining database sessions."
+    require_contains \
+        "${defaults}" \
+        "librenms_galera_backend_force_disconnect_stable_polls: 2" \
+        "Galera convergence must require stable zero-session observations before disruption."
+    require_contains \
+        "${galera_drain}" \
         'rm -f "${BACKEND_DRAIN_PATH}"' \
         "The HAProxy backend drain marker must be removed only by a guarded recovery path."
     require_contains \

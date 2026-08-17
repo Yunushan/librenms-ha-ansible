@@ -183,7 +183,10 @@ librenms_galera_backend_drain_max_client_connections: 0
 # after HAProxy has stopped assigning new ones. Transient readiness failures do
 # not use this path and continue to preserve established sessions.
 librenms_galera_backend_force_disconnect_clients: true
-librenms_galera_backend_force_disconnect_timeout: 15
+# Existing PHP workers can race the first KILL pass while the drain marker is
+# propagating. Reap for a bounded grace period and require two clean polls.
+librenms_galera_backend_force_disconnect_timeout: 30
+librenms_galera_backend_force_disconnect_stable_polls: 2
 # Two readiness-agent intervals gives HAProxy enough time to observe the
 # post-recovery "up" response before web traffic and workers resume.
 librenms_galera_backend_rejoin_delay: 6
