@@ -4,6 +4,9 @@
     argv:
       - "{{ librenms_galera_web_drain_helper_path }}"
       - enter
+  environment:
+    LIBRENMS_GALERA_DRAIN_EXPECTS_MARIADB_RESTART: >-
+      {{ librenms_galera_web_drain_expects_mariadb_restart | default(false) | bool | ternary('1', '0') }}
   register: librenms_galera_web_drain_enter
   changed_when: librenms_galera_web_drain_enter.stdout == 'entered'
   when:

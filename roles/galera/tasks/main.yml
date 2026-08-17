@@ -1340,6 +1340,21 @@
 
 - name: Enter local Galera drain before planned service convergence
   include_tasks: enter_local_web_drain.yml
+  vars:
+    librenms_galera_web_drain_expects_mariadb_restart: >-
+      {{
+        (
+          (librenms_galera_cluster_has_live_member | bool)
+          and (
+            (librenms_galera_config_deploy.changed | default(false))
+            or not (
+              (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
+              and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+              and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_local_state_comment\\s+Synced')
+            )
+          )
+        ) | bool
+      }}
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool
@@ -1458,6 +1473,7 @@
                 or not (
                   (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_cluster_status\\s+Primary')
                   and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_ready\\s+ON')
+                  and (librenms_galera_pre_start_status.stdout | default('')) is search('wsrep_local_state_comment\\s+Synced')
                 )
               )
               else 'started'
@@ -1582,6 +1598,10 @@
 
 - name: Enter local Galera drain before backend listener recovery
   include_tasks: enter_local_web_drain.yml
+  vars:
+    # The following task restarts MariaDB when the backend listener is absent,
+    # so any final persistent session is closed by the planned disruption.
+    librenms_galera_web_drain_expects_mariadb_restart: true
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_local_service_expected | bool

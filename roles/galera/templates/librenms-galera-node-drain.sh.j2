@@ -29,6 +29,8 @@ MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
 MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
 HAPROXY_HEALTH_USER={{ librenms_haproxy_db_health_user | quote }}
 PHP_FPM_SERVICE={{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) | quote }}
+EXPECT_MARIADB_RESTART="${LIBRENMS_GALERA_DRAIN_EXPECTS_MARIADB_RESTART:-0}"
+ALLOW_STALE_CLIENTS_BEFORE_RESTART={{ (librenms_galera_web_drain_allow_stale_clients_before_restart | bool) | ternary('1', '0') }}
 DAILY_TIMER_UNIT=librenms-daily.timer
 DAILY_SERVICE_UNIT=librenms-daily.service
 QUIESCE_UNITS=(
@@ -458,11 +460,32 @@ active_client_connections() {
   return 1
 }
 
+log_client_connections() {
+  local details
+
+  details=$(timeout "${QUERY_TIMEOUT}" \
+    mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+    "SELECT CONCAT_WS('|', ID, COALESCE(USER, ''), COALESCE(HOST, ''),
+             COALESCE(DB, ''), COMMAND, TIME, COALESCE(STATE, ''))
+       FROM information_schema.PROCESSLIST
+      WHERE ID <> CONNECTION_ID()
+        AND COALESCE(USER, '') NOT IN (
+          '', 'unauthenticated user', 'system user', 'event_scheduler',
+          '${HAPROXY_HEALTH_USER}'
+        );" \
+    2>/dev/null || true)
+
+  while IFS= read -r detail; do
+    [ -n "${detail}" ] || continue
+    log "lingering database client: ${detail}"
+  done <<< "${details}"
+}
+
 force_disconnect_client_connections() {
   local deadline
   local force_timeout="${1:-${BACKEND_FORCE_DISCONNECT_TIMEOUT}}"
   local client_count
-  local kill_statements
+  local connection_ids
   local stable_zero_polls=0
 
   deadline=$((SECONDS + force_timeout))
@@ -470,9 +493,9 @@ force_disconnect_client_connections() {
     # A worker can open a replacement connection between two checks. Reap
     # eligible sessions repeatedly until the count is stable at the allowed
     # threshold, but keep the whole operation bounded.
-    if ! kill_statements=$(timeout "${QUERY_TIMEOUT}" \
+    if ! connection_ids=$(timeout "${QUERY_TIMEOUT}" \
       mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
-      "SELECT CONCAT('KILL CONNECTION ', ID, ';')
+      "SELECT ID
          FROM information_schema.PROCESSLIST
         WHERE ID <> CONNECTION_ID()
           AND COALESCE(USER, '') NOT IN (
@@ -484,8 +507,8 @@ force_disconnect_client_connections() {
       return 1
     fi
 
-    client_count=$(printf '%s\n' "${kill_statements}" \
-      | grep -Ec '^KILL CONNECTION [0-9]+;$' || true)
+    client_count=$(printf '%s\n' "${connection_ids}" \
+      | grep -Ec '^[0-9]+$' || true)
     if [ "${client_count}" -le "${BACKEND_DRAIN_MAX_CLIENT_CONNECTIONS}" ]; then
       stable_zero_polls=$((stable_zero_polls + 1))
       if [ "${stable_zero_polls}" -ge "${BACKEND_FORCE_DISCONNECT_STABLE_POLLS}" ] \
@@ -496,10 +519,12 @@ force_disconnect_client_connections() {
     else
       stable_zero_polls=0
       log "graceful database drain expired; disconnecting ${client_count} lingering client(s)"
-      printf '%s\n' "${kill_statements}" \
-        | timeout "${QUERY_TIMEOUT}" \
-          mysql --force --protocol=socket --socket="${MARIADB_SOCKET}" \
-            >/dev/null 2>&1 || true
+      while IFS= read -r connection_id; do
+        [[ "${connection_id}" =~ ^[0-9]+$ ]] || continue
+        timeout "${QUERY_TIMEOUT}" \
+          mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+          "KILL CONNECTION ${connection_id};" >/dev/null 2>&1 || true
+      done <<< "${connection_ids}"
     fi
 
     if [ "${SECONDS}" -ge "${deadline}" ]; then
@@ -666,8 +691,14 @@ enter_drain() {
     if [ "${BACKEND_FORCE_DISCONNECT_CLIENTS}" != '1' ] \
         || ! force_disconnect_client_connections \
         || ! wait_for_forced_client_disconnects; then
-      rollback_drain
-      return 1
+      log_client_connections
+      if [ "${ALLOW_STALE_CLIENTS_BEFORE_RESTART}" = '1' ] \
+          && [ "${EXPECT_MARIADB_RESTART}" = '1' ]; then
+        log 'database clients remained after bounded forced drain; continuing because the next Galera step will restart MariaDB and close the remaining sessions'
+      else
+        rollback_drain
+        return 1
+      fi
     fi
   fi
 

@@ -190,6 +190,10 @@ librenms_galera_backend_force_disconnect_clients: true
 # propagating. Reap for a bounded grace period and require two clean polls.
 librenms_galera_backend_force_disconnect_timeout: 30
 librenms_galera_backend_force_disconnect_stable_polls: 2
+# During a role-managed drain, the next Galera convergence step is known to
+# restart MariaDB. Permit the helper to continue after its bounded reap window
+# in that case; a manual helper invocation remains fail-closed.
+librenms_galera_web_drain_allow_stale_clients_before_restart: true
 # Two readiness-agent intervals gives HAProxy enough time to observe the
 # post-recovery "up" response before web traffic and workers resume.
 librenms_galera_backend_rejoin_delay: 6

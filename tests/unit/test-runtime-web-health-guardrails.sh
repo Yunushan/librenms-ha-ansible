@@ -281,6 +281,14 @@ main() {
         "Galera convergence must verify lingering clients disconnected before disruption."
     require_contains \
         "${galera_drain}" \
+        "EXPECT_MARIADB_RESTART" \
+        "A planned restart may continue after the bounded final client reap."
+    require_contains \
+        "${galera_drain}" \
+        "log_client_connections" \
+        "Drain failures must record the remaining database client identities."
+    require_contains \
+        "${galera_drain}" \
         "stable_zero_polls" \
         "Galera convergence must tolerate replacement sessions during the bounded forced-drain grace period."
     require_contains \
@@ -295,6 +303,10 @@ main() {
         "${defaults}" \
         "librenms_galera_backend_force_disconnect_stable_polls: 2" \
         "Galera convergence must require stable zero-session observations before disruption."
+    require_contains \
+        "${defaults}" \
+        "librenms_galera_web_drain_allow_stale_clients_before_restart: true" \
+        "Role-managed restarts may finish a bounded drain after one persistent session races the reap."
     require_contains \
         "${defaults}" \
         "librenms_galera_web_drain_systemd_recovery_retries: 3" \
