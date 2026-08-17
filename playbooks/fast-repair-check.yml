@@ -1,0 +1,26 @@
+---
+- name: Check fast-repair connectivity and privilege prerequisites
+  hosts: librenms_nodes:!maintenance_nodes
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Check SSH, sudo, and configured interpreter without becoming root
+      ansible.builtin.raw: |
+        set -u
+        printf 'FAST_REPAIR_HOST=%s\n' "$(hostname)"
+        if command -v sudo >/dev/null 2>&1; then
+          printf 'SUDO_PATH=%s\n' "$(command -v sudo)"
+          if sudo -n -v >/dev/null 2>&1; then
+            printf 'SUDO_MODE=passwordless\n'
+          else
+            printf 'SUDO_MODE=password-required-or-denied\n'
+          fi
+        else
+          printf 'SUDO_MODE=missing\n'
+        fi
+        if [ -x '{{ ansible_python_interpreter | default("/usr/bin/python3") }}' ]; then
+          printf 'PYTHON_INTERPRETER=present\n'
+        else
+          printf 'PYTHON_INTERPRETER=missing\n'
+        fi
+      changed_when: false

@@ -12,6 +12,29 @@ cd /home/ansible/librenms-ha-ansible
 make repair-ask-become-pass FAST_REPAIR_CONFIRM=true FAST_REPAIR_LIMIT=lnms3
 ```
 
+The target gives the sudo prompt up to 60 seconds by default. If it still
+reports `Timeout waiting for privilege escalation prompt`, the repair has not
+run: SSH succeeded but `ansible` could not become root on that host. Check the
+host without changing anything:
+
+```sh
+make repair-check FAST_REPAIR_LIMIT=lnms3
+```
+
+On the affected host, verify the `ansible` account can use sudo and that its
+sudo policy is valid. Run `sudo -v` interactively as `ansible`, then check the
+policy with `sudo -l`; do not put the sudo password in inventory or Git. If
+the three nodes use different sudo passwords, `--ask-become-pass` cannot use
+one password for all of them; use per-host vaulted credentials or standardize
+the sudo policy. A passwordless sudo policy is also suitable for an
+automation-only account. After fixing `lnms3`, rerun the bounded repair.
+
+You can override the timeout for a slow but healthy sudo/PAM path:
+
+```sh
+make repair-ask-become-pass FAST_REPAIR_CONFIRM=true FAST_REPAIR_LIMIT=lnms3 FAST_REPAIR_BECOME_TIMEOUT=120
+```
+
 After repairing one node, verify it, then repair the remaining nodes one at a
 time:
 

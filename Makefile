@@ -1,4 +1,4 @@
-.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass repair repair-ask-become-pass cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover galera-recover-ask-become-pass ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
+.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass repair repair-ask-become-pass repair-check cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover galera-recover-ask-become-pass ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -17,8 +17,9 @@ INTERACTIVE_BECOME_TIMEOUT ?= 120
 INTERACTIVE_BECOME_FORKS ?= 1
 FAST_REPAIR_CONFIRM ?= false
 FAST_REPAIR_LIMIT ?= librenms_nodes
-FAST_REPAIR_TIMEOUT ?= 15
+FAST_REPAIR_TIMEOUT ?= 30
 FAST_REPAIR_FORKS ?= 1
+FAST_REPAIR_BECOME_TIMEOUT ?= 60
 DOCKER_ANSIBLE ?= docker compose run --rm -v $(SSH_DIR):/root/.ssh:ro ansible
 
 controller-bootstrap:
@@ -145,11 +146,14 @@ site-ask-become-pass:
 # Galera, run migrations, or alter MariaDB data.
 repair:
 	@test "$(FAST_REPAIR_CONFIRM)" = "true" || (echo "Refusing repair: set FAST_REPAIR_CONFIRM=true after reviewing docs/fast-repair.md" && exit 2)
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 repair-ask-become-pass:
 	@test "$(FAST_REPAIR_CONFIRM)" = "true" || (echo "Refusing repair: set FAST_REPAIR_CONFIRM=true after reviewing docs/fast-repair.md" && exit 2)
-	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --ask-become-pass --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair.yml --ask-become-pass --become-method sudo --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) -e librenms_fast_repair_confirm=true -e ansible_become_timeout=$(FAST_REPAIR_BECOME_TIMEOUT) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+repair-check:
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/fast-repair-check.yml --limit "$(FAST_REPAIR_LIMIT)" --timeout $(FAST_REPAIR_TIMEOUT) --forks $(FAST_REPAIR_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 cluster:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/cluster.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
