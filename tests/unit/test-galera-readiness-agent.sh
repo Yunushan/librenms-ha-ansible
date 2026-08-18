@@ -71,6 +71,10 @@ main() {
         printf 'Readiness-agent service must terminate the whole probe cgroup.\n' >&2
         return 1
     }
+    grep -Fq 'CollectMode=inactive-or-failed' "${SERVICE_TEMPLATE}" || {
+        printf 'Readiness-agent workers must be garbage-collected after completion.\n' >&2
+        return 1
+    }
     grep -Fq 'Backlog={{ librenms_galera_readiness_agent_backlog | int }}' "${SOCKET_TEMPLATE}" || {
         printf 'Readiness-agent socket must use an explicit bounded backlog.\n' >&2
         return 1
@@ -83,8 +87,12 @@ main() {
         printf 'Readiness-agent reset must close the listener before reaping workers.\n' >&2
         return 1
     }
-    grep -Fq 'list-units --all --plain --no-legend --full "${SERVICE_GLOB}"' "${RESET_TEMPLATE}" || {
-        printf 'Readiness-agent reset must enumerate accepted worker instances.\n' >&2
+    grep -Fq -- '--state=active,activating,deactivating' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must enumerate only live worker instances.\n' >&2
+        return 1
+    }
+    if grep -Fq -- 'list-units --all' "${RESET_TEMPLATE}"; then
+        printf 'Readiness-agent reset must not enumerate inactive unit history.\n' >&2
         return 1
     }
     grep -Fq 'systemctl_bounded kill --kill-who=all --signal=TERM' "${RESET_TEMPLATE}" || {

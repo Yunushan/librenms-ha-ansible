@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -u
+set -o pipefail
 
 readonly SOCKET_UNIT={{ librenms_galera_readiness_agent_socket_unit | quote }}
 readonly SERVICE_GLOB={{ (librenms_galera_readiness_agent_service_unit | regex_replace('@\\.service$', '@*.service')) | quote }}
@@ -7,11 +8,16 @@ readonly COMMAND_TIMEOUT={{ librenms_galera_readiness_agent_reset_timeout | int 
 readonly QUIESCE_ATTEMPTS={{ librenms_galera_readiness_agent_reset_attempts | int }}
 
 systemctl_bounded() {
-  timeout "${COMMAND_TIMEOUT}" systemctl "$@"
+  timeout --kill-after=2s "${COMMAND_TIMEOUT}" systemctl "$@"
 }
 
 list_active_workers() {
-  systemctl_bounded list-units --all --plain --no-legend --full "${SERVICE_GLOB}" 2>/dev/null \
+  # Do not use --all here. Accepted socket workers leave a large inactive
+  # unit history, and expanding that history can wedge systemd itself.
+  systemctl_bounded list-units \
+    --type=service \
+    --state=active,activating,deactivating \
+    --plain --no-legend --full "${SERVICE_GLOB}" 2>/dev/null \
     | awk '$3 == "active" || $3 == "activating" || $3 == "deactivating" { print $1 }'
 }
 
@@ -31,14 +37,36 @@ reap_workers() {
 
 # Close the listener first so no new accepted workers appear while stale
 # connection units are being reaped.
-systemctl_bounded stop "${SOCKET_UNIT}" >/dev/null 2>&1 || true
+if ! systemctl_bounded stop "${SOCKET_UNIT}" >/dev/null 2>&1; then
+  printf 'could not stop readiness socket unit: %s\n' "${SOCKET_UNIT}" >&2
+  exit 1
+fi
 
-reap_workers "$(list_active_workers)"
+socket_state="$(systemctl_bounded is-active "${SOCKET_UNIT}" 2>/dev/null)"
+socket_rc=$?
+if [ "${socket_rc}" -eq 124 ]; then
+  printf 'systemd did not respond while checking readiness socket state\n' >&2
+  exit 1
+fi
+if [ "${socket_state}" != "inactive" ] && [ "${socket_state}" != "failed" ]; then
+  printf 'readiness socket remained active after stop: %s\n' "${socket_state}" >&2
+  exit 1
+fi
+
+workers="$(list_active_workers)"
+if [ "$?" -eq 124 ]; then
+  printf 'systemd did not respond while listing readiness workers\n' >&2
+  exit 1
+fi
+reap_workers "${workers}"
 
 for ((attempt = 1; attempt <= QUIESCE_ATTEMPTS; attempt++)); do
   remaining="$(list_active_workers)"
+  if [ "$?" -eq 124 ]; then
+    printf 'systemd did not respond while checking readiness workers\n' >&2
+    exit 1
+  fi
   if [ -z "${remaining}" ]; then
-    systemctl_bounded reset-failed "${SERVICE_GLOB}" >/dev/null 2>&1 || true
     exit 0
   fi
 
@@ -46,5 +74,6 @@ for ((attempt = 1; attempt <= QUIESCE_ATTEMPTS; attempt++)); do
   sleep 1
 done
 
-printf 'readiness agent workers did not stop: %s\n' "$(list_active_workers | tr '\n' ' ')" >&2
+remaining="$(list_active_workers)"
+printf 'readiness agent workers did not stop: %s\n' "${remaining//$'\n'/ }" >&2
 exit 1
