@@ -17,6 +17,23 @@
       ]
     - librenms_db_mode in ['local', 'galera']
 
+- name: Validate the supported RHEL-family PHP stream
+  ansible.builtin.assert:
+    that:
+      - librenms_redhat_php_stream | string in librenms_supported_php_versions
+      - >-
+        (ansible_facts.distribution_major_version | int) >= 10
+        or librenms_redhat_php_stream | string in ['8.2', '8.3']
+        or (
+          librenms_redhat_enable_remi | bool
+          and (ansible_facts.distribution_major_version | int) < 10
+        )
+    fail_msg: >-
+      PHP {{ librenms_redhat_php_stream }} is not available from the selected
+      RHEL-family repositories. PHP 8.4 and 8.5 require the explicitly enabled
+      Remi repository and a reviewed release RPM on EL8/9; EL10 uses its native
+      PHP packages and validates the installed runtime instead.
+
 - name: Install DNF repository management tooling
   ansible.builtin.package:
     name: dnf-plugins-core
@@ -229,7 +246,8 @@
     fail_msg: >-
       Remi is disabled by default. When explicitly enabled, provide a reviewed
       HTTPS release RPM in librenms_redhat_remi_release_url. RHEL-family 10
-      uses its native PHP packages and does not use this compatibility path.
+      uses its native PHP packages and does not use this compatibility path;
+      select a native PHP stream there instead.
   when: librenms_redhat_enable_remi | bool
 
 - name: Install optional signed Remi repository package

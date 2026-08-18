@@ -45,7 +45,7 @@ It is not a generic upgrade path for an existing cluster.
 
 | Distro family | Tier | Expected state | Before production |
 | --- | --- | --- | --- |
-| Ubuntu LTS (22.04, 24.04, 26.04) | Primary | Debian-family mappings; Ubuntu 22.04 explicitly selects PHP 8.3 from the documented Ondrej PHP repository, while Ubuntu 24.04/26.04 use their native supported stream. Distro MariaDB is guarded at 10.6/10.11/11.8 respectively. | Run the full HA command sequence and one node-maintenance drill. |
+| Ubuntu LTS (22.04, 24.04, 26.04) | Primary | Debian-family mappings; Ubuntu 22.04 explicitly selects PHP 8.3 from the documented Ondrej PHP repository, while Ubuntu 24.04/26.04 use their native stream by default and can opt into verified PHP 8.4/8.5 PPA streams. Distro MariaDB is guarded at 10.6/10.11/11.8 respectively. | Run the full HA command sequence and one node-maintenance drill. |
 | Debian stable | Primary | Best fit with upstream LibreNMS examples and package names. | Run the full HA command sequence and one node-maintenance drill. |
 | Linux Mint | Primary-ish | Uses Debian-family logic. | Validate package names, PHP-FPM service name, and firewall behavior in a lab. |
 | RHEL / Red Hat Enterprise Linux (8.10+, 9.4+, 10.x) | Primary source path | Uses the tested EL mappings, including firewalld, enforcing SELinux, EL8 managed Python, EL10 Valkey, and the vendor MariaDB 10.11 stream. Subscription-only repositories are not exercised in public CI. | Run package resolution and all live readiness/failover gates on subscribed RHEL images. |
@@ -146,7 +146,7 @@ vendor-supported repository before running the playbook.
 | Runtime | Supported production series | Requested target | Verification |
 | --- | --- | --- | --- |
 | nginx | 1.18 through 1.31 | 1.31.x | `nginx -v` during common convergence; the HAProxy web integration uses nginx 1.31.3. |
-| PHP | 8.2 through 8.5 | 8.5 | The PHP CLI runtime used alongside PHP-FPM is detected on managed web nodes. |
+| PHP | 8.2 through 8.5 | 8.5 | Ubuntu 24.04/26.04 can select 8.4 or 8.5 with `librenms_ubuntu_php_version_override`; RHEL-family 8/9 require an explicitly reviewed Remi stream for those versions. The selected PHP CLI runtime and matching PHP-FPM service are checked on managed web nodes. |
 | Python | 3.9 through 3.14 | 3.14 | EL8 is bootstrapped onto managed Python 3.11; all target hosts receive the pinned LibreNMS runtime set (`PyMySQL`, `python-dotenv`, `redis`, `setuptools`, `psutil`, and `command_runner`); CI also installs the pinned controller toolchain on Python 3.14. |
 | Laravel | 12 and 13 | 13 | The resolved `laravel/framework` version is read from the installed Composer autoloader. |
 | RRDtool | 1.7 through 1.10 | 1.10.x | The installed `rrdtool --version` series is checked before service configuration. |

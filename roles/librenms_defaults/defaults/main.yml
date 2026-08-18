@@ -1015,10 +1015,18 @@ librenms_ubuntu_php_repository_key_fingerprint: B8DC7E53946656EFBCE4C1DD71DAEAAB
 librenms_ubuntu_php_repository_keyring: /etc/apt/keyrings/ondrej-php.asc
 librenms_ubuntu_php_repository_source_file: /etc/apt/sources.list.d/ondrej-php.sources
 # Ubuntu 22's PHP PPA is managed as a signed deb822 source with the pinned
-# Launchpad key above; Ubuntu 24.04 and 26.04 use their native PHP stream.
+# Launchpad key above; Ubuntu 24.04 and 26.04 use their native PHP stream by
+# default. Set the override to a supported version to select an explicit PHP
+# stream from the same verified PPA on any supported Ubuntu release.
 librenms_ubuntu_php_version: "8.3"
+# Empty preserves the distro-native stream on Ubuntu 24.04/26.04. Supported
+# explicit streams are the versions listed in librenms_supported_php_versions.
+librenms_ubuntu_php_version_override: ""
 librenms_redhat_enable_epel: true
 librenms_redhat_enable_remi: false
+# RHEL-family 8/9 can opt into PHP 8.4 or 8.5 through a reviewed Remi release
+# RPM. RHEL-family 10 uses its native PHP packages and is not switched through
+# the Remi module path.
 librenms_redhat_php_stream: "8.2"
 librenms_redhat_mariadb_stream: "10.11"
 # The supported RHEL-family database contract is the vendor 10.11 stream.

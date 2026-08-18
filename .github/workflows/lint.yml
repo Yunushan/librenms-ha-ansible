@@ -21,6 +21,12 @@ jobs:
             image: ubuntu:22.04
           - name: ubuntu-24.04
             image: ubuntu:24.04
+          - name: ubuntu-24.04-php-8.4
+            image: ubuntu:24.04
+            php_stream: "8.4"
+          - name: ubuntu-24.04-php-8.5
+            image: ubuntu:24.04
+            php_stream: "8.5"
           - name: ubuntu-26.04
             image: ubuntu:26.04
           - name: rocky-8
@@ -43,6 +49,7 @@ jobs:
       - name: Resolve supported platform package set
         run: >-
           docker run --rm
+          -e "LIBRENMS_PHP_STREAM=${{ matrix.php_stream || '' }}"
           -v "$PWD:/workspace:ro"
           "${{ matrix.image }}"
           bash /workspace/tests/platform/package-smoke.sh

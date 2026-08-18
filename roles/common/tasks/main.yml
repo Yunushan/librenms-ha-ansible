@@ -183,6 +183,32 @@
     - ansible_facts.distribution == 'Ubuntu'
     - librenms_enable_extra_repos | bool
 
+- name: Validate explicit Ubuntu PHP stream selection
+  ansible.builtin.assert:
+    that:
+      - librenms_ubuntu_php_version_override | default('') | trim in librenms_supported_php_versions
+      - ansible_facts.distribution == 'Ubuntu'
+      - (ansible_facts.distribution_major_version | int) in [22, 24, 26]
+      - librenms_enable_extra_repos | bool
+      - librenms_ubuntu_php_repository_enabled | bool
+    fail_msg: >-
+      librenms_ubuntu_php_version_override must be a supported PHP version on
+      Ubuntu 22.04, 24.04, or 26.04, and the verified PHP repository must remain
+      enabled. Selected value: {{ librenms_ubuntu_php_version_override | default('') }}.
+  when:
+    - librenms_ubuntu_php_version_override | default('') | trim | length > 0
+
+- name: Determine whether the Ubuntu PHP repository is required
+  ansible.builtin.set_fact:
+    librenms_ubuntu_php_repository_required: >-
+      {{
+        ansible_facts.distribution == 'Ubuntu'
+        and (
+          (ansible_facts.distribution_major_version | int) == 22
+          or (librenms_ubuntu_php_version_override | default('') | trim | length > 0)
+        )
+      }}
+
 - name: Check for legacy Ubuntu universe source file
   stat:
     path: /etc/apt/sources.list.d/archive_ubuntu_com_ubuntu.list
@@ -231,7 +257,7 @@
     - librenms_enable_extra_repos | bool
     - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
 
-- name: Install Ubuntu 22 PHP repository prerequisites
+- name: Install Ubuntu 22 PHP repository prerequisites and explicit PHP stream support
   apt:
     name:
       - ca-certificates
@@ -240,8 +266,7 @@
     state: present
     update_cache: false
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -253,8 +278,7 @@
     group: root
     mode: '0755'
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -263,8 +287,7 @@
     path: /etc/apt/trusted.gpg.d/ondrej-ubuntu-php.gpg
     state: absent
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -276,8 +299,7 @@
   register: librenms_ubuntu_php_legacy_sources
   changed_when: false
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -287,8 +309,7 @@
     state: absent
   loop: "{{ librenms_ubuntu_php_legacy_sources.files | default([]) }}"
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
     - item.path != librenms_ubuntu_php_repository_source_file
@@ -301,8 +322,7 @@
     group: root
     mode: '0644'
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -317,8 +337,7 @@
   changed_when: false
   check_mode: false
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -330,12 +349,11 @@
       The downloaded Ondrej PHP signing key fingerprint does not match the pinned
       fingerprint. Refusing to configure the PHP repository.
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
-- name: Configure the supported PHP stream for Ubuntu 22
+- name: Configure the supported PHP stream for Ubuntu 22 or an explicit Ubuntu override
   ansible.builtin.copy:
     dest: "{{ librenms_ubuntu_php_repository_source_file }}"
     owner: root
@@ -348,8 +366,7 @@
       Components: main
       Signed-By: {{ librenms_ubuntu_php_repository_keyring }}
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - (ansible_facts.distribution_major_version | int) == 22
+    - librenms_ubuntu_php_repository_required | bool
     - librenms_enable_extra_repos | bool
     - librenms_ubuntu_php_repository_enabled | bool
 
@@ -392,6 +409,35 @@
     ansible_facts.os_family == 'RedHat'
     and (ansible_facts.distribution_major_version | int) == 8
     and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+
+- name: Inspect selected Ubuntu PHP CLI alternative
+  ansible.builtin.command:
+    argv:
+      - update-alternatives
+      - --query
+      - php
+  register: librenms_ubuntu_php_alternative_query
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.distribution == 'Ubuntu'
+    - librenms_ubuntu_php_versioned | bool
+
+- name: Select the configured Ubuntu PHP CLI stream
+  ansible.builtin.command:
+    argv:
+      - update-alternatives
+      - --set
+      - php
+      - "/usr/bin/php{{ librenms_ubuntu_php_version_effective }}"
+  register: librenms_ubuntu_php_alternative
+  changed_when: true
+  when:
+    - ansible_facts.distribution == 'Ubuntu'
+    - librenms_ubuntu_php_versioned | bool
+    - >-
+      ('Value: /usr/bin/php' ~ librenms_ubuntu_php_version_effective)
+      not in (librenms_ubuntu_php_alternative_query.stdout | default(''))
 
 - name: Validate supported operating-system and runtime versions
   include_tasks: runtime_support.yml

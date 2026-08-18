@@ -135,6 +135,16 @@ EOF
     apt-get update -q
 }
 
+validate_php_stream() {
+    case "$1" in
+        8.2|8.3|8.4|8.5) ;;
+        *)
+            printf 'Unsupported explicit PHP stream: %s\n' "$1" >&2
+            exit 1
+            ;;
+    esac
+}
+
 case "${ID}" in
     ubuntu)
         case "${VERSION_ID}" in
@@ -148,11 +158,30 @@ case "${ID}" in
 
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -q
+        php_stream="${LIBRENMS_PHP_STREAM:-}"
+        if [ -n "${php_stream}" ]; then
+            validate_php_stream "${php_stream}"
+        fi
+
         if [ "${VERSION_ID}" = "22.04" ]; then
+            php_expected_stream="${php_stream:-8.3}"
             configure_ondrej_php_repository
+        elif [ -n "${php_stream}" ]; then
+            php_expected_stream="${php_stream}"
+            configure_ondrej_php_repository
+        else
+            php_expected_stream=""
+        fi
+
+        if [ -n "${php_expected_stream}" ]; then
+            php_package_prefix="php${php_expected_stream}-"
             php_packages=(
-                php8.3-cli php8.3-curl php8.3-fpm php8.3-gd php8.3-gmp
-                php8.3-mbstring php8.3-mysql php8.3-snmp php8.3-xml php8.3-zip
+                "${php_package_prefix}cli" "${php_package_prefix}common"
+                "${php_package_prefix}curl" "${php_package_prefix}fpm"
+                "${php_package_prefix}gd" "${php_package_prefix}gmp"
+                "${php_package_prefix}mbstring" "${php_package_prefix}mysql"
+                "${php_package_prefix}snmp" "${php_package_prefix}xml"
+                "${php_package_prefix}zip"
             )
         else
             php_packages=(
@@ -168,6 +197,18 @@ case "${ID}" in
             python3 python3-pip python3-systemd python3-venv \
             redis-sentinel redis-server rrdcached \
             rrdtool rsync snmp snmpd traceroute unzip util-linux wget whois
+
+        if [ -n "${php_expected_stream}" ]; then
+            update-alternatives --set php "/usr/bin/php${php_expected_stream}" >/dev/null
+        fi
+        php_runtime_stream="$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
+        validate_php_stream "${php_runtime_stream}"
+        if [ -n "${php_expected_stream}" ] &&
+            [ "${php_runtime_stream}" != "${php_expected_stream}" ]; then
+            printf 'Expected PHP %s, found %s.\n' \
+                "${php_expected_stream}" "${php_runtime_stream}" >&2
+            exit 1
+        fi
 
         python3 -m venv --system-site-packages /tmp/librenms-platform-python
         /tmp/librenms-platform-python/bin/python -m pip install \

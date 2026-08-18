@@ -152,6 +152,22 @@
       Supported versions: {{ librenms_supported_php_versions | join(', ') }}.
   when: librenms_manage_php_fpm | bool
 
+- name: Validate the selected Ubuntu PHP stream is active
+  ansible.builtin.assert:
+    that:
+      - >-
+        (librenms_runtime_php_version_command.stdout | trim)
+        == (librenms_ubuntu_php_version_effective | string)
+    fail_msg: >-
+      Ubuntu PHP stream {{ librenms_ubuntu_php_version_effective }} was selected,
+      but the active CLI runtime is
+      {{ librenms_runtime_php_version_command.stdout | trim | default('unknown') }}.
+      Refusing to continue with a mismatched CLI/PHP-FPM stream.
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.distribution == 'Ubuntu'
+    - librenms_ubuntu_php_versioned | bool
+
 - name: Detect nginx runtime version on managed web nodes
   ansible.builtin.command:
     argv:

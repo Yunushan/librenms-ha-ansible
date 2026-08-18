@@ -5,6 +5,8 @@
   gather_facts: true
   serial: 1
   any_errors_fatal: true
+  vars:
+    readiness_template_dir: "{{ playbook_dir }}/../roles/galera/templates"
   roles:
     - role: librenms_defaults
   tasks:
@@ -30,7 +32,7 @@
 
     - name: Deploy bounded Galera readiness agent
       ansible.builtin.template:
-        src: librenms-galera-readiness-agent.sh.j2
+        src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent.sh.j2"
         dest: "{{ librenms_galera_readiness_agent_path }}"
         owner: root
         group: root
@@ -39,7 +41,7 @@
 
     - name: Deploy bounded Galera readiness socket unit
       ansible.builtin.template:
-        src: librenms-galera-readiness-agent.socket.j2
+        src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent.socket.j2"
         dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_socket_unit }}"
         owner: root
         group: root
@@ -47,7 +49,7 @@
 
     - name: Deploy bounded Galera readiness worker unit
       ansible.builtin.template:
-        src: librenms-galera-readiness-agent@.service.j2
+        src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent@.service.j2"
         dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_service_unit }}"
         owner: root
         group: root

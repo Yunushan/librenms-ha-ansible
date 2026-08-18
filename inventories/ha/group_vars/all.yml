@@ -13,6 +13,11 @@ ansible_python_interpreter: /opt/librenms-ha-ansible/python/bin/python
 librenms_fqdn: librenms.example.com
 librenms_timezone: Etc/UTC
 
+# Ubuntu 22.04 defaults to the pinned PHP 8.3 PPA stream. Ubuntu 24.04 and
+# 26.04 use their native PHP stream unless an explicit, staged stream is set.
+# Set this to 8.4 or 8.5 only after validating the PPA packages on a clone:
+# librenms_ubuntu_php_version_override: "8.5"
+
 librenms_app_key: CHANGE_ME_USE_GENERATE_SECRETS
 
 # Production readiness checks this encrypted vault file by default. For secrets

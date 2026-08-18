@@ -96,20 +96,29 @@ librenms_haproxy_service_name: haproxy
 librenms_keepalived_service_name: keepalived
 librenms_glusterd_service_name: glusterd
 
+librenms_ubuntu_php_version_effective: >-
+  {{
+    librenms_ubuntu_php_version_override
+    if (librenms_ubuntu_php_version_override | default('') | trim | length > 0)
+    else librenms_ubuntu_php_version
+  }}
 librenms_ubuntu_php_versioned: >-
   {{
     ansible_facts.distribution == 'Ubuntu'
-    and (ansible_facts.distribution_major_version | int) == 22
+    and (
+      (ansible_facts.distribution_major_version | int) == 22
+      or (librenms_ubuntu_php_version_override | default('') | trim | length > 0)
+    )
   }}
 librenms_php_package_prefix: >-
   {{
-    'php' ~ librenms_ubuntu_php_version ~ '-'
+    'php' ~ librenms_ubuntu_php_version_effective ~ '-'
     if librenms_ubuntu_php_versioned | bool
     else 'php-'
   }}
 librenms_php_json_package: >-
   {{
-    'php' ~ librenms_ubuntu_php_version ~ '-common'
+    'php' ~ librenms_ubuntu_php_version_effective ~ '-common'
     if librenms_ubuntu_php_versioned | bool
     else 'php-json'
   }}

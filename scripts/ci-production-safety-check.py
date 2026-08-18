@@ -825,11 +825,10 @@ def main() -> int:
         if (
             "ppa:ondrej/php" not in (common_tasks + default_values)
             or "librenms_ubuntu_php_repository_enabled" not in common_tasks
-            or "(ansible_facts.distribution_major_version | int) == 22"
-            not in common_tasks
+            or "librenms_ubuntu_php_repository_required" not in common_tasks
         ):
             failures.append(
-                "Ubuntu repository management must use deb822_repository except for the explicit Ubuntu 22 PHP PPA"
+                "Ubuntu PHP repository management must use the verified deb822 source and explicit repository-required guard"
             )
 
     if "deb822_repository:" not in common_tasks:

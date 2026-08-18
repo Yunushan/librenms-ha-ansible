@@ -293,7 +293,7 @@ production acceptance test on your exact image and architecture.
 
 | Distro | Tier | Notes |
 |---|---|---|
-| Ubuntu 22.04, 24.04, 26.04 | Primary | Ubuntu 22.04 selects PHP 8.3 from the documented PHP PPA; 24.04/26.04 use native supported streams; all are covered by platform guardrails |
+| Ubuntu 22.04, 24.04, 26.04 | Primary | Ubuntu 22.04 selects PHP 8.3 from the documented PHP PPA; 24.04/26.04 use native streams by default and can opt into verified PHP 8.4/8.5 PPA streams; all are covered by platform guardrails |
 | Debian | Primary | Best fit with upstream LibreNMS docs |
 | Linux Mint | Primary-ish | Uses Debian-family logic |
 | RHEL / Red Hat Enterprise Linux 8.10+, 9.4+, 10.x | Primary source path | Uses the same EL mappings as Rocky/Alma; subscribed RHEL images require an operator acceptance run |
@@ -305,6 +305,16 @@ production acceptance test on your exact image and architecture.
 | Manjaro Linux | Best-effort | Uses Arch-family logic |
 | Alpine Linux | Best-effort | OpenRC / package differences may need overrides |
 | Gentoo | Best-effort | Package atom and service differences may need overrides |
+
+Ubuntu 24.04 and 26.04 keep their native PHP package stream unless you set
+`librenms_ubuntu_php_version_override` to `8.4` or `8.5` in the inventory. The
+role then installs the matching versioned packages from the verified Ondrej PHP
+PPA, selects the matching CLI alternative, and derives the matching PHP-FPM
+service before the LibreNMS role runs. The default is intentionally unchanged;
+stage the override on a clone and validate Composer, PHP-FPM, and the LibreNMS
+web probe before using it in production. RHEL-family 8/9 can use PHP 8.4/8.5
+only with an explicitly reviewed Remi release package; RHEL-family 10 uses its
+native PHP stream.
 
 ### Reality check
 

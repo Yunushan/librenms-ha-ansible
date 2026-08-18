@@ -1143,6 +1143,32 @@ Restore should be treated as a maintenance event:
 Do not restore one Galera member with old data while the rest of the cluster is
 running with newer writes.
 
+## PHP Stream Selection
+
+Ubuntu 22.04 uses the verified Ondrej PHP PPA for the default PHP 8.3 stream.
+Ubuntu 24.04 and 26.04 use their native PHP stream by default. To select PHP
+8.4 or 8.5 explicitly on Ubuntu, set the override in the inventory:
+
+```yaml
+librenms_ubuntu_php_version_override: "8.5"
+```
+
+The role validates the version, verifies the PPA signing key, installs the
+matching versioned PHP CLI/FPM packages, selects the matching `php` alternative,
+and lets the application role derive the matching PHP-FPM unit. An empty
+override is the safe default and does not add the PPA on Ubuntu 24.04/26.04.
+Stage an explicit stream on a clone first, then run the PHP runtime check,
+Composer validation, and the VIP web-health probe before changing production.
+
+RHEL-family 8/9 can select PHP 8.4 or 8.5 only when
+`librenms_redhat_enable_remi: true` and a reviewed
+`librenms_redhat_remi_release_url` are supplied. RHEL-family 10 uses its native
+PHP packages and is not switched through the Remi module path.
+
+Do not use the selector as an in-place major-version upgrade procedure. Take a
+database/config backup, use the rolling maintenance workflow, and verify every
+node's PHP CLI, PHP-FPM, Composer, and LibreNMS web endpoint.
+
 ## MariaDB Series Selection
 
 The default `librenms_mariadb_repository_mode: distro` uses the operating
