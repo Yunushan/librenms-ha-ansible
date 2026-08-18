@@ -726,6 +726,12 @@ librenms_galera_readiness_agent_path: /usr/local/sbin/librenms-galera-readiness-
 librenms_galera_readiness_agent_socket_unit: librenms-galera-readiness-agent.socket
 librenms_galera_readiness_agent_service_unit: librenms-galera-readiness-agent@.service
 librenms_galera_readiness_agent_port: 9201
+# Keep accepted socket workers bounded. The reset helper closes the listener
+# and reaps every instance before a repair or rolling Galera restart.
+librenms_galera_readiness_agent_backlog: 128
+librenms_galera_readiness_agent_max_connections: 128
+librenms_galera_readiness_agent_reset_timeout: 15
+librenms_galera_readiness_agent_reset_attempts: 10
 # Bound each socket-activated probe worker so a stalled system call cannot
 # exhaust the listening socket backlog.
 librenms_galera_readiness_agent_service_timeout: 5s

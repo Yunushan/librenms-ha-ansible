@@ -4,6 +4,8 @@ set -euo pipefail
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent.sh.j2"
 readonly SERVICE_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent@.service.j2"
+readonly SOCKET_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent.socket.j2"
+readonly RESET_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent-reset.sh.j2"
 
 assert_output() {
     local expected="$1"
@@ -67,6 +69,26 @@ main() {
     }
     grep -Fq 'KillMode=control-group' "${SERVICE_TEMPLATE}" || {
         printf 'Readiness-agent service must terminate the whole probe cgroup.\n' >&2
+        return 1
+    }
+    grep -Fq 'Backlog={{ librenms_galera_readiness_agent_backlog | int }}' "${SOCKET_TEMPLATE}" || {
+        printf 'Readiness-agent socket must use an explicit bounded backlog.\n' >&2
+        return 1
+    }
+    grep -Fq 'MaxConnections={{ librenms_galera_readiness_agent_max_connections | int }}' "${SOCKET_TEMPLATE}" || {
+        printf 'Readiness-agent socket must cap accepted workers.\n' >&2
+        return 1
+    }
+    grep -Fq 'systemctl_bounded stop "${SOCKET_UNIT}"' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must close the listener before reaping workers.\n' >&2
+        return 1
+    }
+    grep -Fq 'list-units --all --plain --no-legend --full "${SERVICE_GLOB}"' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must enumerate accepted worker instances.\n' >&2
+        return 1
+    }
+    grep -Fq 'systemctl_bounded kill --kill-who=all --signal=TERM' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must terminate stale worker instances.\n' >&2
         return 1
     }
     if grep -Fq 'systemctl is-active' "${TEMPLATE}"; then

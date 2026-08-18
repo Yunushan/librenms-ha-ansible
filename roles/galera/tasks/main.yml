@@ -42,6 +42,18 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
 
+- name: Deploy Galera readiness agent reset helper
+  template:
+    src: librenms-galera-readiness-agent-reset.sh.j2
+    dest: /usr/local/sbin/librenms-galera-readiness-agent-reset
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /bin/bash -n %s
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
 - name: Deploy Galera readiness agent socket
   template:
     src: librenms-galera-readiness-agent.socket.j2

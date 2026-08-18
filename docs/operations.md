@@ -920,6 +920,19 @@ Successful socket-activated Galera readiness-agent lifecycle messages are
 filtered before local storage and forwarding, but agent failures remain
 visible. This queue cannot add delivery acknowledgement to UDP senders.
 
+If a readiness agent stops answering after a burst of health checks, use the
+bounded repair target instead of a full site run. It closes the listener,
+reaps accepted `librenms-galera-readiness-agent@*.service` workers, and then
+restarts the socket without changing MariaDB data:
+
+```bash
+make readiness-repair-ask-become-pass READINESS_REPAIR_LIMIT=lnms3
+```
+
+The socket has an explicit backlog and connection cap, and each worker has a
+bounded database query and service timeout. A continuing timeout should be
+investigated as a local MariaDB/Galera readiness or firewall problem.
+
 After all nodes return, check the self-healing units before rerunning Ansible:
 
 ```bash

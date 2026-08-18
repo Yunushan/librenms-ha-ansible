@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -u
+
+readonly SOCKET_UNIT={{ librenms_galera_readiness_agent_socket_unit | quote }}
+readonly SERVICE_GLOB={{ (librenms_galera_readiness_agent_service_unit | regex_replace('@\\.service$', '@*.service')) | quote }}
+readonly COMMAND_TIMEOUT={{ librenms_galera_readiness_agent_reset_timeout | int }}
+readonly QUIESCE_ATTEMPTS={{ librenms_galera_readiness_agent_reset_attempts | int }}
+
+systemctl_bounded() {
+  timeout "${COMMAND_TIMEOUT}" systemctl "$@"
+}
+
+list_active_workers() {
+  systemctl_bounded list-units --all --plain --no-legend --full "${SERVICE_GLOB}" 2>/dev/null \
+    | awk '$3 == "active" || $3 == "activating" || $3 == "deactivating" { print $1 }'
+}
+
+reap_workers() {
+  local workers="$1"
+
+  [ -n "${workers}" ] || return 0
+  # Unit names cannot contain whitespace. Passing the complete discovered set
+  # keeps cleanup bounded even when the socket backlog was previously full.
+  # shellcheck disable=SC2086
+  systemctl_bounded stop --no-block ${workers} >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  systemctl_bounded kill --kill-who=all --signal=TERM ${workers} >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  systemctl_bounded reset-failed ${workers} >/dev/null 2>&1 || true
+}
+
+# Close the listener first so no new accepted workers appear while stale
+# connection units are being reaped.
+systemctl_bounded stop "${SOCKET_UNIT}" >/dev/null 2>&1 || true
+
+reap_workers "$(list_active_workers)"
+
+for ((attempt = 1; attempt <= QUIESCE_ATTEMPTS; attempt++)); do
+  remaining="$(list_active_workers)"
+  if [ -z "${remaining}" ]; then
+    systemctl_bounded reset-failed "${SERVICE_GLOB}" >/dev/null 2>&1 || true
+    exit 0
+  fi
+
+  reap_workers "${remaining}"
+  sleep 1
+done
+
+printf 'readiness agent workers did not stop: %s\n' "$(list_active_workers | tr '\n' ' ')" >&2
+exit 1

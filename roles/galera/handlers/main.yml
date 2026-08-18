@@ -1,11 +1,8 @@
 ---
 - name: Clear stale Galera readiness agent workers
-  ansible.builtin.shell: |-
-    set -u
-    pattern="{{ librenms_galera_readiness_agent_service_unit | regex_replace('@\\.service$', '@*.service') }}"
-    timeout 15 systemctl stop --no-block "${pattern}" >/dev/null 2>&1 || true
-    timeout 15 systemctl kill --kill-who=all "${pattern}" >/dev/null 2>&1 || true
-    timeout 15 systemctl reset-failed "${pattern}" >/dev/null 2>&1 || true
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/librenms-galera-readiness-agent-reset
   changed_when: false
   when:
     - librenms_db_mode == 'galera'

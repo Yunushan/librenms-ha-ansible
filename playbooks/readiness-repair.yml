@@ -39,6 +39,15 @@
         mode: "0750"
         validate: /bin/bash -n %s
 
+    - name: Deploy bounded Galera readiness agent reset helper
+      ansible.builtin.template:
+        src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent-reset.sh.j2"
+        dest: /usr/local/sbin/librenms-galera-readiness-agent-reset
+        owner: root
+        group: root
+        mode: "0750"
+        validate: /bin/bash -n %s
+
     - name: Deploy bounded Galera readiness socket unit
       ansible.builtin.template:
         src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent.socket.j2"
@@ -56,12 +65,9 @@
         mode: "0644"
 
     - name: Stop stale readiness workers before socket restart
-      ansible.builtin.shell: |-
-        set -u
-        pattern="{{ librenms_galera_readiness_agent_service_unit | regex_replace('@\\.service$', '@*.service') }}"
-        timeout 15 systemctl stop --no-block "${pattern}" >/dev/null 2>&1 || true
-        timeout 15 systemctl kill --kill-who=all "${pattern}" >/dev/null 2>&1 || true
-        timeout 15 systemctl reset-failed "${pattern}" >/dev/null 2>&1 || true
+      ansible.builtin.command:
+        argv:
+          - /usr/local/sbin/librenms-galera-readiness-agent-reset
       changed_when: false
 
     - name: Restart Galera readiness socket
@@ -82,6 +88,6 @@
         executable: /bin/bash
       register: readiness_repair_probe
       changed_when: false
-      retries: 3
-      delay: 2
+      retries: "{{ librenms_galera_readiness_agent_probe_retries | int }}"
+      delay: "{{ librenms_galera_readiness_agent_probe_delay | int }}"
       until: readiness_repair_probe.rc == 0
