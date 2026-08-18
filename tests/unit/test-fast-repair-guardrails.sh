@@ -9,6 +9,8 @@ grep -q 'gather_facts: false' "${PLAYBOOK}"
 grep -q 'ansible.builtin.raw:' "${TASKS}"
 grep -q 'MariaDB/Galera bootstrap is never attempted' "${TASKS}"
 grep -q 'FAST_REPAIR_RESULT=ok' "${TASKS}"
+grep -q 'systemctl_bounded enable' "${TASKS}"
+grep -q 'after .*bounded probes' "${TASKS}"
 
 if grep -Eq 'systemctl(_bounded)?[[:space:]]+(start|restart)[[:space:]]+mariadb|safe_to_bootstrap|grastate\.dat' "${TASKS}"; then
     echo "fast repair must not bootstrap or mutate Galera state" >&2

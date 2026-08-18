@@ -69,11 +69,13 @@ The repair path may:
 
 - cancel stale LibreNMS maintenance jobs;
 - stop only stuck LibreNMS runtime jobs and reset their failed state;
-- start inactive web, PHP-FPM, Redis/Sentinel, HAProxy, Keepalived, Gluster,
-  rrdcached, and LibreNMS timer units;
+- enable and start inactive web, PHP-FPM, Redis/Sentinel, HAProxy, Keepalived,
+  Gluster, rrdcached, and LibreNMS timer units;
 - repair the configured RRD mount using the existing `/etc/fstab` entry,
   including a lazy detach of the exact stale mountpoint;
-- verify local Galera state without changing it.
+- verify local Galera state with bounded retries without changing it. A
+  transient SQL/socket or Galera state response is retried before the repair
+  is reported failed.
 
 It never stops a healthy MariaDB service, bootstraps Galera, edits
 `grastate.dat`, runs database migrations, runs `daily.sh`, updates LibreNMS,

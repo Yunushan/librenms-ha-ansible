@@ -89,6 +89,19 @@
     ensure_started() {
       unit="$1"
       unit_exists "${unit}" || return 0
+      enabled_state="$(probe systemctl is-enabled "${unit}" 2>/dev/null || true)"
+      case "${enabled_state}" in
+        enabled|enabled-runtime|static|indirect|alias)
+          ;;
+        *)
+          echo "enabling ${unit}"
+          if ! systemctl_bounded enable "${unit}" >/dev/null 2>&1; then
+            echo "failed to enable ${unit}" >&2
+            return 1
+          fi
+          REPAIR_CHANGED=1
+          ;;
+      esac
       state="$(unit_state "${unit}")"
       case "${state}" in
         active) return 0 ;;
@@ -300,13 +313,24 @@
     done
 
     if [ "${DB_MODE}" = galera ] && command -v mysql >/dev/null 2>&1; then
-      wsrep="$(bounded mysql --protocol=socket --batch --skip-column-names -e \
-        "SELECT CONCAT(@@wsrep_cluster_status, '|', @@wsrep_local_state_comment);" \
-        2>/dev/null || true)"
-      if printf '%s\n' "${wsrep}" | grep -qx 'Primary|Synced'; then
+      wsrep=""
+      wsrep_ok=false
+      attempt=1
+      while [ "${attempt}" -le "${MAX_ATTEMPTS}" ]; do
+        wsrep="$(probe mysql --protocol=socket --batch --skip-column-names -e \
+          "SELECT CONCAT(@@wsrep_cluster_status, '|', @@wsrep_local_state_comment);" \
+          2>/dev/null || true)"
+        if printf '%s\n' "${wsrep}" | grep -qx 'Primary|Synced'; then
+          wsrep_ok=true
+          break
+        fi
+        [ "${attempt}" -lt "${MAX_ATTEMPTS}" ] && sleep "${POLL_DELAY}"
+        attempt=$((attempt + 1))
+      done
+      if [ "${wsrep_ok}" = true ]; then
         echo "Galera local state: Primary|Synced"
       else
-        echo "Galera is not Primary/Synced; fast repair will not bootstrap it (state: ${wsrep:-unavailable})" >&2
+        echo "Galera is not Primary/Synced after ${MAX_ATTEMPTS} bounded probes; fast repair will not bootstrap it (state: ${wsrep:-unavailable})" >&2
         REPAIR_FAILURE=1
       fi
     fi
