@@ -79,15 +79,100 @@
 
     - name: Verify local readiness agent after repair
       ansible.builtin.shell: |-
-        timeout 5 bash -c '
-          exec 3<>/dev/tcp/"$1"/"$2"
-          IFS= read -r response <&3
-          [ "${response}" = up ]
-        ' _ "{{ ansible_host | default(inventory_hostname) }}" "{{ librenms_galera_readiness_agent_port }}"
+        set +e
+        response="$({
+          timeout 5 bash -c '
+            exec 3<>/dev/tcp/"$1"/"$2"
+            IFS= read -r response <&3
+            printf "%s\n" "${response}"
+            [ "${response}" = up ]
+          ' _ "{{ ansible_host | default(inventory_hostname) }}" "{{ librenms_galera_readiness_agent_port }}"
+        })"
+        probe_rc=$?
+        printf 'readiness_response=%s\n' "${response}"
+        printf 'readiness_probe_rc=%s\n' "${probe_rc}"
+        exit "${probe_rc}"
       args:
         executable: /bin/bash
       register: readiness_repair_probe
       changed_when: false
+      failed_when: false
       retries: "{{ librenms_galera_readiness_agent_probe_retries | int }}"
       delay: "{{ librenms_galera_readiness_agent_probe_delay | int }}"
       until: readiness_repair_probe.rc == 0
+
+    - name: Capture direct readiness-agent result after failed socket probe
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "{{ librenms_galera_readiness_agent_probe_timeout | int }}"
+          - "{{ librenms_galera_readiness_agent_path }}"
+      register: readiness_repair_direct_probe
+      changed_when: false
+      failed_when: false
+      when: readiness_repair_probe.rc != 0
+
+    - name: Capture Galera state after failed readiness probe
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "{{ librenms_galera_readiness_agent_query_timeout | int }}"
+          - mysql
+          - --protocol=socket
+          - "--socket={{ librenms_mariadb_socket }}"
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+      register: readiness_repair_galera_state
+      changed_when: false
+      failed_when: false
+      when: readiness_repair_probe.rc != 0
+
+    - name: Check for a local Galera backend drain marker after failed probe
+      ansible.builtin.stat:
+        path: "{{ librenms_galera_backend_drain_path }}"
+      register: readiness_repair_backend_drain
+      when: readiness_repair_probe.rc != 0
+
+    - name: Capture readiness socket status after failed probe
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_galera_readiness_agent_socket_unit }}"
+          - --no-pager
+          - -l
+      register: readiness_repair_socket_status
+      changed_when: false
+      failed_when: false
+      when: readiness_repair_probe.rc != 0
+
+    - name: Fail with readiness-agent diagnostics
+      ansible.builtin.fail:
+        msg: |-
+          Local Galera readiness agent did not report "up" after repair on {{ inventory_hostname }}.
+
+          Socket probe:
+          {{ readiness_repair_probe.stdout | default('') }}
+          {{ readiness_repair_probe.stderr | default('') }}
+
+          Direct agent result:
+          {{ readiness_repair_direct_probe.stdout | default('') }}
+          {{ readiness_repair_direct_probe.stderr | default('') }}
+
+          Galera state:
+          {{ readiness_repair_galera_state.stdout | default('') }}
+          {{ readiness_repair_galera_state.stderr | default('') }}
+
+          Backend drain marker present:
+          {{ readiness_repair_backend_drain.stat.exists | default(false) }}
+
+          Readiness socket status:
+          {{ readiness_repair_socket_status.stdout | default('') }}
+          {{ readiness_repair_socket_status.stderr | default('') }}
+
+          The repair deliberately leaves HAProxy protection enabled when the
+          local Galera member is not Primary/ready/Synced. Do not bypass this
+          check; resolve the reported Galera state or stale drain marker first.
+      when: readiness_repair_probe.rc != 0

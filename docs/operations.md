@@ -930,8 +930,20 @@ make readiness-repair-ask-become-pass READINESS_REPAIR_LIMIT=lnms3
 ```
 
 The socket has an explicit backlog and connection cap, and each worker has a
-bounded database query and service timeout. A continuing timeout should be
-investigated as a local MariaDB/Galera readiness or firewall problem.
+bounded database query and service timeout. The repair now reports the socket
+response, direct-agent response, Galera status, drain-marker state, and socket
+unit status when the final probe is not `up`:
+
+* `down` means the local MariaDB member is not simultaneously `Primary`,
+  `wsrep_ready=ON`, and `Synced`; repair Galera before changing HAProxy.
+* `drain` means `/run/librenms-galera-backend-drain` is present. Remove it only
+  through the normal drain-exit procedure after confirming no maintenance is
+  active.
+* A timeout or an empty response means the socket or its activated worker is
+  still unhealthy and should be investigated with the reported unit status.
+
+The repair deliberately does not convert `down` or `drain` into `up`, because
+that could send traffic to a non-authoritative database member.
 
 After all nodes return, check the self-healing units before rerunning Ansible:
 
