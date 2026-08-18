@@ -10,6 +10,7 @@
     MANAGER_ATTEMPTS={{ librenms_fast_repair_manager_attempts | int }}
     MANAGER_PROBE_TIMEOUT={{ librenms_fast_repair_manager_probe_timeout | int }}
     RRD_PATH={{ librenms_fast_repair_rrd_mountpoint | quote }}
+    GLUSTER_VOLUME={{ librenms_gluster_volume_name | default('librenms-rrd') | quote }}
     RRD_MODE={{ librenms_fast_repair_rrd_mode | quote }}
     LIBRENMS_USER={{ librenms_fast_repair_user | quote }}
     REPAIR_MOUNT={{ librenms_fast_repair_mount_repair_enabled | bool | ternary('true', 'false') | quote }}
@@ -22,6 +23,7 @@
     REPAIR_CHANGED=0
     RRD_MOUNT_CHANGED=0
     RRD_SHARED=false
+    RRD_READY=false
     case "${RRD_MODE}" in
       glusterfs|external|external_nfs|nfs) RRD_SHARED=true ;;
     esac
@@ -216,9 +218,30 @@
 
       bounded mkdir -p "${RRD_PATH}" || return 1
       echo "mounting the configured RRD filesystem at ${RRD_PATH}"
-      bounded mount "${RRD_PATH}" || return 1
+      mount_output="$(bounded mount "${RRD_PATH}" 2>&1)"
+      mount_rc=$?
+      if [ "${mount_rc}" -ne 0 ]; then
+        [ -z "${mount_output}" ] || printf '%s\n' "${mount_output}" >&2
+        echo "mount command failed for ${RRD_PATH} (rc=${mount_rc})" >&2
+        return "${mount_rc}"
+      fi
+      [ -z "${mount_output}" ] || printf '%s\n' "${mount_output}"
       RRD_MOUNT_CHANGED=1
       mount_is_healthy
+    }
+
+    print_rrd_mount_diagnostics() {
+      echo "RRD mount diagnostics for ${RRD_PATH}:" >&2
+      echo "--- fstab entry ---" >&2
+      probe grep -F "${RRD_PATH}" /etc/fstab >&2 || true
+      echo "--- mount table ---" >&2
+      probe findmnt --target "${RRD_PATH}" --output TARGET,SOURCE,FSTYPE,OPTIONS >&2 || true
+      echo "--- Gluster service ---" >&2
+      probe systemctl --no-pager --full status glusterd >&2 || true
+      echo "--- Gluster peers ---" >&2
+      probe gluster peer status >&2 || true
+      echo "--- Gluster volume ---" >&2
+      probe gluster volume status "${GLUSTER_VOLUME}" >&2 || true
     }
 
     if [ "${CONFIRM}" != true ]; then
@@ -255,6 +278,7 @@
     if [ "${RRD_SHARED}" = true ]; then
       if ! repair_rrd_mount; then
         echo "RRD mount repair failed for ${RRD_PATH}" >&2
+        print_rrd_mount_diagnostics
         REPAIR_FAILURE=1
       else
         if [ "${RRD_MOUNT_CHANGED}" -ne 0 ]; then
@@ -268,15 +292,30 @@
       fi
     fi
 
-    if ! mount_is_healthy && [ "${RRD_SHARED}" = true ]; then
+    if mount_is_healthy; then
+      RRD_READY=true
+    else
+      if [ "${RRD_SHARED}" = true ]; then
+        echo "RRD mount is not healthy; LibreNMS and RRDCacheD will remain stopped" >&2
+      else
+        echo "local RRD directory is not writable: ${RRD_PATH}" >&2
+      fi
       REPAIR_FAILURE=1
     fi
 
-    for unit in nginx haproxy keepalived librenms.service; do
+    for unit in nginx haproxy keepalived; do
       if ! ensure_started "${unit}"; then
         REPAIR_FAILURE=1
       fi
     done
+
+    if [ "${RRD_READY}" = true ]; then
+      if ! ensure_started librenms.service; then
+        REPAIR_FAILURE=1
+      fi
+    else
+      echo "skipping librenms.service until the RRD mount is healthy" >&2
+    fi
 
     if [ "${REDIS_MODE}" = sentinel ]; then
       for unit in redis-server redis-sentinel; do
@@ -290,10 +329,12 @@
       fi
     fi
 
-    if [ "${RRD_SHARED}" = true ] || mount_is_healthy; then
+    if [ "${RRD_READY}" = true ]; then
       if ! ensure_started rrdcached; then
         REPAIR_FAILURE=1
       fi
+    else
+      echo "skipping rrdcached until the RRD mount is healthy" >&2
     fi
 
     php_units="$(probe systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}' || true)"
@@ -303,14 +344,18 @@
       fi
     done
 
-    for timer in \
-      librenms-scheduler.timer \
-      librenms-ha-startup-repair.timer \
-      librenms-dispatcher-ha-recover.timer; do
-      if ! ensure_started "${timer}"; then
-        REPAIR_FAILURE=1
-      fi
-    done
+    if [ "${RRD_READY}" = true ]; then
+      for timer in \
+        librenms-scheduler.timer \
+        librenms-ha-startup-repair.timer \
+        librenms-dispatcher-ha-recover.timer; do
+        if ! ensure_started "${timer}"; then
+          REPAIR_FAILURE=1
+        fi
+      done
+    else
+      echo "skipping LibreNMS maintenance timers until the RRD mount is healthy" >&2
+    fi
 
     if [ "${DB_MODE}" = galera ] && command -v mysql >/dev/null 2>&1; then
       wsrep=""

@@ -77,6 +77,11 @@ The repair path may:
   transient SQL/socket or Galera state response is retried before the repair
   is reported failed.
 
+If shared RRD recovery fails, the repair reports bounded Gluster and mount
+diagnostics and leaves `librenms.service`, `rrdcached`, and LibreNMS
+maintenance timers stopped. This prevents them from writing to the local
+mountpoint directory while the shared filesystem is unavailable.
+
 It never stops a healthy MariaDB service, bootstraps Galera, edits
 `grastate.dat`, runs database migrations, runs `daily.sh`, updates LibreNMS,
 or deletes an RRD/Gluster directory. A Galera `Primary|Synced` failure still

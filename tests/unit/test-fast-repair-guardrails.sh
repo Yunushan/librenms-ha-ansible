@@ -11,6 +11,11 @@ grep -q 'MariaDB/Galera bootstrap is never attempted' "${TASKS}"
 grep -q 'FAST_REPAIR_RESULT=ok' "${TASKS}"
 grep -q 'systemctl_bounded enable' "${TASKS}"
 grep -q 'after .*bounded probes' "${TASKS}"
+grep -q 'RRD_READY=false' "${TASKS}"
+grep -q 'print_rrd_mount_diagnostics' "${TASKS}"
+grep -q 'skipping librenms.service until the RRD mount is healthy' "${TASKS}"
+grep -q 'skipping rrdcached until the RRD mount is healthy' "${TASKS}"
+grep -q 'skipping LibreNMS maintenance timers until the RRD mount is healthy' "${TASKS}"
 
 if grep -Eq 'systemctl(_bounded)?[[:space:]]+(start|restart)[[:space:]]+mariadb|safe_to_bootstrap|grastate\.dat' "${TASKS}"; then
     echo "fast repair must not bootstrap or mutate Galera state" >&2
