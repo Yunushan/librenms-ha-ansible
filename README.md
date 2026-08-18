@@ -915,12 +915,18 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml \
 ```
 
 The live TCP checks cover the Web backend path, Galera ports, Redis/Sentinel
-ports, and GlusterFS management ports. Gluster brick range probing is disabled
-by default because brick port allocation can vary; enable a representative
-low/high probe with:
+ports, and the persistent GlusterFS management listener (TCP 24007). TCP 24008
+is not assumed to be an active listener on the default TCP-only Gluster
+profile; add it explicitly when using a Gluster transport that configures it.
+Gluster brick range probing is disabled by default because brick port allocation
+can vary; enable a representative low/high probe with:
 
 ```yaml
 librenms_doctor_network_check_gluster_brick_ports: true
+# Only for a deployment with an active TCP/24008 listener:
+# librenms_doctor_network_gluster_tcp_ports:
+#   - 24007
+#   - 24008
 ```
 
 `doctor.yml` is not a replacement for `validate.yml`. Use `doctor.yml` before

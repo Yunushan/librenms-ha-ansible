@@ -42,9 +42,11 @@ librenms_doctor_network_galera_tcp_ports:
 librenms_doctor_network_redis_tcp_ports:
   - 6379
   - 26379
+# Gluster's persistent TCP management listener is 24007. TCP/24008 is used
+# for RDMA-capable deployments and is not a listener on this project's normal
+# TCP-only Gluster nodes; add it explicitly when that transport is configured.
 librenms_doctor_network_gluster_tcp_ports:
   - 24007
-  - 24008
 librenms_doctor_network_check_gluster_brick_ports: false
 librenms_doctor_network_gluster_brick_probe_ports:
   - 49152

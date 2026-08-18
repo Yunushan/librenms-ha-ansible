@@ -135,6 +135,11 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 #
 # librenms_doctor_network_tcp_checks_enabled: false
 # librenms_doctor_network_check_gluster_brick_ports: false
+# The default Gluster live check probes persistent TCP/24007 only. Keep
+# 24008 here only when this deployment explicitly enables that listener.
+# librenms_doctor_network_gluster_tcp_ports:
+#   - 24007
+#   - 24008
 # Galera TCP 4444 (SST) and 4568 (IST) are transient transfer listeners and
 # are intentionally excluded from the default live matrix. Add them only
 # during an active, time-bounded state-transfer observation:
