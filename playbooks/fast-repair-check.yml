@@ -10,7 +10,8 @@
         printf 'FAST_REPAIR_HOST=%s\n' "$(hostname)"
         if command -v sudo >/dev/null 2>&1; then
           printf 'SUDO_PATH=%s\n' "$(command -v sudo)"
-          if sudo -n -v >/dev/null 2>&1; then
+          sudo_probe_uid="$(sudo -n id -u 2>/dev/null || true)"
+          if [ "${sudo_probe_uid}" = "0" ]; then
             printf 'SUDO_MODE=passwordless\n'
           else
             printf 'SUDO_MODE=password-required-or-denied\n'
