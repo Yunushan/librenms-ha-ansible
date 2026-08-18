@@ -35,7 +35,9 @@
     group: root
     mode: "0750"
     validate: /bin/bash -n %s
-  notify: Restart Galera readiness agent socket
+  notify:
+    - Clear stale Galera readiness agent workers
+    - Restart Galera readiness agent socket
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
@@ -47,7 +49,9 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Restart Galera readiness agent socket
+  notify:
+    - Clear stale Galera readiness agent workers
+    - Restart Galera readiness agent socket
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
@@ -59,7 +63,9 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Restart Galera readiness agent socket
+  notify:
+    - Clear stale Galera readiness agent workers
+    - Restart Galera readiness agent socket
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool

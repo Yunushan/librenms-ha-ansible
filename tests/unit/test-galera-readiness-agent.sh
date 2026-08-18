@@ -3,17 +3,16 @@ set -euo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent.sh.j2"
+readonly SERVICE_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent@.service.j2"
 
 assert_output() {
     local expected="$1"
-    local service_state="$2"
-    local status="$3"
-    local drain_state="${4:-absent}"
+    local status="$2"
+    local drain_state="${3:-absent}"
     local actual
 
     actual="$(
-        SERVICE_STATE="${service_state}" \
-            MOCK_STATUS="${status}" \
+        MOCK_STATUS="${status}" \
             MOCK_DRAIN_STATE="${drain_state}" \
             run_agent
     )"
@@ -29,10 +28,6 @@ run_agent() {
     trap 'rm -rf "${temporary_dir}"' RETURN
 
     mkdir -p "${temporary_dir}/bin"
-    cat >"${temporary_dir}/bin/systemctl" <<'EOF'
-#!/usr/bin/env bash
-[ "${SERVICE_STATE}" = "active" ]
-EOF
     cat >"${temporary_dir}/bin/timeout" <<'EOF'
 #!/usr/bin/env bash
 shift
@@ -42,8 +37,7 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "${MOCK_STATUS}"
 EOF
-    chmod +x "${temporary_dir}/bin/systemctl" "${temporary_dir}/bin/timeout" \
-        "${temporary_dir}/bin/mysql"
+    chmod +x "${temporary_dir}/bin/timeout" "${temporary_dir}/bin/mysql"
 
     if [ "${MOCK_DRAIN_STATE:-absent}" = "present" ]; then
         touch "${temporary_dir}/backend-drain"
@@ -61,12 +55,24 @@ EOF
 }
 
 main() {
-    assert_output drain active $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced' present
-    assert_output up active $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced'
-    assert_output down active $'wsrep_cluster_status\tNon-Primary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced'
-    assert_output down active $'wsrep_cluster_status\tPrimary\nwsrep_ready\tOFF\nwsrep_local_state_comment\tSynced'
-    assert_output down active $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tDonor/Desynced'
-    assert_output down inactive $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced'
+    assert_output drain $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced' present
+    assert_output up $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced'
+    assert_output down $'wsrep_cluster_status\tNon-Primary\nwsrep_ready\tON\nwsrep_local_state_comment\tSynced'
+    assert_output down $'wsrep_cluster_status\tPrimary\nwsrep_ready\tOFF\nwsrep_local_state_comment\tSynced'
+    assert_output down $'wsrep_cluster_status\tPrimary\nwsrep_ready\tON\nwsrep_local_state_comment\tDonor/Desynced'
+
+    grep -Fq 'TimeoutStartSec={{ librenms_galera_readiness_agent_service_timeout }}' "${SERVICE_TEMPLATE}" || {
+        printf 'Readiness-agent service must have a bounded startup timeout.\n' >&2
+        return 1
+    }
+    grep -Fq 'KillMode=control-group' "${SERVICE_TEMPLATE}" || {
+        printf 'Readiness-agent service must terminate the whole probe cgroup.\n' >&2
+        return 1
+    }
+    if grep -Fq 'systemctl is-active' "${TEMPLATE}"; then
+        printf 'Readiness agent must not depend on an unbounded systemctl probe.\n' >&2
+        return 1
+    fi
     printf 'Galera readiness agent decision test passed.\n'
 }
 
