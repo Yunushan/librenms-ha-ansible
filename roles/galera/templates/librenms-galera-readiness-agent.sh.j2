@@ -12,6 +12,7 @@ fi
 status=$(timeout {{ librenms_galera_readiness_agent_query_timeout | int }} \
   mysql --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
   "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" \
+  </dev/null \
   2>/dev/null || true)
 
 if printf '%s\n' "${status}" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \

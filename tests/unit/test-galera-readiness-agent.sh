@@ -103,6 +103,10 @@ main() {
         printf 'Readiness agent must not depend on an unbounded systemctl probe.\n' >&2
         return 1
     fi
+    grep -Fq '</dev/null' "${TEMPLATE}" || {
+        printf 'Readiness-agent database probes must not inherit the client socket as stdin.\n' >&2
+        return 1
+    }
     printf 'Galera readiness agent decision test passed.\n'
 }
 
