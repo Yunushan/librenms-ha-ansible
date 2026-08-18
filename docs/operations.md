@@ -97,12 +97,22 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/doctor.yml \
   -e librenms_doctor_network_tcp_checks_enabled=true
 ```
 
-The default Galera TCP matrix checks the persistent database, replication, and
-IST listeners (3306, 4567, and 4568). It intentionally does not check TCP
-4444: that is the transient SST receiver port and is normally closed when no
-state transfer is running. Only add 4444 to
-`librenms_doctor_network_galera_tcp_ports` for a deliberate, time-bounded
-check while an SST receiver is expected to be listening.
+The default Galera TCP matrix checks the persistent database and replication
+listeners (3306 and 4567). The IST and SST receiver ports (4568 and 4444) are
+transfer-scoped and are normally closed while the cluster is idle, so a live
+listener probe would create false failures. The host firewall must still allow
+4568 for IST and 4444 for the configured SST method between database peers.
+Only add the transfer ports to `librenms_doctor_network_galera_tcp_ports` for a
+deliberate, time-bounded check while the corresponding state transfer is
+expected to be listening:
+
+```yaml
+librenms_doctor_network_galera_tcp_ports:
+  - 3306
+  - 4444
+  - 4567
+  - 4568
+```
 
 For a managed host firewall, explicitly set the management and trusted-cluster
 CIDRs in \`inventories/ha/group_vars/all.yml\`, review them with an SSH session

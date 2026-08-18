@@ -135,8 +135,9 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 #
 # librenms_doctor_network_tcp_checks_enabled: false
 # librenms_doctor_network_check_gluster_brick_ports: false
-# Galera TCP 4444 is a transient SST listener and is intentionally excluded
-# from the default live matrix. Add it only during an active SST observation:
+# Galera TCP 4444 (SST) and 4568 (IST) are transient transfer listeners and
+# are intentionally excluded from the default live matrix. Add them only
+# during an active, time-bounded state-transfer observation:
 # librenms_doctor_network_galera_tcp_ports:
 #   - 3306
 #   - 4444
