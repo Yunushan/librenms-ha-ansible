@@ -135,6 +135,13 @@ librenms_seed_cluster_devices: "{{ librenms_manage_local_snmpd | bool }}"
 #
 # librenms_doctor_network_tcp_checks_enabled: false
 # librenms_doctor_network_check_gluster_brick_ports: false
+# Galera TCP 4444 is a transient SST listener and is intentionally excluded
+# from the default live matrix. Add it only during an active SST observation:
+# librenms_doctor_network_galera_tcp_ports:
+#   - 3306
+#   - 4444
+#   - 4567
+#   - 4568
 
 # Fail the HA status playbook when any HA layer is degraded. This is useful for
 # AWX schedules, monitoring hooks, and pre-maintenance gates.

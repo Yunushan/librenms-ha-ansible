@@ -32,9 +32,12 @@ librenms_doctor_network_route_checks_enabled: true
 librenms_doctor_network_tcp_checks_enabled: false
 librenms_doctor_network_check_timeout: 3
 librenms_doctor_network_web_backend_port: 80
+# Galera's 4444 SST listener is transient: it is normally closed and is only
+# opened by the SST receiver during an active state transfer.  Keep the live
+# doctor matrix limited to persistent listeners; add 4444 explicitly for a
+# deliberate, time-bounded SST observation.
 librenms_doctor_network_galera_tcp_ports:
   - 3306
-  - 4444
   - 4567
   - 4568
 librenms_doctor_network_redis_tcp_ports:
