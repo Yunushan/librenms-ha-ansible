@@ -35,21 +35,37 @@ reap_workers() {
   systemctl_bounded reset-failed ${workers} >/dev/null 2>&1 || true
 }
 
+stop_socket() {
+  local socket_state
+  local socket_rc
+
+  # Do not wait for systemd to synchronously drain a busy socket unit. Queue
+  # the stop, then verify that the listener really left the active states.
+  systemctl_bounded stop --no-block "${SOCKET_UNIT}" >/dev/null 2>&1 || true
+
+  for ((attempt = 1; attempt <= QUIESCE_ATTEMPTS; attempt++)); do
+    socket_state="$(systemctl_bounded is-active "${SOCKET_UNIT}" 2>/dev/null)"
+    socket_rc=$?
+    if [ "${socket_rc}" -eq 124 ]; then
+      sleep 1
+      continue
+    fi
+    case "${socket_state}" in
+      inactive|failed|unknown)
+        return 0
+        ;;
+    esac
+    sleep 1
+  done
+
+  printf 'could not stop readiness socket unit: %s (state=%s)\n' \
+    "${SOCKET_UNIT}" "${socket_state:-unknown}" >&2
+  return 1
+}
+
 # Close the listener first so no new accepted workers appear while stale
 # connection units are being reaped.
-if ! systemctl_bounded stop "${SOCKET_UNIT}" >/dev/null 2>&1; then
-  printf 'could not stop readiness socket unit: %s\n' "${SOCKET_UNIT}" >&2
-  exit 1
-fi
-
-socket_state="$(systemctl_bounded is-active "${SOCKET_UNIT}" 2>/dev/null)"
-socket_rc=$?
-if [ "${socket_rc}" -eq 124 ]; then
-  printf 'systemd did not respond while checking readiness socket state\n' >&2
-  exit 1
-fi
-if [ "${socket_state}" != "inactive" ] && [ "${socket_state}" != "failed" ]; then
-  printf 'readiness socket remained active after stop: %s\n' "${socket_state}" >&2
+if ! stop_socket; then
   exit 1
 fi
 

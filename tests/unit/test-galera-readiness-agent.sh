@@ -83,8 +83,12 @@ main() {
         printf 'Readiness-agent socket must cap accepted workers.\n' >&2
         return 1
     }
-    grep -Fq 'systemctl_bounded stop "${SOCKET_UNIT}"' "${RESET_TEMPLATE}" || {
-        printf 'Readiness-agent reset must close the listener before reaping workers.\n' >&2
+    grep -Fq 'systemctl_bounded stop --no-block "${SOCKET_UNIT}"' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must queue listener shutdown before reaping workers.\n' >&2
+        return 1
+    }
+    grep -Fq 'systemctl_bounded is-active "${SOCKET_UNIT}"' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must verify listener shutdown before reaping workers.\n' >&2
         return 1
     }
     grep -Fq -- '--state=active,activating,deactivating' "${RESET_TEMPLATE}" || {
