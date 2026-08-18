@@ -94,7 +94,7 @@ main() {
     if grep -Fq -- 'list-units --all' "${RESET_TEMPLATE}"; then
         printf 'Readiness-agent reset must not enumerate inactive unit history.\n' >&2
         return 1
-    }
+    fi
     grep -Fq 'systemctl_bounded kill --kill-who=all --signal=TERM' "${RESET_TEMPLATE}" || {
         printf 'Readiness-agent reset must terminate stale worker instances.\n' >&2
         return 1
