@@ -22,6 +22,8 @@ contains() {
 }
 
 main() {
+    local rrdtool_version_task
+
     contains "${DEFAULTS_FILE}" 'librenms_runtime_support_enabled: true'
     contains "${DEFAULTS_FILE}" '- "8.5"'
     contains "${DEFAULTS_FILE}" '- "3.14"'
@@ -48,6 +50,15 @@ main() {
     contains "${COMMON_TASKS_FILE}" 'Command rc: {{ librenms_runtime_python_version_command.rc'
     contains "${COMMON_TASKS_FILE}" "default('<empty>', true)"
     contains "${APP_TASKS_FILE}" 'Validate resolved Laravel framework version'
+    rrdtool_version_task="$(
+        sed -n \
+            '/^- name: Set LibreNMS rrdtool version after bootstrap$/,/^- name: Set dispatcher schedule types after bootstrap$/p' \
+            "${APP_TASKS_FILE}"
+    )"
+    grep -Fq -- "| regex_search('[0-9]+\\\\.[0-9]+\\\\.[0-9]+')" <<<"${rrdtool_version_task}" ||
+        fail "RRDtool post-bootstrap configuration must parse a semantic version"
+    grep -Fq -- ') is not none' <<<"${rrdtool_version_task}" ||
+        fail "RRDtool post-bootstrap version guard must return an explicit boolean"
     contains "${WORKFLOW_FILE}" 'python-version: "3.14"'
     contains "${SUPPORT_MATRIX_FILE}" '## Application Runtime Versions'
     contains "${SUPPORT_MATRIX_FILE}" 'Ubuntu 22.04/24.04/26.04'

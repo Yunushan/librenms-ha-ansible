@@ -3619,7 +3619,11 @@
     - librenms_apply_post_bootstrap_config | bool
     - librenms_manage_rrdcached | bool
     - inventory_hostname == librenms_runtime_config_node_effective
-    - librenms_rrdtool_version_cmd.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+')
+    - >-
+      (
+        librenms_rrdtool_version_cmd.stdout
+        | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+')
+      ) is not none
 
 - name: Set dispatcher schedule types after bootstrap
   command:
