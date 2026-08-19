@@ -165,7 +165,7 @@
     unit_cgroup_has_processes() {
       unit_control_group="$1"
       case "${unit_control_group}" in
-        /system.slice/*) ;;
+        /system.slice/*.service) ;;
         *) return 1 ;;
       esac
 
@@ -183,6 +183,67 @@
         return $?
       done
       return 1
+    }
+
+    unit_cgroup_process_ids() {
+      unit_process_control_group="$1"
+      case "${unit_process_control_group}" in
+        /system.slice/*.service) ;;
+        *) return 1 ;;
+      esac
+
+      for unit_process_file in \
+        "${CGROUP_ROOT}${unit_process_control_group}/cgroup.procs" \
+        "${CGROUP_ROOT}/systemd${unit_process_control_group}/tasks"; do
+        [ -r "${unit_process_file}" ] || continue
+        awk '$1 ~ /^[0-9]+$/ && $1 > 1 { print $1 }' "${unit_process_file}"
+        return 0
+      done
+      return 1
+    }
+
+    unit_control_group() {
+      control_group_snapshot="$(unit_stop_snapshot "$1")"
+      control_group_value="${control_group_snapshot##*|}"
+      case "${control_group_value}" in
+        /system.slice/*.service)
+          printf '%s\n' "${control_group_value}"
+          ;;
+        *) return 1 ;;
+      esac
+    }
+
+    signal_unit_cgroup_processes() {
+      cgroup_signal="$1"
+      signal_control_group="$2"
+      signal_pids="$(unit_cgroup_process_ids "${signal_control_group}" || true)"
+      [ -n "${signal_pids}" ] || return 0
+
+      signal_failed=0
+      for signal_pid in ${signal_pids}; do
+        case "${signal_pid}" in
+          *[!0-9]*|0|1) signal_failed=1; continue ;;
+        esac
+        [ -d "/proc/${signal_pid}" ] || continue
+        kill "-${cgroup_signal}" "${signal_pid}" 2>/dev/null || {
+          [ ! -d "/proc/${signal_pid}" ] || signal_failed=1
+        }
+      done
+      return "${signal_failed}"
+    }
+
+    kill_unit_cgroup() {
+      kill_control_group="$1"
+      case "${kill_control_group}" in
+        /system.slice/*.service) ;;
+        *) return 1 ;;
+      esac
+
+      cgroup_kill_file="${CGROUP_ROOT}${kill_control_group}/cgroup.kill"
+      if [ -w "${cgroup_kill_file}" ] && printf '1\n' > "${cgroup_kill_file}" 2>/dev/null; then
+        return 0
+      fi
+      signal_unit_cgroup_processes KILL "${kill_control_group}"
     }
 
     wait_until_stopped() {
@@ -226,6 +287,45 @@
         stopped_attempt=$((stopped_attempt + 1))
       done
       return 1
+    }
+
+    print_unit_cgroup_process_diagnostics() {
+      diagnostic_unit="$1"
+      diagnostic_control_group="$(unit_control_group "${diagnostic_unit}" || true)"
+      echo "--- ${diagnostic_unit} cgroup processes ---" >&2
+      if [ -z "${diagnostic_control_group}" ]; then
+        echo "No safe system service cgroup could be resolved." >&2
+        return 0
+      fi
+
+      echo "ControlGroup=${diagnostic_control_group}" >&2
+      diagnostic_pids="$(unit_cgroup_process_ids "${diagnostic_control_group}" || true)"
+      if [ -z "${diagnostic_pids}" ]; then
+        echo "No remaining process IDs were visible in the service cgroup." >&2
+        return 0
+      fi
+
+      for diagnostic_pid in ${diagnostic_pids}; do
+        [ -d "/proc/${diagnostic_pid}" ] || continue
+        probe ps -o pid=,ppid=,user=,stat=,wchan:32=,etime=,comm=,args= \
+          -p "${diagnostic_pid}" >&2 || true
+        diagnostic_state="$(
+          probe ps -o stat= -p "${diagnostic_pid}" 2>/dev/null |
+            awk 'NR == 1 { print $1 }' || true
+        )"
+        case "${diagnostic_state}" in
+          D*)
+            echo "PID ${diagnostic_pid} is in uninterruptible kernel I/O (state ${diagnostic_state})." >&2
+            echo "Signals cannot terminate a D-state process; keep this node drained and perform a controlled node reboot after verifying the remaining HA nodes." >&2
+            ;;
+          Z*)
+            echo "PID ${diagnostic_pid} is a zombie (state ${diagnostic_state}) awaiting parent reaping; keep this node drained and recover systemd or reboot it in a controlled manner." >&2
+            ;;
+          *)
+            echo "PID ${diagnostic_pid} survived the bounded cgroup SIGKILL attempt (state ${diagnostic_state:-unknown}); refusing unsafe runtime-file cleanup." >&2
+            ;;
+        esac
+      done
     }
 
     print_unit_diagnostics() {
@@ -718,6 +818,7 @@
 
     stop_stuck_service() {
       stop_unit="$1"
+      stop_control_group="$(unit_control_group "${stop_unit}" || true)"
 
       systemctl_bounded stop --no-block "${stop_unit}" >/dev/null 2>&1 || true
       if wait_until_stopped "${stop_unit}" "${MAX_ATTEMPTS}"; then
@@ -727,6 +828,9 @@
 
       echo "${stop_unit} remained stuck; sending SIGTERM to its service cgroup" >&2
       systemctl_bounded kill --kill-whom=all --signal=TERM "${stop_unit}" >/dev/null 2>&1 || true
+      if [ -n "${stop_control_group}" ]; then
+        signal_unit_cgroup_processes TERM "${stop_control_group}" || true
+      fi
       if wait_until_stopped "${stop_unit}" 5; then
         systemctl_bounded reset-failed "${stop_unit}" >/dev/null 2>&1 || true
         return 0
@@ -734,6 +838,13 @@
 
       echo "${stop_unit} did not stop after SIGTERM; sending SIGKILL to its service cgroup" >&2
       systemctl_bounded kill --kill-whom=all --signal=KILL "${stop_unit}" >/dev/null 2>&1 || true
+      current_stop_control_group="$(unit_control_group "${stop_unit}" || true)"
+      if [ -n "${current_stop_control_group}" ]; then
+        stop_control_group="${current_stop_control_group}"
+      fi
+      if [ -n "${stop_control_group}" ]; then
+        kill_unit_cgroup "${stop_control_group}" || true
+      fi
       systemctl_bounded stop --no-block "${stop_unit}" >/dev/null 2>&1 || true
       if wait_until_stopped "${stop_unit}" 5; then
         systemctl_bounded reset-failed "${stop_unit}" >/dev/null 2>&1 || true
@@ -742,6 +853,7 @@
 
       echo "failed to quiesce stuck ${stop_unit}; refusing to restart over its unresolved systemd job" >&2
       print_unit_diagnostics "${stop_unit}"
+      print_unit_cgroup_process_diagnostics "${stop_unit}"
       return 1
     }
 

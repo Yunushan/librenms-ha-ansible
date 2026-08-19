@@ -112,6 +112,55 @@ diagnostics and leaves `librenms.service`, `rrdcached`, and LibreNMS
 maintenance timers stopped. This prevents them from writing to the local
 mountpoint directory while the shared filesystem is unavailable.
 
+If a service process remains in its exact systemd cgroup, fast repair first
+uses systemd signaling and then a bounded direct cgroup fallback. On cgroup v2
+it uses `cgroup.kill`; otherwise it signals only PIDs read from that service's
+`cgroup.procs` or `tasks` file. It never selects processes by an untrusted name
+or removes runtime files while a process remains.
+
+A process reported in state `D` is blocked in uninterruptible kernel I/O and
+cannot be terminated even by `SIGKILL`. This commonly accompanies a stalled
+FUSE/network filesystem operation. Do not remove the reported PID file and do
+not start a second `rrdcached` instance. Keep the affected node out of service,
+verify the other HA nodes, and use the controlled single-node maintenance and
+reboot workflow. Fast repair deliberately does not reboot a host automatically.
+
+If the diagnostics also show `Starting rrdcached.service - LSB`, deploy the
+native foreground systemd drop-in before rebooting the affected node. This
+bounded playbook reloads systemd and validates the effective unit properties;
+it does not start, stop, or restart the daemon:
+
+```sh
+make rrdcached-unit-repair-ask-become-pass \
+  RRDCACHED_UNIT_REPAIR_CONFIRM=true \
+  RRDCACHED_UNIT_REPAIR_LIMIT=lnms1
+```
+
+If a subsequent fast repair still reports the old process in state `D`, drain
+only that node while deliberately skipping the impossible RRDCacheD stop, then
+reboot it. The maintenance playbook verifies that the remaining Galera,
+Redis, VIP, and dispatcher paths stay available before it reports success:
+
+```sh
+make maintenance-enter \
+  MAINTENANCE_TARGET=lnms1 \
+  PLAYBOOK_FLAGS=--ask-become-pass \
+  ANSIBLE_EXTRA_ARGS="-e librenms_maintenance_stop_rrdcached=false"
+
+ssh -tt ansible@10.2.7.140 'sudo systemctl reboot'
+```
+
+Run the reboot only after `maintenance-enter` succeeds. After the node is
+reachable, rejoin and verify it:
+
+```sh
+make maintenance-exit \
+  MAINTENANCE_TARGET=lnms1 \
+  PLAYBOOK_FLAGS=--ask-become-pass
+
+make status-strict PLAYBOOK_FLAGS=--ask-become-pass
+```
+
 It never stops a healthy MariaDB service, bootstraps Galera, edits
 `grastate.dat`, runs database migrations, runs `daily.sh`, updates LibreNMS,
 or deletes an RRD/Gluster directory. A Galera `Primary|Synced` failure still

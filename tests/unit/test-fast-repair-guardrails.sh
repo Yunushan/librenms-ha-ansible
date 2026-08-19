@@ -8,6 +8,10 @@ DEFAULTS="${ROOT_DIR}/roles/fast_repair/defaults/main.yml"
 GLOBAL_DEFAULTS="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
 DISPATCHER_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-dispatcher-ha-recover.py.j2"
 RRD_PERMISSION_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-rrd-permission-repair.sh.j2"
+RRDCACHED_UNIT_PLAYBOOK="${ROOT_DIR}/playbooks/rrdcached-unit-repair.yml"
+RRDCACHED_OVERRIDE="${ROOT_DIR}/roles/librenms_app/templates/rrdcached.systemd-override.conf.j2"
+MAKEFILE="${ROOT_DIR}/Makefile"
+FAST_REPAIR_DOC="${ROOT_DIR}/docs/fast-repair.md"
 TEST_ROOT="$(mktemp -d)"
 RENDERED_SCRIPT="${TEST_ROOT}/rendered-fast-repair.sh"
 UNIT_FUNCTIONS="${TEST_ROOT}/unit-functions.sh"
@@ -81,9 +85,16 @@ grep -q 'systemctl_bounded start --no-block "${unit}"' "${TASKS}"
 grep -q 'wait_until_stopped()' "${TASKS}"
 grep -q -- '--property=ActiveState,SubState,MainPID,ControlPID,ControlGroup' "${TASKS}"
 grep -q 'unit_cgroup_has_processes()' "${TASKS}"
+grep -q 'unit_cgroup_process_ids()' "${TASKS}"
+grep -q 'signal_unit_cgroup_processes()' "${TASKS}"
+grep -q 'kill_unit_cgroup()' "${TASKS}"
+grep -q 'print_unit_cgroup_process_diagnostics()' "${TASKS}"
 grep -q 'CGROUP_ROOT=/sys/fs/cgroup' "${TASKS}"
 grep -q '${CGROUP_ROOT}${unit_control_group}/cgroup.events' "${TASKS}"
 grep -q '${CGROUP_ROOT}${unit_control_group}/cgroup.procs' "${TASKS}"
+grep -q '${CGROUP_ROOT}${kill_control_group}/cgroup.kill' "${TASKS}"
+grep -q 'uninterruptible kernel I/O' "${TASKS}"
+grep -q 'controlled node reboot' "${TASKS}"
 grep -q 'failed:\*|\*:auto-restart)' "${TASKS}"
 grep -q 'systemctl_bounded stop --no-block "${stop_unit}"' "${TASKS}"
 grep -q 'systemctl_bounded kill --kill-whom=all --signal=TERM "${stop_unit}"' "${TASKS}"
@@ -114,6 +125,20 @@ grep -q 'librenms_rrd_permission_repair_recursive: false' "${GLOBAL_DEFAULTS}"
 grep -q '{% if librenms_rrd_permission_repair_recursive | bool %}' "${RRD_PERMISSION_HELPER}"
 grep -q 'sys.exit(1)' "${DISPATCHER_HELPER}"
 grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
+grep -q '^RemainAfterExit=no$' "${RRDCACHED_OVERRIDE}"
+grep -q 'librenms_rrdcached_unit_repair_confirm' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q 'librenms_manage_rrdcached_systemd_override' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q 'rrdcached.systemd-override.conf.j2' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q -- '--property=Type,RemainAfterExit,KillMode,DropInPaths,ExecStart' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q 'The service was not started, stopped, or' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q '^rrdcached-unit-repair:' "${MAKEFILE}"
+grep -q '^rrdcached-unit-repair-ask-become-pass:' "${MAKEFILE}"
+grep -q 'RRDCACHED_UNIT_REPAIR_CONFIRM=true' "${FAST_REPAIR_DOC}"
+
+if grep -Eq 'state:[[:space:]]*(started|stopped|restarted)' "${RRDCACHED_UNIT_PLAYBOOK}"; then
+    echo "RRDCacheD unit repair must not change service runtime state" >&2
+    exit 1
+fi
 
 (
   probe() {
@@ -215,6 +240,75 @@ grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
   }
 
   wait_until_stopped rrdcached.service 2
+)
+
+(
+  cgroup_root="${TEST_ROOT}/signal-cgroup"
+  cgroup_path="/system.slice/rrdcached.service"
+  mkdir -p "${cgroup_root}${cgroup_path}"
+  sleep 60 &
+  sleeper_pid=$!
+  trap 'kill "${sleeper_pid}" >/dev/null 2>&1 || true' EXIT
+  printf '%s\n' "${sleeper_pid}" > "${cgroup_root}${cgroup_path}/cgroup.procs"
+
+  CGROUP_ROOT="${cgroup_root}"
+  # shellcheck source=/dev/null
+  source "${STOP_FUNCTIONS}"
+  signal_unit_cgroup_processes TERM "${cgroup_path}"
+
+  wait "${sleeper_pid}" 2>/dev/null || true
+  if kill -0 "${sleeper_pid}" 2>/dev/null; then
+    echo "fast repair direct cgroup fallback did not signal the proven service PID" >&2
+    exit 1
+  fi
+  trap - EXIT
+)
+
+(
+  cgroup_root="${TEST_ROOT}/diagnostic-cgroup"
+  cgroup_path="/system.slice/rrdcached.service"
+  mkdir -p "${cgroup_root}${cgroup_path}"
+  printf '%s\n' "$$" > "${cgroup_root}${cgroup_path}/cgroup.procs"
+
+  probe() {
+    case "$1" in
+      systemctl)
+        printf '%s\n' \
+          'ActiveState=inactive' \
+          'SubState=dead' \
+          'MainPID=0' \
+          'ControlPID=0' \
+          "ControlGroup=${cgroup_path}"
+        ;;
+      ps)
+        case "$*" in
+          *'stat='*) printf 'D\n' ;;
+          *) printf '%s 1 root D fuse_wait 00:10 rrdcached rrdcached\n' "$$" ;;
+        esac
+        ;;
+      *) return 1 ;;
+    esac
+  }
+
+  CGROUP_ROOT="${cgroup_root}"
+  # shellcheck source=/dev/null
+  source "${STOP_FUNCTIONS}"
+  diagnostic_output="$(print_unit_cgroup_process_diagnostics rrdcached.service 2>&1)"
+  grep -q 'uninterruptible kernel I/O' <<< "${diagnostic_output}"
+  grep -q 'controlled node reboot' <<< "${diagnostic_output}"
+)
+
+(
+  cgroup_root="${TEST_ROOT}/kill-cgroup"
+  cgroup_path="/system.slice/rrdcached.service"
+  mkdir -p "${cgroup_root}${cgroup_path}"
+  : > "${cgroup_root}${cgroup_path}/cgroup.kill"
+
+  CGROUP_ROOT="${cgroup_root}"
+  # shellcheck source=/dev/null
+  source "${STOP_FUNCTIONS}"
+  kill_unit_cgroup "${cgroup_path}"
+  grep -qx '1' "${cgroup_root}${cgroup_path}/cgroup.kill"
 )
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)

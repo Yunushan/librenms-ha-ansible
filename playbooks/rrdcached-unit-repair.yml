@@ -1,0 +1,138 @@
+---
+- name: Deploy the native RRDCacheD systemd drop-in without restarting it
+  hosts: librenms_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  roles:
+    - role: librenms_defaults
+  tasks:
+    - name: Require explicit RRDCacheD unit repair confirmation
+      ansible.builtin.assert:
+        that:
+          - librenms_rrdcached_unit_repair_confirm | default(false) | bool
+          - librenms_manage_rrdcached | bool
+          - librenms_manage_rrdcached_systemd_override | bool
+          - ansible_facts.service_mgr == 'systemd'
+        fail_msg: >-
+          RRDCacheD unit repair is opt-in and requires a systemd-managed host.
+          Set RRDCACHED_UNIT_REPAIR_CONFIRM=true only after reviewing
+          docs/fast-repair.md.
+
+    - name: Determine the effective primary LibreNMS node for RRDCacheD
+      ansible.builtin.set_fact:
+        librenms_rrdcached_unit_primary_node: >-
+          {{
+            groups.get(
+              'librenms_primary',
+              groups.get('librenms_nodes', [inventory_hostname])
+            )
+            | first
+          }}
+
+    - name: Determine whether RRDCacheD runs on this node
+      ansible.builtin.set_fact:
+        librenms_rrdcached_runs_on_host: >-
+          {{
+            librenms_rrdcached_scope == 'all'
+            or inventory_hostname == librenms_rrdcached_unit_primary_node
+          }}
+        librenms_rrdcached_network_bind_address_effective: >-
+          {{
+            ansible_host
+            | default(
+                ansible_facts.default_ipv4.address
+                | default(inventory_hostname)
+              )
+            if (
+              librenms_rrdcached_endpoint_strategy == 'vip_tcp'
+              and (
+                librenms_rrdcached_network_bind_address | string | trim
+              ) in ['', '0.0.0.0', '::', '*']
+            )
+            else librenms_rrdcached_network_bind_address
+          }}
+
+    - name: Inspect the configured RRDCacheD daemon
+      ansible.builtin.stat:
+        path: "{{ librenms_rrdcached_daemon_path }}"
+      register: librenms_rrdcached_unit_daemon
+      when: librenms_rrdcached_runs_on_host | bool
+
+    - name: Validate the configured RRDCacheD daemon
+      ansible.builtin.assert:
+        that:
+          - librenms_rrdcached_unit_daemon.stat.exists | default(false)
+          - librenms_rrdcached_unit_daemon.stat.isreg | default(false)
+          - librenms_rrdcached_unit_daemon.stat.executable | default(false)
+        fail_msg: >-
+          The configured RRDCacheD daemon is missing or is not executable:
+          {{ librenms_rrdcached_daemon_path }}.
+      when: librenms_rrdcached_runs_on_host | bool
+
+    - name: Ensure the RRDCacheD systemd drop-in directory exists
+      ansible.builtin.file:
+        path: "{{ librenms_rrdcached_systemd_override_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: librenms_rrdcached_runs_on_host | bool
+
+    - name: Deploy the native foreground RRDCacheD systemd drop-in
+      ansible.builtin.template:
+        src: >-
+          {{
+            playbook_dir
+            ~ '/../roles/librenms_app/templates/'
+            ~ 'rrdcached.systemd-override.conf.j2'
+          }}
+        dest: "{{ librenms_rrdcached_systemd_override_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: librenms_rrdcached_runs_on_host | bool
+
+    - name: Reload systemd after the RRDCacheD drop-in deployment
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: librenms_rrdcached_runs_on_host | bool
+
+    - name: Read the effective RRDCacheD systemd properties
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - "{{ librenms_rrdcached_service_name }}.service"
+          - --no-pager
+          - --property=Type,RemainAfterExit,KillMode,DropInPaths,ExecStart
+      register: librenms_rrdcached_unit_properties
+      changed_when: false
+      when: librenms_rrdcached_runs_on_host | bool
+
+    - name: Validate the native RRDCacheD systemd drop-in is effective
+      ansible.builtin.assert:
+        that:
+          - "'Type=simple' in librenms_rrdcached_unit_properties.stdout"
+          - "'RemainAfterExit=no' in librenms_rrdcached_unit_properties.stdout"
+          - "'KillMode=control-group' in librenms_rrdcached_unit_properties.stdout"
+          - >-
+            librenms_rrdcached_systemd_override_path
+            in librenms_rrdcached_unit_properties.stdout
+          - >-
+            librenms_rrdcached_daemon_path
+            in librenms_rrdcached_unit_properties.stdout
+        fail_msg: |-
+          systemd did not load the expected native RRDCacheD drop-in.
+
+          Effective properties:
+          {{ librenms_rrdcached_unit_properties.stdout | default('unavailable') }}
+      when: librenms_rrdcached_runs_on_host | bool
+
+    - name: Report non-disruptive RRDCacheD unit repair result
+      ansible.builtin.debug:
+        msg: >-
+          The native foreground RRDCacheD systemd drop-in is installed on
+          {{ inventory_hostname }}. The service was not started, stopped, or
+          restarted by this playbook.
+      when: librenms_rrdcached_runs_on_host | bool
