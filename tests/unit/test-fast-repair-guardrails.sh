@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PLAYBOOK="${ROOT_DIR}/playbooks/fast-repair.yml"
 TASKS="${ROOT_DIR}/roles/fast_repair/tasks/main.yml"
+RENDERED_SCRIPT="$(mktemp)"
+trap 'rm -f "${RENDERED_SCRIPT}"' EXIT
+
+awk '
+  /^  register: fast_repair_result$/ { exit }
+  in_raw { sub(/^    /, ""); print }
+  /^  ansible\.builtin\.raw: \|$/ { in_raw=1 }
+' "${TASKS}" |
+  sed -E 's/^([A-Z_]+)=\{\{.*\}\}$/\1=x/' > "${RENDERED_SCRIPT}"
+sh -n "${RENDERED_SCRIPT}"
 
 grep -q 'gather_facts: false' "${PLAYBOOK}"
 grep -q 'ansible.builtin.raw:' "${TASKS}"
@@ -21,6 +31,13 @@ grep -q 'skipping rrdcached until the RRD mount is healthy' "${TASKS}"
 grep -q 'skipping LibreNMS maintenance timers until the RRD mount is healthy' "${TASKS}"
 grep -q 'print_unit_diagnostics "${unit}"' "${TASKS}"
 grep -q 'if wait_until_active "${unit}"; then' "${TASKS}"
+grep -q 'systemctl_bounded start --no-block "${unit}"' "${TASKS}"
+grep -q 'wait_until_stopped()' "${TASKS}"
+grep -q 'systemctl_bounded stop --no-block "${stop_unit}"' "${TASKS}"
+grep -q 'systemctl_bounded kill --kill-whom=all --signal=TERM "${stop_unit}"' "${TASKS}"
+grep -q 'systemctl_bounded kill --kill-whom=all --signal=KILL "${stop_unit}"' "${TASKS}"
+grep -q 'if ! quiesce_stuck_units; then' "${TASKS}"
+grep -q -- '--- librenms.service runtime gate ---' "${TASKS}"
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 rrdcached_start_line=$(grep -nF 'if ! ensure_started rrdcached; then' "${TASKS}" | head -n 1 | cut -d: -f1)

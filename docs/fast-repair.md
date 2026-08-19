@@ -68,11 +68,14 @@ operations and reports a failure instead of waiting indefinitely.
 The repair path may:
 
 - cancel stale LibreNMS maintenance jobs;
-- stop only stuck LibreNMS runtime jobs and reset their failed state;
+- stop only stuck LibreNMS runtime jobs, wait for systemd to confirm they are
+  inactive, and use bounded `SIGTERM`/`SIGKILL` escalation against only the
+  unresolved service cgroup before resetting its failed state;
 - enable and start inactive web, PHP-FPM, Redis/Sentinel, HAProxy, Keepalived,
   Gluster, rrdcached, and LibreNMS timer units;
 - start Redis/Sentinel and rrdcached before `librenms.service`, whose runtime
-  gate depends on those services, and report bounded unit status and journal
+  gate depends on those services, queue service starts without blocking on the
+  systemd transaction, and report bounded unit, journal, and runtime-gate
   diagnostics when a service still cannot start;
 - repair the configured RRD mount using the existing `/etc/fstab` entry,
   including a lazy detach of the exact stale mountpoint and a bounded
@@ -94,4 +97,10 @@ requires the separate, operator-confirmed `galera-recover` procedure.
 Do not start a second repair while one is running. If a previous `make site`
 process is still attached to the terminal, press `Ctrl+C` first. Review the
 repair output and then use `make status-strict` or `make doctor-live` after
-the nodes are reachable again.
+the nodes are reachable again. To ensure strict status does not run after a
+failed repair, chain the commands:
+
+```sh
+make repair-ask-become-pass FAST_REPAIR_CONFIRM=true FAST_REPAIR_LIMIT=lnms2 && \
+  make status-strict PLAYBOOK_FLAGS=--ask-become-pass
+```

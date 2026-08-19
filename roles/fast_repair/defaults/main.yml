@@ -13,3 +13,4 @@ librenms_fast_repair_lazy_unmount_enabled: true
 librenms_fast_repair_rrd_mountpoint: "{{ librenms_gluster_mountpoint | default(librenms_install_dir ~ '/rrd') }}"
 librenms_fast_repair_rrd_mode: "{{ librenms_rrd_mode | default('local') }}"
 librenms_fast_repair_user: "{{ librenms_user | default('librenms') }}"
+librenms_fast_repair_runtime_wait_path: "{{ librenms_dispatcher_runtime_wait_path | default('/usr/local/sbin/librenms-ha-runtime-wait') }}"
