@@ -19,6 +19,18 @@ grep -q "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsre
 grep -q 'skipping librenms.service until the RRD mount is healthy' "${TASKS}"
 grep -q 'skipping rrdcached until the RRD mount is healthy' "${TASKS}"
 grep -q 'skipping LibreNMS maintenance timers until the RRD mount is healthy' "${TASKS}"
+grep -q 'print_unit_diagnostics "${unit}"' "${TASKS}"
+grep -q 'if wait_until_active "${unit}"; then' "${TASKS}"
+
+redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+rrdcached_start_line=$(grep -nF 'if ! ensure_started rrdcached; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+dispatcher_start_line=$(grep -nF 'if ! ensure_started librenms.service; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+
+if [ "${redis_start_line}" -ge "${dispatcher_start_line}" ] || \
+   [ "${rrdcached_start_line}" -ge "${dispatcher_start_line}" ]; then
+    echo "fast repair must start Redis and RRDCacheD before librenms.service" >&2
+    exit 1
+fi
 
 if grep -Eq 'systemctl(_bounded)?[[:space:]]+(start|restart)[[:space:]]+mariadb|safe_to_bootstrap|grastate\.dat' "${TASKS}"; then
     echo "fast repair must not bootstrap or mutate Galera state" >&2

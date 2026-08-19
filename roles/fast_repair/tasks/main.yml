@@ -88,6 +88,14 @@
       return 1
     }
 
+    print_unit_diagnostics() {
+      unit="$1"
+      echo "--- ${unit} status ---" >&2
+      probe systemctl status "${unit}" --no-pager --full >&2 || true
+      echo "--- ${unit} recent journal ---" >&2
+      probe journalctl -u "${unit}" --since=-10min --no-pager -n 80 >&2 || true
+    }
+
     ensure_started() {
       unit="$1"
       unit_exists "${unit}" || return 0
@@ -118,11 +126,20 @@
       fi
       echo "starting ${unit}"
       if ! systemctl_bounded start "${unit}"; then
+        if wait_until_active "${unit}"; then
+          REPAIR_CHANGED=1
+          return 0
+        fi
         echo "failed to start ${unit}" >&2
+        print_unit_diagnostics "${unit}"
         return 1
       fi
       REPAIR_CHANGED=1
-      wait_until_active "${unit}"
+      if ! wait_until_active "${unit}"; then
+        echo "${unit} did not become active after startup" >&2
+        print_unit_diagnostics "${unit}"
+        return 1
+      fi
     }
 
     print_jobs() {
@@ -324,14 +341,6 @@
       fi
     done
 
-    if [ "${RRD_READY}" = true ]; then
-      if ! ensure_started librenms.service; then
-        REPAIR_FAILURE=1
-      fi
-    else
-      echo "skipping librenms.service until the RRD mount is healthy" >&2
-    fi
-
     if [ "${REDIS_MODE}" = sentinel ]; then
       for unit in redis-server redis-sentinel; do
         if ! ensure_started "${unit}"; then
@@ -358,6 +367,16 @@
         REPAIR_FAILURE=1
       fi
     done
+
+    # The dispatcher ExecStartPre gate checks Redis and RRDCacheD. Start those
+    # dependencies first so systemctl does not spend the repair timeout waiting.
+    if [ "${RRD_READY}" = true ]; then
+      if ! ensure_started librenms.service; then
+        REPAIR_FAILURE=1
+      fi
+    else
+      echo "skipping librenms.service until the RRD mount is healthy" >&2
+    fi
 
     if [ "${RRD_READY}" = true ]; then
       for timer in \

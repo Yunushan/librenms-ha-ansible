@@ -71,6 +71,9 @@ The repair path may:
 - stop only stuck LibreNMS runtime jobs and reset their failed state;
 - enable and start inactive web, PHP-FPM, Redis/Sentinel, HAProxy, Keepalived,
   Gluster, rrdcached, and LibreNMS timer units;
+- start Redis/Sentinel and rrdcached before `librenms.service`, whose runtime
+  gate depends on those services, and report bounded unit status and journal
+  diagnostics when a service still cannot start;
 - repair the configured RRD mount using the existing `/etc/fstab` entry,
   including a lazy detach of the exact stale mountpoint and a bounded
   create/read/delete probe as the `librenms` user;
