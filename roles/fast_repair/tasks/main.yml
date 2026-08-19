@@ -146,14 +146,46 @@
       return 0
     }
 
+    unit_stop_snapshot() {
+      probe systemctl show "$1" --no-pager \
+        --property=ActiveState,SubState,MainPID,ControlPID 2>/dev/null |
+        awk -F= '
+          $1 == "ActiveState" { active_state=$2 }
+          $1 == "SubState" { sub_state=$2 }
+          $1 == "MainPID" { main_pid=$2 }
+          $1 == "ControlPID" { control_pid=$2 }
+          END {
+            printf "%s|%s|%s|%s\n", active_state, sub_state, main_pid, control_pid
+          }
+        '
+    }
+
     wait_until_stopped() {
       stopped_unit="$1"
       stopped_attempts="$2"
       stopped_attempt=1
       while [ "${stopped_attempt}" -le "${stopped_attempts}" ]; do
-        stopped_state="$(unit_state "${stopped_unit}")"
-        case "${stopped_state}" in
-          inactive|failed) return 0 ;;
+        stopped_snapshot="$(unit_stop_snapshot "${stopped_unit}")"
+        stopped_state="${stopped_snapshot%%|*}"
+        stopped_remainder="${stopped_snapshot#*|}"
+        stopped_substate="${stopped_remainder%%|*}"
+        stopped_remainder="${stopped_remainder#*|}"
+        stopped_main_pid="${stopped_remainder%%|*}"
+        stopped_control_pid="${stopped_remainder#*|}"
+
+        if [ "${stopped_state}" = inactive ] && \
+           [ "${stopped_main_pid}" = 0 ] && \
+           [ "${stopped_control_pid}" = 0 ]; then
+          return 0
+        fi
+
+        case "${stopped_state}:${stopped_substate}" in
+          failed:*|*:auto-restart)
+            # A failed unit with Restart=on-failure is not stopped yet. Cancel
+            # the queued restart and clear the failed transition before retrying.
+            systemctl_bounded stop --no-block "${stopped_unit}" >/dev/null 2>&1 || true
+            systemctl_bounded reset-failed "${stopped_unit}" >/dev/null 2>&1 || true
+            ;;
         esac
         sleep "${POLL_DELAY}"
         stopped_attempt=$((stopped_attempt + 1))

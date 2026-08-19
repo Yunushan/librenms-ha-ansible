@@ -11,6 +11,7 @@ RRD_PERMISSION_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-rrd-
 TEST_ROOT="$(mktemp -d)"
 RENDERED_SCRIPT="${TEST_ROOT}/rendered-fast-repair.sh"
 UNIT_FUNCTIONS="${TEST_ROOT}/unit-functions.sh"
+STOP_FUNCTIONS="${TEST_ROOT}/stop-functions.sh"
 RECONCILE_FUNCTIONS="${TEST_ROOT}/reconcile-functions.sh"
 trap 'rm -rf "${TEST_ROOT}"' EXIT
 
@@ -32,6 +33,17 @@ awk '
   }
 ' "${TASKS}" > "${UNIT_FUNCTIONS}"
 sh -n "${UNIT_FUNCTIONS}"
+
+awk '
+  /^    print_unit_diagnostics\(\)/ { exit }
+  in_functions { sub(/^    /, ""); print }
+  /^    unit_stop_snapshot\(\)/ {
+    in_functions=1
+    sub(/^    /, "")
+    print
+  }
+' "${TASKS}" > "${STOP_FUNCTIONS}"
+sh -n "${STOP_FUNCTIONS}"
 
 awk '
   /^    probe_readiness_socket\(\)/ { exit }
@@ -67,6 +79,8 @@ grep -q 'refusing unsafe RRDCacheD runtime path' "${TASKS}"
 grep -q 'librenms_fast_repair_rrdcached_required:' "${DEFAULTS}"
 grep -q 'systemctl_bounded start --no-block "${unit}"' "${TASKS}"
 grep -q 'wait_until_stopped()' "${TASKS}"
+grep -q -- '--property=ActiveState,SubState,MainPID,ControlPID' "${TASKS}"
+grep -q 'failed:\*|\*:auto-restart)' "${TASKS}"
 grep -q 'systemctl_bounded stop --no-block "${stop_unit}"' "${TASKS}"
 grep -q 'systemctl_bounded kill --kill-whom=all --signal=TERM "${stop_unit}"' "${TASKS}"
 grep -q 'systemctl_bounded kill --kill-whom=all --signal=KILL "${stop_unit}"' "${TASKS}"
@@ -124,6 +138,45 @@ grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
     echo "fast repair must reject an empty systemd LoadState response" >&2
     exit 1
   fi
+)
+
+(
+  stop_sequence_count="${TEST_ROOT}/stop-sequence-count"
+  stop_command_log="${TEST_ROOT}/stop-command-log"
+  printf '0\n' > "${stop_sequence_count}"
+  : > "${stop_command_log}"
+
+  probe() {
+    sequence_count="$(cat "${stop_sequence_count}")"
+    sequence_count=$((sequence_count + 1))
+    printf '%s\n' "${sequence_count}" > "${stop_sequence_count}"
+    if [ "${sequence_count}" -eq 1 ]; then
+      printf '%s\n' \
+        'ActiveState=failed' \
+        'SubState=auto-restart' \
+        'MainPID=0' \
+        'ControlPID=0'
+    else
+      printf '%s\n' \
+        'ActiveState=inactive' \
+        'SubState=dead' \
+        'MainPID=0' \
+        'ControlPID=0'
+    fi
+  }
+
+  systemctl_bounded() {
+    printf '%s\n' "$*" >> "${stop_command_log}"
+  }
+
+  POLL_DELAY=0
+  # shellcheck source=/dev/null
+  source "${STOP_FUNCTIONS}"
+  wait_until_stopped rrdcached.service 2
+
+  [ "$(cat "${stop_sequence_count}")" -eq 2 ]
+  grep -q '^stop --no-block rrdcached.service$' "${stop_command_log}"
+  grep -q '^reset-failed rrdcached.service$' "${stop_command_log}"
 )
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
