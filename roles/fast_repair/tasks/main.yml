@@ -92,7 +92,23 @@
     }
 
     unit_exists() {
-      probe systemctl list-unit-files "$1" --no-legend >/dev/null 2>&1
+      unit_name="$1"
+      unit_load_state="$(
+        probe systemctl show "${unit_name}" --property=LoadState --value 2>/dev/null |
+          tr -d '[:space:]' || true
+      )"
+
+      if [ -z "${unit_load_state}" ] || [ "${unit_load_state}" = not-found ]; then
+        case "${unit_name}" in
+          *.*) return 1 ;;
+        esac
+        unit_load_state="$(
+          probe systemctl show "${unit_name}.service" --property=LoadState --value 2>/dev/null |
+            tr -d '[:space:]' || true
+        )"
+      fi
+
+      [ -n "${unit_load_state}" ] && [ "${unit_load_state}" != not-found ]
     }
 
     unit_state() {

@@ -10,6 +10,7 @@ DISPATCHER_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-dispatcher-
 RRD_PERMISSION_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-rrd-permission-repair.sh.j2"
 TEST_ROOT="$(mktemp -d)"
 RENDERED_SCRIPT="${TEST_ROOT}/rendered-fast-repair.sh"
+UNIT_FUNCTIONS="${TEST_ROOT}/unit-functions.sh"
 RECONCILE_FUNCTIONS="${TEST_ROOT}/reconcile-functions.sh"
 trap 'rm -rf "${TEST_ROOT}"' EXIT
 
@@ -20,6 +21,17 @@ awk '
 ' "${TASKS}" |
   sed -E 's/^([A-Z_]+)=\{\{.*\}\}$/\1=x/' > "${RENDERED_SCRIPT}"
 sh -n "${RENDERED_SCRIPT}"
+
+awk '
+  /^    unit_state\(\)/ { exit }
+  in_functions { sub(/^    /, ""); print }
+  /^    unit_exists\(\)/ {
+    in_functions=1
+    sub(/^    /, "")
+    print
+  }
+' "${TASKS}" > "${UNIT_FUNCTIONS}"
+sh -n "${UNIT_FUNCTIONS}"
 
 awk '
   /^    probe_readiness_socket\(\)/ { exit }
@@ -50,6 +62,7 @@ grep -q 'if wait_until_active "${unit}"; then' "${TASKS}"
 grep -q 'wait_until_stably_active()' "${TASKS}"
 grep -q 'ensure_rrdcached_started()' "${TASKS}"
 grep -q 'cleanup_stale_rrdcached_runtime()' "${TASKS}"
+grep -q -- '--property=LoadState' "${TASKS}"
 grep -q 'refusing unsafe RRDCacheD runtime path' "${TASKS}"
 grep -q 'librenms_fast_repair_rrdcached_required:' "${DEFAULTS}"
 grep -q 'systemctl_bounded start --no-block "${unit}"' "${TASKS}"
@@ -83,6 +96,35 @@ grep -q 'librenms_rrd_permission_repair_recursive: false' "${GLOBAL_DEFAULTS}"
 grep -q '{% if librenms_rrd_permission_repair_recursive | bool %}' "${RRD_PERMISSION_HELPER}"
 grep -q 'sys.exit(1)' "${DISPATCHER_HELPER}"
 grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
+
+(
+  probe() {
+    case "${3:-}" in
+      rrdcached|rrdcached.service) printf 'loaded\n' ;;
+      shorthand.service) printf 'loaded\n' ;;
+      masked.service) printf 'masked\n' ;;
+      shorthand|missing|missing.service) printf 'not-found\n' ;;
+      empty|empty.service) : ;;
+      *) return 1 ;;
+    esac
+  }
+
+  # shellcheck source=/dev/null
+  source "${UNIT_FUNCTIONS}"
+  unit_exists rrdcached
+  unit_exists rrdcached.service
+  unit_exists shorthand
+  unit_exists masked.service
+
+  if unit_exists missing; then
+    echo "fast repair must reject a not-found systemd service" >&2
+    exit 1
+  fi
+  if unit_exists empty; then
+    echo "fast repair must reject an empty systemd LoadState response" >&2
+    exit 1
+  fi
+)
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 rrdcached_start_line=$(grep -nF 'if ensure_rrdcached_started; then' "${TASKS}" | head -n 1 | cut -d: -f1)
