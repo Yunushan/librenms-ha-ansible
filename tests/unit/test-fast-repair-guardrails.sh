@@ -62,7 +62,7 @@ grep -q 'reconcile_runtime_db_endpoint()' "${TASKS}"
 grep -q 'replace_shell_assignment "${RUNTIME_WAIT_PATH}" DB_HOST "${DB_HOST}"' "${TASKS}"
 grep -q 'replace_shell_assignment "${LIBRENMS_ENV_PATH}" DB_HOST "${DB_HOST}"' "${TASKS}"
 grep -q 'replace_python_string_assignment "${DISPATCHER_RECOVER_PATH}" DB_HOST "${DB_HOST}"' "${TASKS}"
-grep -q 'REQUIRE_LOCAL_GALERA_READY 1' "${TASKS}"
+grep -q 'REQUIRE_LOCAL_GALERA_READY 1 DB_HOST' "${TASKS}"
 grep -q 'cleared stale LibreNMS configuration cache' "${TASKS}"
 grep -q 'refresh_php_fpm_for_runtime_db_change()' "${TASKS}"
 
@@ -107,7 +107,6 @@ mkdir -p "$(dirname "${config_cache}")"
 cat > "${runtime_wait}" <<'EOF'
 #!/bin/sh
 DB_HOST='10.2.7.144'
-REQUIRE_LOCAL_GALERA_READY=0
 EOF
 cat > "${runtime_env}" <<'EOF'
 DB_HOST=10.2.7.144
@@ -142,6 +141,7 @@ LAST_REPLACE_CHANGED=0
 reconcile_runtime_db_endpoint
 grep -qx 'DB_HOST=10.2.7.141' "${runtime_wait}"
 grep -qx 'REQUIRE_LOCAL_GALERA_READY=1' "${runtime_wait}"
+[ "$(grep -c '^REQUIRE_LOCAL_GALERA_READY=' "${runtime_wait}")" -eq 1 ]
 grep -qx 'DB_HOST=10.2.7.141' "${runtime_env}"
 grep -qx 'DB_HOST = "10.2.7.141"' "${dispatcher_recover}"
 [ ! -e "${config_cache}" ]
@@ -159,5 +159,11 @@ reconcile_runtime_db_endpoint
 [ "${REPAIR_CHANGED}" -eq 0 ]
 [ "${RUNTIME_DB_CHANGED}" -eq 0 ]
 [ "${RUNTIME_ENV_CHANGED}" -eq 0 ]
+
+printf 'REQUIRE_LOCAL_GALERA_READY=0\n' >> "${runtime_wait}"
+if reconcile_runtime_db_endpoint 2>/dev/null; then
+    echo "fast repair must reject duplicate local Galera guard assignments" >&2
+    exit 1
+fi
 
 echo "fast repair guardrails passed"

@@ -83,7 +83,10 @@ The repair path may:
   the service stuck in `activating`;
 - atomically update only the `DB_HOST` assignments in `.env`, the runtime wait
   helper, and the dispatcher recovery helper when local Galera preference is
-  enabled; an explicit `librenms_db_host` remains authoritative;
+  enabled; older runtime-wait helpers receive the missing compatibility
+  setting after `DB_HOST` while fast repair's direct `Primary|Synced` check
+  remains authoritative, duplicate settings fail closed, and an explicit
+  `librenms_db_host` remains authoritative;
 - clear the stale Laravel configuration cache and gracefully reload active
   PHP-FPM services only after the replacement local database path passes its
   authenticated runtime gate;

@@ -199,7 +199,7 @@
 
       if ! awk -v key="${assignment_key}" -v value="${assignment_value}" '
         BEGIN { matches=0 }
-        index($0, key "=") == 1 {
+        $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
           print key "=" value
           matches++
           next
@@ -215,6 +215,74 @@
       if cmp -s -- "${assignment_path}" "${replacement_path}"; then
         rm -f -- "${replacement_path}"
         return 0
+      fi
+      if ! preserve_replacement_metadata "${assignment_path}" "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        return 1
+      fi
+      mv -f -- "${replacement_path}" "${assignment_path}" || return 1
+      LAST_REPLACE_CHANGED=1
+      REPAIR_CHANGED=1
+    }
+
+    upsert_shell_assignment_after() {
+      assignment_path="$1"
+      assignment_key="$2"
+      assignment_value="$3"
+      anchor_key="$4"
+      LAST_REPLACE_CHANGED=0
+
+      [ -f "${assignment_path}" ] || {
+        echo "runtime configuration file is missing: ${assignment_path}" >&2
+        return 1
+      }
+
+      assignment_count="$(awk -v key="${assignment_key}" '
+        $0 ~ "^[[:space:]]*" key "[[:space:]]*=" { matches++ }
+        END { print matches + 0 }
+      ' "${assignment_path}")" || return 1
+      case "${assignment_count}" in
+        1)
+          replace_shell_assignment \
+            "${assignment_path}" "${assignment_key}" "${assignment_value}"
+          return $?
+          ;;
+        0)
+          ;;
+        *)
+          echo "found duplicate ${assignment_key} assignments in ${assignment_path}" >&2
+          return 1
+          ;;
+      esac
+
+      anchor_count="$(awk -v key="${anchor_key}" '
+        $0 ~ "^[[:space:]]*" key "[[:space:]]*=" { matches++ }
+        END { print matches + 0 }
+      ' "${assignment_path}")" || return 1
+      if [ "${anchor_count}" -ne 1 ]; then
+        echo "could not locate one ${anchor_key} anchor in ${assignment_path}" >&2
+        return 1
+      fi
+
+      replacement_dir="$(dirname -- "${assignment_path}")"
+      replacement_base="$(basename -- "${assignment_path}")"
+      replacement_path="$(mktemp "${replacement_dir}/.${replacement_base}.fast-repair.XXXXXX")" || return 1
+      if ! awk \
+        -v anchor="${anchor_key}" \
+        -v key="${assignment_key}" \
+        -v value="${assignment_value}" '
+        $0 ~ "^[[:space:]]*" anchor "[[:space:]]*=" {
+          print
+          print key "=" value
+          inserted++
+          next
+        }
+        { print }
+        END { if (inserted != 1) exit 42 }
+      ' "${assignment_path}" > "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        echo "could not insert ${assignment_key} in ${assignment_path}" >&2
+        return 1
       fi
       if ! preserve_replacement_metadata "${assignment_path}" "${replacement_path}"; then
         rm -f -- "${replacement_path}"
@@ -279,7 +347,8 @@
       echo "reconciling LibreNMS runtime database endpoint to ${DB_HOST}:${DB_PORT}"
       replace_shell_assignment "${RUNTIME_WAIT_PATH}" DB_HOST "${DB_HOST}" || return 1
       [ "${LAST_REPLACE_CHANGED}" -eq 0 ] || RUNTIME_DB_CHANGED=1
-      replace_shell_assignment "${RUNTIME_WAIT_PATH}" REQUIRE_LOCAL_GALERA_READY 1 || return 1
+      upsert_shell_assignment_after \
+        "${RUNTIME_WAIT_PATH}" REQUIRE_LOCAL_GALERA_READY 1 DB_HOST || return 1
       [ "${LAST_REPLACE_CHANGED}" -eq 0 ] || RUNTIME_DB_CHANGED=1
       replace_shell_assignment "${LIBRENMS_ENV_PATH}" DB_HOST "${DB_HOST}" || return 1
       if [ "${LAST_REPLACE_CHANGED}" -ne 0 ]; then
