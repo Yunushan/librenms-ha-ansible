@@ -41,6 +41,18 @@
   changed_when: false
   listen: Restart PHP-FPM
 
+- name: Reset failed PHP-FPM unit state before restart
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_php_fpm_service_effective }}"
+  changed_when: false
+  failed_when: false
+  listen: Restart PHP-FPM
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+
 - name: Restart PHP-FPM through systemd
   ansible.builtin.command:
     argv:

@@ -1206,8 +1206,13 @@ matching versioned PHP CLI/FPM packages, selects the matching `php` alternative,
 and lets the application role derive the matching PHP-FPM unit. During that
 handoff, it validates the selected PHP-FPM configuration, stops older FPM
 streams that still contain the role-managed LibreNMS pool, and removes only
-those stale `librenms.conf` pool files before starting the selected stream. This
-prevents two PHP-FPM versions from competing for the shared LibreNMS socket. An empty
+those stale `librenms.conf` pool files before starting the selected stream. If
+an older service still owns the shared socket after its pool file was removed,
+the handoff resolves the listener through its systemd cgroup and stops only that
+older PHP-FPM unit. Selected-stream startup clears systemd failure state and
+performs one bounded stop/cleanup/retry before reporting full unit, journal,
+process, socket, and runtime-file diagnostics. This prevents two PHP-FPM
+versions from competing for the shared LibreNMS socket. An empty
 override is the safe default and does not add the PPA on Ubuntu 24.04/26.04.
 Stage an explicit stream on a clone first, then run the PHP runtime check,
 Composer validation, and the VIP web-health probe before changing production.

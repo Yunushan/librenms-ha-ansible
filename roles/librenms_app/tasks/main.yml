@@ -1239,6 +1239,7 @@
   when:
     - librenms_manage_php_fpm | bool
     - ansible_facts.os_family == 'Debian'
+    - ansible_facts.service_mgr == 'systemd'
 
 - name: Deploy LibreNMS nginx site
   template:
@@ -2241,6 +2242,81 @@
   when:
     - librenms_manage_php_fpm | bool
 
+- name: Record processes owning the LibreNMS PHP-FPM socket
+  ansible.builtin.set_fact:
+    librenms_php_fpm_socket_owner_pids: >-
+      {{
+        librenms_php_fpm_socket_listeners_before_handoff.stdout_lines
+        | default([])
+        | select('search', librenms_php_fpm_socket | regex_escape)
+        | join('\n')
+        | regex_findall('pid=([0-9]+)')
+        | unique
+        | list
+      }}
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Inspect systemd units owning the LibreNMS PHP-FPM socket
+  ansible.builtin.command:
+    argv:
+      - cat
+      - "/proc/{{ item }}/cgroup"
+  loop: "{{ librenms_php_fpm_socket_owner_pids | default([]) }}"
+  loop_control:
+    label: "pid={{ item }}"
+  register: librenms_php_fpm_socket_owner_cgroups
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Record stale socket-owning PHP-FPM streams
+  ansible.builtin.set_fact:
+    librenms_php_fpm_stale_socket_owner_units: >-
+      {{
+        librenms_php_fpm_socket_owner_cgroups.results
+        | default([])
+        | map(attribute='stdout')
+        | join('\n')
+        | regex_findall('/(php[0-9]+[.][0-9]+-fpm[.]service)(?:/|$)')
+        | unique
+        | reject('equalto', librenms_php_fpm_service_effective ~ '.service')
+        | list
+      }}
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Stop stale socket-owning PHP-FPM streams before handoff
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ librenms_php_fpm_stale_socket_owner_units | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.os_family == 'Debian'
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Reinspect PHP-FPM socket listeners after stream handoff
+  ansible.builtin.command:
+    argv:
+      - ss
+      - -H
+      - -xlpn
+  register: librenms_php_fpm_socket_listeners_after_handoff
+  changed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+
 - name: Remove unowned stale PHP-FPM socket before selected stream startup
   ansible.builtin.file:
     path: "{{ librenms_php_fpm_socket }}"
@@ -2249,10 +2325,141 @@
     - librenms_manage_php_fpm | bool
     - >-
       librenms_php_fpm_socket
-      not in (librenms_php_fpm_socket_listeners_before_handoff.stdout | default(''))
+      not in (librenms_php_fpm_socket_listeners_after_handoff.stdout | default(''))
 
 - name: Enable PHP-FPM
-  service:
+  ansible.builtin.service:
+    name: "{{ librenms_php_fpm_service_effective }}"
+    enabled: true
+  when: librenms_manage_php_fpm | bool
+
+- name: Inspect selected PHP-FPM state before startup
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_php_fpm_service_effective }}"
+  register: librenms_php_fpm_state_before_start
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Reset failed PHP-FPM unit state before selected stream startup
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_php_fpm_service_effective }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Start selected PHP-FPM stream through systemd
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - >-
+        {{
+          'restart'
+          if (librenms_identity_account_changed | default(false) | bool)
+          else 'start'
+        }}
+      - "{{ librenms_php_fpm_service_effective }}"
+  register: librenms_php_fpm_systemd_start
+  changed_when: >-
+    (librenms_php_fpm_systemd_start.rc == 0)
+    and (
+      (librenms_php_fpm_state_before_start.rc | default(1) != 0)
+      or (librenms_identity_account_changed | default(false) | bool)
+    )
+  failed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Stop incomplete selected PHP-FPM startup before bounded retry
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - 30s
+      - systemctl
+      - stop
+      - "{{ librenms_php_fpm_service_effective }}"
+  register: librenms_php_fpm_failed_start_stop
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_systemd_start.rc | default(0) != 0
+
+- name: Clear incomplete selected PHP-FPM service cgroup before bounded retry
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - kill
+      - --kill-who=all
+      - --signal=KILL
+      - "{{ librenms_php_fpm_service_effective }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_systemd_start.rc | default(0) != 0
+
+- name: Reset selected PHP-FPM unit state before bounded retry
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_php_fpm_service_effective }}"
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_systemd_start.rc | default(0) != 0
+
+- name: Inspect PHP-FPM socket after failed selected stream startup
+  ansible.builtin.command:
+    argv:
+      - ss
+      - -H
+      - -xlpn
+  register: librenms_php_fpm_socket_after_failed_start
+  changed_when: false
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_systemd_start.rc | default(0) != 0
+
+- name: Remove unowned PHP-FPM socket before bounded retry
+  ansible.builtin.file:
+    path: "{{ librenms_php_fpm_socket }}"
+    state: absent
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_systemd_start.rc | default(0) != 0
+    - >-
+      librenms_php_fpm_socket
+      not in (librenms_php_fpm_socket_after_failed_start.stdout | default(''))
+
+- name: Retry selected PHP-FPM stream startup once after bounded cleanup
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - start
+      - "{{ librenms_php_fpm_service_effective }}"
+  register: librenms_php_fpm_systemd_retry
+  changed_when: librenms_php_fpm_systemd_retry.rc == 0
+  failed_when: false
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_systemd_start.rc | default(0) != 0
+
+- name: Start selected PHP-FPM stream without systemd
+  ansible.builtin.service:
     name: "{{ librenms_php_fpm_service_effective }}"
     state: >-
       {{
@@ -2260,8 +2467,155 @@
         if (librenms_identity_account_changed | default(false) | bool)
         else 'started'
       }}
-    enabled: true
-  when: librenms_manage_php_fpm | bool
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.service_mgr != 'systemd'
+
+- name: Record selected PHP-FPM startup failure
+  ansible.builtin.set_fact:
+    librenms_php_fpm_start_failed: >-
+      {{
+        (
+          librenms_php_fpm_systemd_retry.rc
+          | default(librenms_php_fpm_systemd_start.rc | default(0))
+          | int
+        ) != 0
+      }}
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Capture selected PHP-FPM properties after failed startup
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - "{{ librenms_php_fpm_service_effective }}"
+      - --property=LoadState
+      - --property=ActiveState
+      - --property=SubState
+      - --property=Result
+      - --property=MainPID
+      - --property=ControlPID
+      - --property=ExecMainCode
+      - --property=ExecMainStatus
+      - --property=StatusText
+  register: librenms_php_fpm_start_properties
+  changed_when: false
+  failed_when: false
+  when: librenms_php_fpm_start_failed | default(false) | bool
+
+- name: Capture selected PHP-FPM status after failed startup
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - status
+      - "{{ librenms_php_fpm_service_effective }}"
+      - --no-pager
+      - -l
+  register: librenms_php_fpm_start_status
+  changed_when: false
+  failed_when: false
+  when: librenms_php_fpm_start_failed | default(false) | bool
+
+- name: Capture selected PHP-FPM journal after failed startup
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - -u
+      - "{{ librenms_php_fpm_service_effective }}"
+      - -n
+      - "120"
+      - --no-pager
+  register: librenms_php_fpm_start_journal
+  changed_when: false
+  failed_when: false
+  when: librenms_php_fpm_start_failed | default(false) | bool
+
+- name: Capture PHP-FPM processes after failed startup
+  ansible.builtin.command:
+    argv:
+      - pgrep
+      - -a
+      - -f
+      - php-fpm
+  register: librenms_php_fpm_start_processes
+  changed_when: false
+  failed_when: false
+  when: librenms_php_fpm_start_failed | default(false) | bool
+
+- name: Capture PHP-FPM socket listeners after failed startup
+  ansible.builtin.command:
+    argv:
+      - ss
+      - -H
+      - -xlpn
+  register: librenms_php_fpm_start_socket_listeners
+  changed_when: false
+  failed_when: false
+  when: librenms_php_fpm_start_failed | default(false) | bool
+
+- name: Capture PHP-FPM runtime files after failed startup
+  ansible.builtin.command:
+    argv:
+      - find
+      - /run/php
+      - -maxdepth
+      - "1"
+      - -printf
+      - "%M %u:%g %p -> %l\n"
+  register: librenms_php_fpm_start_runtime_files
+  changed_when: false
+  failed_when: false
+  when: librenms_php_fpm_start_failed | default(false) | bool
+
+- name: Fail with PHP-FPM startup diagnostics
+  ansible.builtin.fail:
+    msg: |-
+      Failed to start {{ librenms_php_fpm_service_effective }} on {{ inventory_hostname }}
+      after one bounded cleanup and retry.
+
+      PHP-FPM configuration test:
+      {{ librenms_php_fpm_pre_handoff_config_test.stdout | default('') }}
+      {{ librenms_php_fpm_pre_handoff_config_test.stderr | default('') }}
+
+      initial systemctl startup:
+      {{ librenms_php_fpm_systemd_start.stdout | default('') }}
+      {{ librenms_php_fpm_systemd_start.stderr | default('') }}
+
+      bounded cleanup stop:
+      {{ librenms_php_fpm_failed_start_stop.stdout | default('') }}
+      {{ librenms_php_fpm_failed_start_stop.stderr | default('') }}
+
+      retry systemctl startup:
+      {{ librenms_php_fpm_systemd_retry.stdout | default('') }}
+      {{ librenms_php_fpm_systemd_retry.stderr | default('') }}
+
+      systemd properties:
+      {{ librenms_php_fpm_start_properties.stdout | default('') }}
+
+      systemctl status:
+      {{ librenms_php_fpm_start_status.stdout | default('') }}
+      {{ librenms_php_fpm_start_status.stderr | default('') }}
+
+      recent journal:
+      {{ librenms_php_fpm_start_journal.stdout | default('') }}
+
+      PHP-FPM processes:
+      {{ librenms_php_fpm_start_processes.stdout | default('none') }}
+
+      listener for {{ librenms_php_fpm_socket }}:
+      {{
+        librenms_php_fpm_start_socket_listeners.stdout_lines
+        | default([])
+        | select('search', librenms_php_fpm_socket | regex_escape)
+        | join('\n')
+        | default('none', true)
+      }}
+
+      /run/php:
+      {{ librenms_php_fpm_start_runtime_files.stdout | default('unavailable') }}
+  when: librenms_php_fpm_start_failed | default(false) | bool
 
 - name: Flush web service handlers before validating LibreNMS web nodes
   meta: flush_handlers

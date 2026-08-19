@@ -73,7 +73,13 @@ main() {
         fail "PHP-FPM handoff must remove stale managed pools before enabling the selected stream"
     grep -Fq -- 'Remove unowned stale PHP-FPM socket before selected stream startup' <<<"${php_fpm_handoff_tasks}" ||
         fail "PHP-FPM handoff must remove an unowned stale socket before enabling the selected stream"
+    grep -Fq -- 'Stop stale socket-owning PHP-FPM streams before handoff' <<<"${php_fpm_handoff_tasks}" ||
+        fail "PHP-FPM handoff must stop an older stream that still owns the LibreNMS socket"
+    contains "${APP_TASKS_FILE}" 'Reset failed PHP-FPM unit state before selected stream startup'
+    contains "${APP_TASKS_FILE}" 'Retry selected PHP-FPM stream startup once after bounded cleanup'
+    contains "${APP_TASKS_FILE}" 'Fail with PHP-FPM startup diagnostics'
     contains "${APP_HANDLERS_FILE}" 'Validate PHP-FPM configuration before restart'
+    contains "${APP_HANDLERS_FILE}" 'Reset failed PHP-FPM unit state before restart'
     contains "${APP_HANDLERS_FILE}" 'Capture LibreNMS PHP-FPM socket owner after failed restart'
     contains "${APP_HANDLERS_FILE}" 'Fail with PHP-FPM restart diagnostics'
     contains "${WORKFLOW_FILE}" 'python-version: "3.14"'
