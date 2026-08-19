@@ -79,7 +79,11 @@ grep -q 'refusing unsafe RRDCacheD runtime path' "${TASKS}"
 grep -q 'librenms_fast_repair_rrdcached_required:' "${DEFAULTS}"
 grep -q 'systemctl_bounded start --no-block "${unit}"' "${TASKS}"
 grep -q 'wait_until_stopped()' "${TASKS}"
-grep -q -- '--property=ActiveState,SubState,MainPID,ControlPID' "${TASKS}"
+grep -q -- '--property=ActiveState,SubState,MainPID,ControlPID,ControlGroup' "${TASKS}"
+grep -q 'unit_cgroup_has_processes()' "${TASKS}"
+grep -q 'CGROUP_ROOT=/sys/fs/cgroup' "${TASKS}"
+grep -q '${CGROUP_ROOT}${unit_control_group}/cgroup.events' "${TASKS}"
+grep -q '${CGROUP_ROOT}${unit_control_group}/cgroup.procs' "${TASKS}"
 grep -q 'failed:\*|\*:auto-restart)' "${TASKS}"
 grep -q 'systemctl_bounded stop --no-block "${stop_unit}"' "${TASKS}"
 grep -q 'systemctl_bounded kill --kill-whom=all --signal=TERM "${stop_unit}"' "${TASKS}"
@@ -155,13 +159,15 @@ grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
         'ActiveState=failed' \
         'SubState=auto-restart' \
         'MainPID=0' \
-        'ControlPID=0'
+        'ControlPID=0' \
+        'ControlGroup='
     else
       printf '%s\n' \
         'ActiveState=inactive' \
         'SubState=dead' \
         'MainPID=0' \
-        'ControlPID=0'
+        'ControlPID=0' \
+        'ControlGroup='
     fi
   }
 
@@ -177,6 +183,34 @@ grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
   [ "$(cat "${stop_sequence_count}")" -eq 2 ]
   grep -q '^stop --no-block rrdcached.service$' "${stop_command_log}"
   grep -q '^reset-failed rrdcached.service$' "${stop_command_log}"
+)
+
+(
+  cgroup_root="${TEST_ROOT}/cgroup"
+  cgroup_path="/system.slice/rrdcached.service"
+  mkdir -p "${cgroup_root}${cgroup_path}"
+  printf 'populated 1\n' > "${cgroup_root}${cgroup_path}/cgroup.events"
+
+  probe() {
+    printf '%s\n' \
+      'ActiveState=inactive' \
+      'SubState=dead' \
+      'MainPID=0' \
+      'ControlPID=0' \
+      "ControlGroup=${cgroup_path}"
+  }
+
+  CGROUP_ROOT="${cgroup_root}"
+  # shellcheck source=/dev/null
+  source "${STOP_FUNCTIONS}"
+
+  if wait_until_stopped rrdcached.service 1; then
+    echo "fast repair must not treat an orphaned unit cgroup as stopped" >&2
+    exit 1
+  fi
+
+  printf 'populated 0\n' > "${cgroup_root}${cgroup_path}/cgroup.events"
+  wait_until_stopped rrdcached.service 1
 )
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)

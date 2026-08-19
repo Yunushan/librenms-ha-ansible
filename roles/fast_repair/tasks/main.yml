@@ -40,6 +40,7 @@
     READINESS_PATH={{ librenms_fast_repair_readiness_path | quote }}
     READINESS_RESET_PATH={{ librenms_fast_repair_readiness_reset_path | quote }}
     READINESS_SOCKET_UNIT={{ librenms_fast_repair_readiness_socket_unit | quote }}
+    CGROUP_ROOT=/sys/fs/cgroup
 
     REPAIR_FAILURE=0
     REPAIR_CHANGED=0
@@ -148,16 +149,40 @@
 
     unit_stop_snapshot() {
       probe systemctl show "$1" --no-pager \
-        --property=ActiveState,SubState,MainPID,ControlPID 2>/dev/null |
+        --property=ActiveState,SubState,MainPID,ControlPID,ControlGroup 2>/dev/null |
         awk -F= '
           $1 == "ActiveState" { active_state=$2 }
           $1 == "SubState" { sub_state=$2 }
           $1 == "MainPID" { main_pid=$2 }
           $1 == "ControlPID" { control_pid=$2 }
+          $1 == "ControlGroup" { control_group=$2 }
           END {
-            printf "%s|%s|%s|%s\n", active_state, sub_state, main_pid, control_pid
+            printf "%s|%s|%s|%s|%s\n", active_state, sub_state, main_pid, control_pid, control_group
           }
         '
+    }
+
+    unit_cgroup_has_processes() {
+      unit_control_group="$1"
+      case "${unit_control_group}" in
+        /system.slice/*) ;;
+        *) return 1 ;;
+      esac
+
+      cgroup_events_file="${CGROUP_ROOT}${unit_control_group}/cgroup.events"
+      if [ -r "${cgroup_events_file}" ]; then
+        grep -Eq '^populated[[:space:]]+1$' "${cgroup_events_file}"
+        return $?
+      fi
+
+      for cgroup_process_file in \
+        "${CGROUP_ROOT}${unit_control_group}/cgroup.procs" \
+        "${CGROUP_ROOT}/systemd${unit_control_group}/tasks"; do
+        [ -r "${cgroup_process_file}" ] || continue
+        grep -Eq '^[[:space:]]*[0-9]+[[:space:]]*$' "${cgroup_process_file}"
+        return $?
+      done
+      return 1
     }
 
     wait_until_stopped() {
@@ -171,11 +196,20 @@
         stopped_substate="${stopped_remainder%%|*}"
         stopped_remainder="${stopped_remainder#*|}"
         stopped_main_pid="${stopped_remainder%%|*}"
-        stopped_control_pid="${stopped_remainder#*|}"
+        stopped_remainder="${stopped_remainder#*|}"
+        stopped_control_pid="${stopped_remainder%%|*}"
+        stopped_control_group="${stopped_remainder#*|}"
 
         if [ "${stopped_state}" = inactive ] && \
            [ "${stopped_main_pid}" = 0 ] && \
            [ "${stopped_control_pid}" = 0 ]; then
+          if unit_cgroup_has_processes "${stopped_control_group}"; then
+            # MainPID can already be zero while a daemon left behind by a
+            # generated SysV unit is still alive in the service cgroup.
+            # Let stop_stuck_service escalate against that cgroup before any
+            # PID or socket file is removed.
+            return 1
+          fi
           return 0
         fi
 

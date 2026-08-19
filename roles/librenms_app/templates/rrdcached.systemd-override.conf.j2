@@ -10,6 +10,9 @@ Type=simple
 User=root
 Group=root
 PIDFile=
+KillMode=control-group
+SendSIGKILL=yes
+TimeoutStopSec=30s
 {% if librenms_startup_repair_fix_writable_ownership | bool %}
 ExecStartPre={{ librenms_rrd_permission_repair_path }}
 {% endif %}
@@ -32,5 +35,6 @@ ExecStart={{ librenms_rrdcached_daemon_path }} \
   -l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}{% endif %} \
   -U {{ librenms_user }} \
   -G {{ librenms_group }}
+ExecStop=
 Restart=on-failure
 RestartSec=5s
