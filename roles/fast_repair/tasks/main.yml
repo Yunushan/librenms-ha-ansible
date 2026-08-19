@@ -206,11 +206,12 @@
           if unit_cgroup_has_processes "${stopped_control_group}"; then
             # MainPID can already be zero while a daemon left behind by a
             # generated SysV unit is still alive in the service cgroup.
-            # Let stop_stuck_service escalate against that cgroup before any
-            # PID or socket file is removed.
-            return 1
+            # Keep polling so TERM/KILL gets a bounded grace period to empty
+            # the cgroup before stop_stuck_service escalates or gives up.
+            :
+          else
+            return 0
           fi
-          return 0
         fi
 
         case "${stopped_state}:${stopped_substate}" in
@@ -231,7 +232,7 @@
       unit="$1"
       echo "--- ${unit} properties ---" >&2
       probe systemctl show "${unit}" --no-pager \
-        --property=ActiveState,SubState,Result,ControlPID,MainPID,ExecMainCode,ExecMainStatus >&2 || true
+        --property=ActiveState,SubState,Result,ControlPID,MainPID,ControlGroup,ExecMainCode,ExecMainStatus >&2 || true
       echo "--- ${unit} status ---" >&2
       probe systemctl status "${unit}" --no-pager --full >&2 || true
       echo "--- ${unit} recent journal ---" >&2

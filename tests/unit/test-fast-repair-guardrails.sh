@@ -201,6 +201,7 @@ grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
   }
 
   CGROUP_ROOT="${cgroup_root}"
+  POLL_DELAY=0
   # shellcheck source=/dev/null
   source "${STOP_FUNCTIONS}"
 
@@ -209,8 +210,11 @@ grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
     exit 1
   fi
 
-  printf 'populated 0\n' > "${cgroup_root}${cgroup_path}/cgroup.events"
-  wait_until_stopped rrdcached.service 1
+  sleep() {
+    printf 'populated 0\n' > "${cgroup_root}${cgroup_path}/cgroup.events"
+  }
+
+  wait_until_stopped rrdcached.service 2
 )
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
