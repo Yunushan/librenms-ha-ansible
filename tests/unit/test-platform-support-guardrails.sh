@@ -20,6 +20,8 @@ DAILY_SERVICE_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-daily.servic
 DISPATCHER_OVERRIDE_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-dispatcher.systemd-override.conf.j2"
 SCHEDULER_SERVICE_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-scheduler.service.j2"
 STARTUP_REPAIR_SERVICE_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-ha-startup-repair.service.j2"
+BACKUP_SERVICE_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-backup.service.j2"
+RRDCACHED_OVERRIDE_FILE="$ROOT_DIR/roles/librenms_app/templates/rrdcached.systemd-override.conf.j2"
 PRODUCTION_READINESS_FILE="$ROOT_DIR/roles/production_readiness/tasks/main.yml"
 SYSLOG_FILE="$ROOT_DIR/roles/librenms_syslog/tasks/main.yml"
 SYSLOG_TEMPLATE="$ROOT_DIR/roles/librenms_syslog/templates/rsyslog-librenms.conf.j2"
@@ -293,6 +295,26 @@ require_text "$DISPATCHER_OVERRIDE_FILE" 'librenms_mariadb_service_name'
 require_text "$DISPATCHER_OVERRIDE_FILE" 'librenms_haproxy_service_name'
 require_text "$SCHEDULER_SERVICE_FILE" "librenms_rrd_mode in ['glusterfs', 'external']"
 require_text "$STARTUP_REPAIR_SERVICE_FILE" "librenms_rrd_mode in ['glusterfs', 'external']"
+
+systemd_templates=(
+    "$BACKUP_SERVICE_FILE"
+    "$DAILY_SERVICE_FILE"
+    "$DISPATCHER_OVERRIDE_FILE"
+    "$RRDCACHED_OVERRIDE_FILE"
+    "$SCHEDULER_SERVICE_FILE"
+    "$STARTUP_REPAIR_SERVICE_FILE"
+)
+for systemd_template in "${systemd_templates[@]}"; do
+    if awk '
+      /{% endif %}[[:space:]]*$/ &&
+      $0 !~ /^[[:space:]]*{% endif %}[[:space:]]*$/ { found=1 }
+      END { exit(found ? 0 : 1) }
+    ' "$systemd_template"; then
+        printf 'Inline end-of-line Jinja block can concatenate systemd directives: %s\n' \
+            "$systemd_template" >&2
+        exit 1
+    fi
+done
 
 if grep -Fq 'remote-fs.target glusterd.service' "$DISPATCHER_OVERRIDE_FILE"; then
     printf 'The dispatcher override must not require Gluster on external-NFS or local RRD hosts.\n' >&2

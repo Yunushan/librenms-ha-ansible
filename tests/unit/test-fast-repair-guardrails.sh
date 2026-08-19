@@ -129,11 +129,18 @@ grep -q '^RemainAfterExit=no$' "${RRDCACHED_OVERRIDE}"
 grep -q 'librenms_rrdcached_unit_repair_confirm' "${RRDCACHED_UNIT_PLAYBOOK}"
 grep -q 'librenms_manage_rrdcached_systemd_override' "${RRDCACHED_UNIT_PLAYBOOK}"
 grep -q 'rrdcached.systemd-override.conf.j2' "${RRDCACHED_UNIT_PLAYBOOK}"
-grep -q -- '--property=Type,RemainAfterExit,KillMode,DropInPaths,ExecStart' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q -- '--property=Type,RemainAfterExit,KillMode,DropInPaths,ExecStart,After' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q 'Read back the deployed RRDCacheD systemd drop-in' "${RRDCACHED_UNIT_PLAYBOOK}"
+grep -q "'serviceRequiresMountsFor=' not in" "${RRDCACHED_UNIT_PLAYBOOK}"
 grep -q 'The service was not started, stopped, or' "${RRDCACHED_UNIT_PLAYBOOK}"
 grep -q '^rrdcached-unit-repair:' "${MAKEFILE}"
 grep -q '^rrdcached-unit-repair-ask-become-pass:' "${MAKEFILE}"
 grep -q 'RRDCACHED_UNIT_REPAIR_CONFIRM=true' "${FAST_REPAIR_DOC}"
+
+if grep -Eq '^After=.*\{%.*%\}[[:space:]]*$' "${RRDCACHED_OVERRIDE}"; then
+    echo "RRDCacheD After= must not use an end-of-line Jinja block that trims its newline" >&2
+    exit 1
+fi
 
 if grep -Eq 'state:[[:space:]]*(started|stopped|restarted)' "${RRDCACHED_UNIT_PLAYBOOK}"; then
     echo "RRDCacheD unit repair must not change service runtime state" >&2

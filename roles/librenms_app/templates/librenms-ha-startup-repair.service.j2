@@ -9,7 +9,7 @@ After={{ librenms_mariadb_service_name }}.service
 After={{ librenms_haproxy_service_name }}.service
 After={{ librenms_redis_service_name }}.service
 After={{ librenms_redis_sentinel_service_name_effective }}.service
-RequiresMountsFor={{ librenms_install_dir }}{% if librenms_rrd_mode in ['glusterfs', 'external'] %} {{ librenms_install_dir }}/rrd{% endif %}
+RequiresMountsFor={{ librenms_install_dir }}{{ (' ' ~ librenms_install_dir ~ '/rrd') if librenms_rrd_mode in ['glusterfs', 'external'] else '' }}
 
 [Service]
 Type=oneshot

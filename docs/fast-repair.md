@@ -125,6 +125,12 @@ not start a second `rrdcached` instance. Keep the affected node out of service,
 verify the other HA nodes, and use the controlled single-node maintenance and
 reboot workflow. Fast repair deliberately does not reboot a host automatically.
 
+A process reported in state `Z` (`<defunct>`) has already exited and cannot be
+signaled. Only its parent can reap it. If a long-lived zombie owned by PID 1
+keeps the systemd cgroup populated, the same controlled single-node reboot is
+required; deleting its PID file or starting a second daemon does not repair the
+stuck service state.
+
 If the diagnostics also show `Starting rrdcached.service - LSB`, deploy the
 native foreground systemd drop-in before rebooting the affected node. This
 bounded playbook reloads systemd and validates the effective unit properties;
@@ -136,10 +142,11 @@ make rrdcached-unit-repair-ask-become-pass \
   RRDCACHED_UNIT_REPAIR_LIMIT=lnms1
 ```
 
-If a subsequent fast repair still reports the old process in state `D`, drain
-only that node while deliberately skipping the impossible RRDCacheD stop, then
-reboot it. The maintenance playbook verifies that the remaining Galera,
-Redis, VIP, and dispatcher paths stay available before it reports success:
+If a subsequent fast repair still reports the old process in state `D` or `Z`,
+drain only that node while deliberately skipping the impossible RRDCacheD
+stop, then reboot it. The maintenance playbook verifies that the remaining
+Galera, Redis, VIP, and dispatcher paths stay available before it reports
+success:
 
 ```sh
 make maintenance-enter \

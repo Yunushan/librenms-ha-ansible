@@ -98,6 +98,12 @@
         daemon_reload: true
       when: librenms_rrdcached_runs_on_host | bool
 
+    - name: Read back the deployed RRDCacheD systemd drop-in
+      ansible.builtin.slurp:
+        src: "{{ librenms_rrdcached_systemd_override_path }}"
+      register: librenms_rrdcached_unit_dropin
+      when: librenms_rrdcached_runs_on_host | bool
+
     - name: Read the effective RRDCacheD systemd properties
       ansible.builtin.command:
         argv:
@@ -105,7 +111,7 @@
           - show
           - "{{ librenms_rrdcached_service_name }}.service"
           - --no-pager
-          - --property=Type,RemainAfterExit,KillMode,DropInPaths,ExecStart
+          - --property=Type,RemainAfterExit,KillMode,DropInPaths,ExecStart,After
       register: librenms_rrdcached_unit_properties
       changed_when: false
       when: librenms_rrdcached_runs_on_host | bool
@@ -117,6 +123,21 @@
           - "'RemainAfterExit=no' in librenms_rrdcached_unit_properties.stdout"
           - "'KillMode=control-group' in librenms_rrdcached_unit_properties.stdout"
           - >-
+            (
+              'RequiresMountsFor=' ~ librenms_rrdcached_base_path
+            ) in (
+              librenms_rrdcached_unit_dropin.content
+              | b64decode
+            ).splitlines()
+          - >-
+            'serviceRequiresMountsFor=' not in (
+              librenms_rrdcached_unit_dropin.content
+              | b64decode
+            )
+          - >-
+            librenms_rrd_mode != 'glusterfs'
+            or 'glusterd.service' in librenms_rrdcached_unit_properties.stdout
+          - >-
             librenms_rrdcached_systemd_override_path
             in librenms_rrdcached_unit_properties.stdout
           - >-
@@ -127,6 +148,13 @@
 
           Effective properties:
           {{ librenms_rrdcached_unit_properties.stdout | default('unavailable') }}
+
+          Deployed drop-in:
+          {{
+            librenms_rrdcached_unit_dropin.content
+            | default('')
+            | b64decode
+          }}
       when: librenms_rrdcached_runs_on_host | bool
 
     - name: Report non-disruptive RRDCacheD unit repair result

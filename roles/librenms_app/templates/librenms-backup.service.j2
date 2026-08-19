@@ -2,7 +2,7 @@
 Description=LibreNMS {{ librenms_backup_unit_category }} backup
 Wants=network-online.target remote-fs.target
 After=network-online.target remote-fs.target mariadb.service haproxy.service
-RequiresMountsFor={{ librenms_install_dir }}{% if librenms_backup_include_rrd | bool %} {{ librenms_backup_rrd_path }}{% endif %}
+RequiresMountsFor={{ librenms_install_dir }}{{ (' ' ~ librenms_backup_rrd_path) if (librenms_backup_include_rrd | bool) else '' }}
 
 [Service]
 Type=oneshot
