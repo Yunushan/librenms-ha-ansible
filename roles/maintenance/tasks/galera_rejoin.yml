@@ -1,0 +1,160 @@
+---
+- name: Rejoin target MariaDB without bootstrapping Galera
+  vars:
+    librenms_maintenance_target_mariadb_service: >-
+      {{
+        hostvars[librenms_maintenance_target].librenms_mariadb_service_name
+        | default(librenms_mariadb_service_name)
+      }}
+    librenms_maintenance_target_mariadb_socket: >-
+      {{
+        hostvars[librenms_maintenance_target].librenms_mariadb_socket
+        | default(librenms_mariadb_socket)
+      }}
+  block:
+    - name: Reset failed target MariaDB unit state before normal rejoin
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - reset-failed
+          - "{{ librenms_maintenance_target_mariadb_service }}"
+      delegate_to: "{{ librenms_maintenance_target }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Clear stale Galera bootstrap environment before normal rejoin
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - unset-environment
+          - MYSQLD_OPTS
+          - _WSREP_NEW_CLUSTER
+      delegate_to: "{{ librenms_maintenance_target }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Start target MariaDB after maintenance
+      ansible.builtin.service:
+        name: "{{ librenms_maintenance_target_mariadb_service }}"
+        state: started
+      delegate_to: "{{ librenms_maintenance_target }}"
+      register: librenms_maintenance_target_mariadb_start
+      retries: "{{ librenms_maintenance_mariadb_start_retries | int }}"
+      delay: "{{ librenms_maintenance_mariadb_start_delay | int }}"
+      until: librenms_maintenance_target_mariadb_start is succeeded
+
+    - name: Wait for target MariaDB socket after maintenance
+      ansible.builtin.wait_for:
+        path: "{{ librenms_maintenance_target_mariadb_socket }}"
+        state: started
+        timeout: "{{ librenms_maintenance_mariadb_socket_timeout | int }}"
+      delegate_to: "{{ librenms_maintenance_target }}"
+
+    - name: Wait for target Galera member to become Primary and Synced
+      ansible.builtin.command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - "--socket={{ librenms_maintenance_target_mariadb_socket }}"
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');
+      delegate_to: "{{ librenms_maintenance_target }}"
+      register: librenms_maintenance_target_galera_state
+      changed_when: false
+      until:
+        - librenms_maintenance_target_galera_state.rc == 0
+        - >-
+          librenms_maintenance_target_galera_state.stdout
+          is search('wsrep_cluster_status[ \t]+Primary')
+        - >-
+          librenms_maintenance_target_galera_state.stdout
+          is search('wsrep_ready[ \t]+ON')
+        - >-
+          librenms_maintenance_target_galera_state.stdout
+          is search('wsrep_local_state_comment[ \t]+Synced')
+      retries: "{{ librenms_maintenance_galera_retries | int }}"
+      delay: "{{ librenms_maintenance_galera_delay | int }}"
+  rescue:
+    - name: Capture target MariaDB status after failed maintenance rejoin
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_maintenance_target_mariadb_service }}"
+          - --no-pager
+          - -l
+      delegate_to: "{{ librenms_maintenance_target }}"
+      register: librenms_maintenance_target_mariadb_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture target MariaDB journal after failed maintenance rejoin
+      ansible.builtin.command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_maintenance_target_mariadb_service }}"
+          - -n
+          - "120"
+          - --no-pager
+      delegate_to: "{{ librenms_maintenance_target }}"
+      register: librenms_maintenance_target_mariadb_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture target Galera saved state after failed maintenance rejoin
+      ansible.builtin.command:
+        argv:
+          - cat
+          - /var/lib/mysql/grastate.dat
+      delegate_to: "{{ librenms_maintenance_target }}"
+      register: librenms_maintenance_target_galera_saved_state
+      changed_when: false
+      failed_when: false
+
+    - name: Capture target MariaDB runtime after failed maintenance rejoin
+      ansible.builtin.shell: |-
+        set -o pipefail
+        {
+          echo "--- systemd environment ---"
+          systemctl show-environment | grep -E '^(MYSQLD_OPTS|_WSREP_)=' || true
+          echo "--- processes ---"
+          ps -eo pid,ppid,stat,cmd | grep -E '[m]ariadbd|[m]ysql' || true
+          echo "--- listeners ---"
+          ss -ltnp || true
+        }
+      args:
+        executable: /bin/bash
+      delegate_to: "{{ librenms_maintenance_target }}"
+      register: librenms_maintenance_target_mariadb_runtime
+      changed_when: false
+
+    - name: Fail with target Galera maintenance rejoin diagnostics
+      ansible.builtin.fail:
+        msg: |-
+          {{ librenms_maintenance_target }} did not rejoin the existing Galera
+          primary component after maintenance. No Galera bootstrap was attempted
+          and no saved state was modified.
+
+          Last Galera query:
+          {{ (librenms_maintenance_target_galera_state | default({})).stdout | default('') }}
+          {{ (librenms_maintenance_target_galera_state | default({})).stderr | default('') }}
+
+          systemctl status:
+          {{ librenms_maintenance_target_mariadb_status.stdout | default('') }}
+          {{ librenms_maintenance_target_mariadb_status.stderr | default('') }}
+
+          journal:
+          {{ librenms_maintenance_target_mariadb_journal.stdout | default('') }}
+
+          grastate.dat:
+          {{ librenms_maintenance_target_galera_saved_state.stdout | default('') }}
+
+          runtime:
+          {{ librenms_maintenance_target_mariadb_runtime.stdout | default('') }}
+
+          Keep this node in maintenance and correct the reported normal-rejoin
+          failure. Do not bootstrap it while the other Galera members retain a
+          Primary component.

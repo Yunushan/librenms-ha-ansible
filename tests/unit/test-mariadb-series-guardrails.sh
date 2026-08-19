@@ -8,6 +8,7 @@ readonly GALERA_TEMPLATE="${ROOT_DIR}/roles/galera/templates/galera.cnf.j2"
 readonly GALERA_TASKS_FILE="${ROOT_DIR}/roles/galera/tasks/main.yml"
 readonly MAINTENANCE_DEFAULTS_FILE="${ROOT_DIR}/roles/maintenance/defaults/main.yml"
 readonly MAINTENANCE_EXIT_FILE="${ROOT_DIR}/roles/maintenance/tasks/exit.yml"
+readonly MAINTENANCE_GALERA_REJOIN_FILE="${ROOT_DIR}/roles/maintenance/tasks/galera_rejoin.yml"
 readonly README_FILE="${ROOT_DIR}/README.md"
 readonly OPERATIONS_FILE="${ROOT_DIR}/docs/operations.md"
 readonly SUPPORT_MATRIX_FILE="${ROOT_DIR}/docs/support-matrix.md"
@@ -68,7 +69,15 @@ main() {
     contains "${UPGRADE_RUNBOOK_FILE}" 'librenms_maintenance_resume_daily_timer=false'
     does_not_contain "${UPGRADE_RUNBOOK_FILE}" "sudo mysql -e 'SET GLOBAL innodb_fast_shutdown=1;'"
     contains "${MAINTENANCE_DEFAULTS_FILE}" 'librenms_maintenance_resume_daily_timer: true'
+    contains "${MAINTENANCE_DEFAULTS_FILE}" 'librenms_maintenance_mariadb_socket_timeout: 120'
     contains "${MAINTENANCE_EXIT_FILE}" 'librenms_maintenance_resume_daily_timer | bool'
+    contains "${MAINTENANCE_EXIT_FILE}" 'ansible.builtin.include_tasks: galera_rejoin.yml'
+    contains "${MAINTENANCE_GALERA_REJOIN_FILE}" 'Reset failed target MariaDB unit state before normal rejoin'
+    contains "${MAINTENANCE_GALERA_REJOIN_FILE}" 'Clear stale Galera bootstrap environment before normal rejoin'
+    contains "${MAINTENANCE_GALERA_REJOIN_FILE}" 'Wait for target MariaDB socket after maintenance'
+    contains "${MAINTENANCE_GALERA_REJOIN_FILE}" 'Fail with target Galera maintenance rejoin diagnostics'
+    contains "${MAINTENANCE_GALERA_REJOIN_FILE}" 'No Galera bootstrap was attempted'
+    does_not_contain "${MAINTENANCE_GALERA_REJOIN_FILE}" 'galera_new_cluster'
 
     printf 'MariaDB series guardrail test passed.\n'
 }

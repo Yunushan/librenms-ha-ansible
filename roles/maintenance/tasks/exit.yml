@@ -1,9 +1,6 @@
 ---
-- name: Start target MariaDB after maintenance
-  service:
-    name: "{{ hostvars[librenms_maintenance_target].librenms_mariadb_service_name | default(librenms_mariadb_service_name) }}"
-    state: started
-  delegate_to: "{{ librenms_maintenance_target }}"
+- name: Rejoin target MariaDB to the existing Galera primary component
+  ansible.builtin.include_tasks: galera_rejoin.yml
   when:
     - librenms_db_mode == 'galera'
     - librenms_maintenance_target in librenms_maintenance_db_nodes
