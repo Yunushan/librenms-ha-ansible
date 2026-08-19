@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PLAYBOOK="${ROOT_DIR}/playbooks/fast-repair.yml"
 TASKS="${ROOT_DIR}/roles/fast_repair/tasks/main.yml"
 DEFAULTS="${ROOT_DIR}/roles/fast_repair/defaults/main.yml"
+GLOBAL_DEFAULTS="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
+DISPATCHER_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-dispatcher-ha-recover.py.j2"
+RRD_PERMISSION_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-rrd-permission-repair.sh.j2"
 TEST_ROOT="$(mktemp -d)"
 RENDERED_SCRIPT="${TEST_ROOT}/rendered-fast-repair.sh"
 RECONCILE_FUNCTIONS="${TEST_ROOT}/reconcile-functions.sh"
@@ -41,9 +44,14 @@ grep -q 'probe test -d "${RRD_PATH}"' "${TASKS}"
 grep -q 'print_rrd_mount_diagnostics' "${TASKS}"
 grep -q "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_local_state_comment')" "${TASKS}"
 grep -q 'skipping rrdcached until the RRD mount is healthy' "${TASKS}"
-grep -q 'skipping LibreNMS maintenance timers until the runtime dependency gate passes' "${TASKS}"
+grep -q 'skipping LibreNMS maintenance timers until the dispatcher is active and registered' "${TASKS}"
 grep -q 'print_unit_diagnostics "${unit}"' "${TASKS}"
 grep -q 'if wait_until_active "${unit}"; then' "${TASKS}"
+grep -q 'wait_until_stably_active()' "${TASKS}"
+grep -q 'ensure_rrdcached_started()' "${TASKS}"
+grep -q 'cleanup_stale_rrdcached_runtime()' "${TASKS}"
+grep -q 'refusing unsafe RRDCacheD runtime path' "${TASKS}"
+grep -q 'librenms_fast_repair_rrdcached_required:' "${DEFAULTS}"
 grep -q 'systemctl_bounded start --no-block "${unit}"' "${TASKS}"
 grep -q 'wait_until_stopped()' "${TASKS}"
 grep -q 'systemctl_bounded stop --no-block "${stop_unit}"' "${TASKS}"
@@ -62,13 +70,25 @@ grep -q 'reconcile_runtime_db_endpoint()' "${TASKS}"
 grep -q 'replace_shell_assignment "${RUNTIME_WAIT_PATH}" DB_HOST "${DB_HOST}"' "${TASKS}"
 grep -q 'replace_shell_assignment "${LIBRENMS_ENV_PATH}" DB_HOST "${DB_HOST}"' "${TASKS}"
 grep -q 'replace_python_string_assignment "${DISPATCHER_RECOVER_PATH}" DB_HOST "${DB_HOST}"' "${TASKS}"
+grep -q 'replace_python_bool_assignment' "${TASKS}"
+grep -q 'reconcile_dispatcher_recovery_policy()' "${TASKS}"
+grep -q 'recover_dispatcher_registration()' "${TASKS}"
+grep -q 'dispatcher recovery helper is missing or not executable' "${TASKS}"
+grep -q 'librenms_fast_repair_dispatcher_recovery_enabled:' "${DEFAULTS}"
 grep -q 'REQUIRE_LOCAL_GALERA_READY 1 DB_HOST' "${TASKS}"
 grep -q 'cleared stale LibreNMS configuration cache' "${TASKS}"
 grep -q 'refresh_php_fpm_for_runtime_db_change()' "${TASKS}"
+grep -q 'librenms_dispatcher_failover_prune_unreachable_nodes: false' "${GLOBAL_DEFAULTS}"
+grep -q 'librenms_rrd_permission_repair_recursive: false' "${GLOBAL_DEFAULTS}"
+grep -q '{% if librenms_rrd_permission_repair_recursive | bool %}' "${RRD_PERMISSION_HELPER}"
+grep -q 'sys.exit(1)' "${DISPATCHER_HELPER}"
+grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
-rrdcached_start_line=$(grep -nF 'if ! ensure_started rrdcached; then' "${TASKS}" | head -n 1 | cut -d: -f1)
-dispatcher_start_line=$(grep -nF 'if ! ensure_started librenms.service; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+rrdcached_start_line=$(grep -nF 'if ensure_rrdcached_started; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+dispatcher_start_line=$(grep -nF 'if ensure_started librenms.service; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+dispatcher_recovery_line=$(grep -nF 'if ! recover_dispatcher_registration; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+timer_start_line=$(grep -nF 'if [ "${LIBRENMS_READY}" = true ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 runtime_gate_line=$(grep -nF 'if runtime_gate_ready; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 runtime_reconcile_line=$(grep -nF 'if [ "${GALERA_READY}" = true ] && ! reconcile_runtime_db_endpoint; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 
@@ -85,6 +105,12 @@ fi
 
 if [ "${runtime_reconcile_line}" -ge "${runtime_gate_line}" ]; then
     echo "fast repair must reconcile the runtime database endpoint before running its dependency gate" >&2
+    exit 1
+fi
+
+if [ "${dispatcher_recovery_line}" -le "${dispatcher_start_line}" ] || \
+   [ "${dispatcher_recovery_line}" -ge "${timer_start_line}" ]; then
+    echo "fast repair must recover dispatcher registration after service startup and before timers" >&2
     exit 1
 fi
 
@@ -115,6 +141,7 @@ EOF
 cat > "${dispatcher_recover}" <<'EOF'
 #!/usr/bin/env python3
 DB_HOST = "10.2.7.144"
+PRUNE_UNREACHABLE_NODES = True
 EOF
 printf 'stale cache\n' > "${config_cache}"
 chmod 0750 "${runtime_wait}" "${dispatcher_recover}"
@@ -137,6 +164,8 @@ REPAIR_CHANGED=0
 RUNTIME_DB_CHANGED=0
 RUNTIME_ENV_CHANGED=0
 LAST_REPLACE_CHANGED=0
+DISPATCHER_RECOVERY_ENABLED=true
+DISPATCHER_PRUNE_UNREACHABLE=False
 
 reconcile_runtime_db_endpoint
 grep -qx 'DB_HOST=10.2.7.141' "${runtime_wait}"
@@ -144,6 +173,8 @@ grep -qx 'REQUIRE_LOCAL_GALERA_READY=1' "${runtime_wait}"
 [ "$(grep -c '^REQUIRE_LOCAL_GALERA_READY=' "${runtime_wait}")" -eq 1 ]
 grep -qx 'DB_HOST=10.2.7.141' "${runtime_env}"
 grep -qx 'DB_HOST = "10.2.7.141"' "${dispatcher_recover}"
+reconcile_dispatcher_recovery_policy
+grep -qx 'PRUNE_UNREACHABLE_NODES = False' "${dispatcher_recover}"
 [ ! -e "${config_cache}" ]
 [ "$(stat -c '%a' "${runtime_wait}")" = "${runtime_wait_mode}" ]
 [ "$(stat -c '%a' "${runtime_env}")" = "${runtime_env_mode}" ]
