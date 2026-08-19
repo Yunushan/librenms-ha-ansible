@@ -13,21 +13,50 @@ librenms_fast_repair_lazy_unmount_enabled: true
 librenms_fast_repair_rrd_mountpoint: "{{ librenms_gluster_mountpoint | default(librenms_install_dir ~ '/rrd') }}"
 librenms_fast_repair_rrd_mode: "{{ librenms_rrd_mode | default('local') }}"
 librenms_fast_repair_user: "{{ librenms_user | default('librenms') }}"
+librenms_fast_repair_install_dir: "{{ librenms_install_dir | default('/opt/librenms') }}"
+librenms_fast_repair_env_path: "{{ librenms_fast_repair_install_dir }}/.env"
 librenms_fast_repair_runtime_wait_path: "{{ librenms_dispatcher_runtime_wait_path | default('/usr/local/sbin/librenms-ha-runtime-wait') }}"
+librenms_fast_repair_dispatcher_recover_path: /usr/local/sbin/librenms-dispatcher-ha-recover
 librenms_fast_repair_runtime_gate_timeout: 45
+librenms_fast_repair_local_galera_runtime: >-
+  {{
+    librenms_db_mode | default('local') == 'galera'
+    and librenms_db_host | default('') | length == 0
+    and librenms_runtime_db_prefer_local_galera | default(false) | bool
+    and inventory_hostname in groups.get('librenms_db', [])
+    and inventory_hostname not in groups.get('maintenance_nodes', [])
+    and inventory_hostname not in groups.get('decommission_nodes', [])
+  }}
+librenms_fast_repair_reconcile_runtime_db_endpoint: >-
+  {{ librenms_fast_repair_local_galera_runtime | bool }}
 librenms_fast_repair_db_host: >-
   {{
     librenms_db_host
     if librenms_db_host | default('') | length > 0
     else
     (
-      librenms_vip_ip
-      if (
-        librenms_db_mode | default('local') == 'galera'
-        and librenms_vip_enabled | default(false) | bool
-        and librenms_vip_ip | default('') | length > 0
+      '127.0.0.1'
+      if librenms_db_mode | default('local') == 'local'
+      else
+      (
+        ansible_host | default(inventory_hostname)
+        if librenms_fast_repair_local_galera_runtime | bool
+        else
+        (
+          librenms_vip_ip
+          if (
+            librenms_db_mode | default('local') == 'galera'
+            and librenms_vip_enabled | default(false) | bool
+            and librenms_vip_ip | default('') | length > 0
+          )
+          else (
+            hostvars[(groups.get('librenms_db', []) | first)].ansible_host
+            | default(groups.get('librenms_db', []) | first)
+            if (groups.get('librenms_db', []) | length > 0)
+            else (ansible_host | default(inventory_hostname))
+          )
+        )
       )
-      else (ansible_host | default(inventory_hostname))
     )
   }}
 librenms_fast_repair_db_port: "{{ librenms_db_port | default(3306) }}"

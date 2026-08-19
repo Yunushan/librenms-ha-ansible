@@ -76,11 +76,20 @@ The repair path may:
 - start Redis/Sentinel and rrdcached before `librenms.service`, whose runtime
   gate depends on those services;
 - verify a local Galera member is `Primary|Synced`, repair its bounded
-  readiness listener when necessary, and run the deployed runtime gate against
-  the database VIP before queuing `librenms.service`; this prevents an empty
-  HAProxy database backend from leaving the service stuck in `activating`;
-- report bounded readiness-agent, database VIP, HAProxy, unit, journal, and
-  runtime-gate diagnostics when an application service still cannot start;
+  readiness listener when necessary, reconcile stale runtime files to the
+  configured local Galera endpoint, and run the deployed runtime gate before
+  queuing `librenms.service`; this avoids database VIP transitions for
+  co-located web/database nodes and prevents a failed endpoint from leaving
+  the service stuck in `activating`;
+- atomically update only the `DB_HOST` assignments in `.env`, the runtime wait
+  helper, and the dispatcher recovery helper when local Galera preference is
+  enabled; an explicit `librenms_db_host` remains authoritative;
+- clear the stale Laravel configuration cache and gracefully reload active
+  PHP-FPM services only after the replacement local database path passes its
+  authenticated runtime gate;
+- report bounded readiness-agent, configured database path, HAProxy, unit,
+  journal, and runtime-gate diagnostics when an application service still
+  cannot start;
 - repair the configured RRD mount using the existing `/etc/fstab` entry,
   including a lazy detach of the exact stale mountpoint and a bounded
   create/read/delete probe as the `librenms` user;

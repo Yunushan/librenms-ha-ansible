@@ -13,14 +13,18 @@
     GLUSTER_VOLUME={{ librenms_gluster_volume_name | default('librenms-rrd') | quote }}
     RRD_MODE={{ librenms_fast_repair_rrd_mode | quote }}
     LIBRENMS_USER={{ librenms_fast_repair_user | quote }}
+    LIBRENMS_DIR={{ librenms_fast_repair_install_dir | quote }}
+    LIBRENMS_ENV_PATH={{ librenms_fast_repair_env_path | quote }}
     REPAIR_MOUNT={{ librenms_fast_repair_mount_repair_enabled | bool | ternary('true', 'false') | quote }}
     LAZY_UNMOUNT={{ librenms_fast_repair_lazy_unmount_enabled | bool | ternary('true', 'false') | quote }}
     CONFIRM={{ librenms_fast_repair_confirm | bool | ternary('true', 'false') | quote }}
     DB_MODE={{ librenms_db_mode | default('local') | quote }}
     DB_HOST={{ librenms_fast_repair_db_host | quote }}
     DB_PORT={{ librenms_fast_repair_db_port | int }}
+    RECONCILE_RUNTIME_DB={{ librenms_fast_repair_reconcile_runtime_db_endpoint | bool | ternary('true', 'false') | quote }}
     REDIS_MODE={{ librenms_redis_mode | default('local') | quote }}
     RUNTIME_WAIT_PATH={{ librenms_fast_repair_runtime_wait_path | quote }}
+    DISPATCHER_RECOVER_PATH={{ librenms_fast_repair_dispatcher_recover_path | quote }}
     RUNTIME_GATE_TIMEOUT={{ librenms_fast_repair_runtime_gate_timeout | int }}
     READINESS_HOST={{ librenms_fast_repair_readiness_host | quote }}
     READINESS_PORT={{ librenms_fast_repair_readiness_port | int }}
@@ -34,7 +38,11 @@
     RRD_SHARED=false
     RRD_READY=false
     GALERA_READY=true
+    DB_ENDPOINT_READY=true
     RUNTIME_READY=false
+    RUNTIME_DB_CHANGED=0
+    RUNTIME_ENV_CHANGED=0
+    LAST_REPLACE_CHANGED=0
     case "${RRD_MODE}" in
       glusterfs|external|external_nfs|nfs) RRD_SHARED=true ;;
     esac
@@ -164,6 +172,140 @@
       return 1
     }
 
+    preserve_replacement_metadata() {
+      source_path="$1"
+      replacement_path="$2"
+
+      chmod --reference="${source_path}" "${replacement_path}" || return 1
+      chown --reference="${source_path}" "${replacement_path}" || return 1
+      if command -v chcon >/dev/null 2>&1; then
+        chcon --reference="${source_path}" "${replacement_path}" >/dev/null 2>&1 || true
+      fi
+    }
+
+    replace_shell_assignment() {
+      assignment_path="$1"
+      assignment_key="$2"
+      assignment_value="$3"
+      LAST_REPLACE_CHANGED=0
+
+      [ -f "${assignment_path}" ] || {
+        echo "runtime configuration file is missing: ${assignment_path}" >&2
+        return 1
+      }
+      replacement_dir="$(dirname -- "${assignment_path}")"
+      replacement_base="$(basename -- "${assignment_path}")"
+      replacement_path="$(mktemp "${replacement_dir}/.${replacement_base}.fast-repair.XXXXXX")" || return 1
+
+      if ! awk -v key="${assignment_key}" -v value="${assignment_value}" '
+        BEGIN { matches=0 }
+        index($0, key "=") == 1 {
+          print key "=" value
+          matches++
+          next
+        }
+        { print }
+        END { if (matches != 1) exit 42 }
+      ' "${assignment_path}" > "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        echo "could not locate one ${assignment_key} assignment in ${assignment_path}" >&2
+        return 1
+      fi
+
+      if cmp -s -- "${assignment_path}" "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        return 0
+      fi
+      if ! preserve_replacement_metadata "${assignment_path}" "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        return 1
+      fi
+      mv -f -- "${replacement_path}" "${assignment_path}" || return 1
+      LAST_REPLACE_CHANGED=1
+      REPAIR_CHANGED=1
+    }
+
+    replace_python_string_assignment() {
+      assignment_path="$1"
+      assignment_key="$2"
+      assignment_value="$3"
+      LAST_REPLACE_CHANGED=0
+
+      [ -f "${assignment_path}" ] || return 0
+      replacement_dir="$(dirname -- "${assignment_path}")"
+      replacement_base="$(basename -- "${assignment_path}")"
+      replacement_path="$(mktemp "${replacement_dir}/.${replacement_base}.fast-repair.XXXXXX")" || return 1
+
+      if ! awk -v key="${assignment_key}" -v value="${assignment_value}" '
+        BEGIN { matches=0 }
+        $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+          print key " = \"" value "\""
+          matches++
+          next
+        }
+        { print }
+        END { if (matches != 1) exit 42 }
+      ' "${assignment_path}" > "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        echo "could not locate one ${assignment_key} assignment in ${assignment_path}" >&2
+        return 1
+      fi
+
+      if cmp -s -- "${assignment_path}" "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        return 0
+      fi
+      if ! preserve_replacement_metadata "${assignment_path}" "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        return 1
+      fi
+      mv -f -- "${replacement_path}" "${assignment_path}" || return 1
+      LAST_REPLACE_CHANGED=1
+      REPAIR_CHANGED=1
+    }
+
+    reconcile_runtime_db_endpoint() {
+      [ "${RECONCILE_RUNTIME_DB}" = true ] || return 0
+      [ "${DB_MODE}" = galera ] || return 0
+      [ "${GALERA_READY}" = true ] || return 1
+
+      case "${DB_HOST}" in
+        ''|*[!A-Za-z0-9_.:-]*)
+          echo "refusing unsafe runtime database host value: ${DB_HOST:-<empty>}" >&2
+          return 1
+          ;;
+      esac
+
+      echo "reconciling LibreNMS runtime database endpoint to ${DB_HOST}:${DB_PORT}"
+      replace_shell_assignment "${RUNTIME_WAIT_PATH}" DB_HOST "${DB_HOST}" || return 1
+      [ "${LAST_REPLACE_CHANGED}" -eq 0 ] || RUNTIME_DB_CHANGED=1
+      replace_shell_assignment "${RUNTIME_WAIT_PATH}" REQUIRE_LOCAL_GALERA_READY 1 || return 1
+      [ "${LAST_REPLACE_CHANGED}" -eq 0 ] || RUNTIME_DB_CHANGED=1
+      replace_shell_assignment "${LIBRENMS_ENV_PATH}" DB_HOST "${DB_HOST}" || return 1
+      if [ "${LAST_REPLACE_CHANGED}" -ne 0 ]; then
+        RUNTIME_DB_CHANGED=1
+        RUNTIME_ENV_CHANGED=1
+      fi
+      replace_python_string_assignment "${DISPATCHER_RECOVER_PATH}" DB_HOST "${DB_HOST}" || return 1
+      [ "${LAST_REPLACE_CHANGED}" -eq 0 ] || RUNTIME_DB_CHANGED=1
+
+      if [ "${RUNTIME_ENV_CHANGED}" -ne 0 ]; then
+        config_cache_path="${LIBRENMS_DIR}/bootstrap/cache/config.php"
+        case "${config_cache_path}" in
+          /opt/librenms/bootstrap/cache/config.php|*/librenms/bootstrap/cache/config.php)
+            if [ -f "${config_cache_path}" ]; then
+              rm -f -- "${config_cache_path}" || return 1
+              echo "cleared stale LibreNMS configuration cache"
+            fi
+            ;;
+          *)
+            echo "refusing unsafe LibreNMS config cache path: ${config_cache_path}" >&2
+            return 1
+            ;;
+        esac
+      fi
+    }
+
     probe_readiness_socket() {
       response="$(probe bash -c '
         exec 3<>/dev/tcp/"$1"/"$2"
@@ -186,7 +328,7 @@
         "${socket_response:-<empty>}" "${READINESS_HOST}" "${READINESS_PORT}" >&2
       echo "--- readiness socket unit ---" >&2
       probe systemctl status "${READINESS_SOCKET_UNIT}" --no-pager --full >&2 || true
-      echo "--- database VIP TCP path ---" >&2
+      echo "--- configured runtime database TCP path ---" >&2
       if probe bash -c 'exec 3<>/dev/tcp/"$1"/"$2"' _ "${DB_HOST}" "${DB_PORT}"; then
         echo "TCP connect succeeded: ${DB_HOST}:${DB_PORT}" >&2
       else
@@ -235,6 +377,19 @@
       echo "local Galera readiness listener did not report up after repair" >&2
       print_database_path_diagnostics
       return 1
+    }
+
+    refresh_php_fpm_for_runtime_db_change() {
+      [ "${RUNTIME_DB_CHANGED}" -ne 0 ] || return 0
+
+      for php_unit in ${php_units}; do
+        unit_is_active "${php_unit}" || continue
+        echo "gracefully reloading ${php_unit} after runtime database endpoint change"
+        if ! systemctl_bounded reload "${php_unit}" >/dev/null 2>&1; then
+          echo "failed to reload ${php_unit} after runtime database endpoint change" >&2
+          return 1
+        fi
+      done
     }
 
     runtime_gate_ready() {
@@ -580,14 +735,22 @@
       if ! repair_local_readiness; then
         REPAIR_FAILURE=1
       fi
+      if [ "${GALERA_READY}" = true ] && ! reconcile_runtime_db_endpoint; then
+        DB_ENDPOINT_READY=false
+        REPAIR_FAILURE=1
+      fi
     fi
 
     # The dispatcher ExecStartPre gate checks DB, Redis, and RRDCacheD. Run the
-    # same gate before queuing the service so a broken DB VIP cannot leave an
-    # unbounded systemd activation job behind.
-    if [ "${RRD_READY}" = true ] && [ "${GALERA_READY}" = true ]; then
+    # same gate before queuing the service so a broken runtime database path
+    # cannot leave an unbounded systemd activation job behind.
+    if [ "${RRD_READY}" = true ] && [ "${GALERA_READY}" = true ] && [ "${DB_ENDPOINT_READY}" = true ]; then
       if runtime_gate_ready; then
         RUNTIME_READY=true
+        if ! refresh_php_fpm_for_runtime_db_change; then
+          RUNTIME_READY=false
+          REPAIR_FAILURE=1
+        fi
       else
         print_database_path_diagnostics
         REPAIR_FAILURE=1
