@@ -1012,6 +1012,10 @@ librenms_rrdcached_base_path: >-
 librenms_manage_nginx: "{{ librenms_install_profile in ['full', 'web'] }}"
 librenms_manage_php_fpm: "{{ librenms_install_profile in ['full', 'web'] }}"
 librenms_php_fpm_socket: /run/php-fpm-librenms.sock
+# A selected Debian PHP stream owns the role-managed LibreNMS pool. Retire only
+# stale pool files created by this role so an older FPM service cannot retain the
+# shared LibreNMS socket during a rolling stream upgrade.
+librenms_php_fpm_retire_stale_managed_streams: true
 librenms_manage_lnms_symlink: true
 
 librenms_enable_extra_repos: true

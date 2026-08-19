@@ -6,6 +6,7 @@ readonly DEFAULTS_FILE="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
 readonly COMMON_TASKS_FILE="${ROOT_DIR}/roles/common/tasks/runtime_support.yml"
 readonly COMMON_MAIN_FILE="${ROOT_DIR}/roles/common/tasks/main.yml"
 readonly APP_TASKS_FILE="${ROOT_DIR}/roles/librenms_app/tasks/main.yml"
+readonly APP_HANDLERS_FILE="${ROOT_DIR}/roles/librenms_app/handlers/main.yml"
 readonly WORKFLOW_FILE="${ROOT_DIR}/.github/workflows/lint.yml"
 readonly SUPPORT_MATRIX_FILE="${ROOT_DIR}/docs/support-matrix.md"
 
@@ -22,6 +23,7 @@ contains() {
 }
 
 main() {
+    local php_fpm_handoff_tasks
     local rrdtool_version_task
 
     contains "${DEFAULTS_FILE}" 'librenms_runtime_support_enabled: true'
@@ -59,6 +61,21 @@ main() {
         fail "RRDtool post-bootstrap configuration must parse a semantic version"
     grep -Fq -- ') is not none' <<<"${rrdtool_version_task}" ||
         fail "RRDtool post-bootstrap version guard must return an explicit boolean"
+    contains "${DEFAULTS_FILE}" 'librenms_php_fpm_retire_stale_managed_streams: true'
+    php_fpm_handoff_tasks="$(
+        sed -n \
+            '/^- name: Validate selected PHP-FPM configuration before service handoff$/,/^- name: Enable PHP-FPM$/p' \
+            "${APP_TASKS_FILE}"
+    )"
+    grep -Fq -- 'Stop stale role-managed PHP-FPM streams before handoff' <<<"${php_fpm_handoff_tasks}" ||
+        fail "PHP-FPM handoff must stop stale managed streams after validating the selected stream"
+    grep -Fq -- 'Remove stale role-managed PHP-FPM pool files' <<<"${php_fpm_handoff_tasks}" ||
+        fail "PHP-FPM handoff must remove stale managed pools before enabling the selected stream"
+    grep -Fq -- 'Remove unowned stale PHP-FPM socket before selected stream startup' <<<"${php_fpm_handoff_tasks}" ||
+        fail "PHP-FPM handoff must remove an unowned stale socket before enabling the selected stream"
+    contains "${APP_HANDLERS_FILE}" 'Validate PHP-FPM configuration before restart'
+    contains "${APP_HANDLERS_FILE}" 'Capture LibreNMS PHP-FPM socket owner after failed restart'
+    contains "${APP_HANDLERS_FILE}" 'Fail with PHP-FPM restart diagnostics'
     contains "${WORKFLOW_FILE}" 'python-version: "3.14"'
     contains "${SUPPORT_MATRIX_FILE}" '## Application Runtime Versions'
     contains "${SUPPORT_MATRIX_FILE}" 'Ubuntu 22.04/24.04/26.04'

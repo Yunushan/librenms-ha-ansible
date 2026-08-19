@@ -32,10 +32,109 @@
   when:
     - librenms_apply_post_bootstrap_config | bool
 
-- name: Restart PHP-FPM
-  service:
+- name: Validate PHP-FPM configuration before restart
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_php_fpm_binary_effective }}"
+      - -t
+  register: librenms_php_fpm_handler_config_test
+  changed_when: false
+  listen: Restart PHP-FPM
+
+- name: Restart PHP-FPM through systemd
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - restart
+      - "{{ librenms_php_fpm_service_effective }}"
+  register: librenms_php_fpm_handler_restart
+  changed_when: librenms_php_fpm_handler_restart.rc == 0
+  failed_when: false
+  listen: Restart PHP-FPM
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Restart PHP-FPM without systemd
+  ansible.builtin.service:
     name: "{{ librenms_php_fpm_service_effective }}"
     state: restarted
+  listen: Restart PHP-FPM
+  when:
+    - ansible_facts.service_mgr != 'systemd'
+
+- name: Capture PHP-FPM status after failed restart
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - status
+      - "{{ librenms_php_fpm_service_effective }}"
+      - --no-pager
+      - -l
+  register: librenms_php_fpm_handler_status
+  changed_when: false
+  failed_when: false
+  listen: Restart PHP-FPM
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_handler_restart.rc | default(0) != 0
+
+- name: Capture PHP-FPM journal after failed restart
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - -u
+      - "{{ librenms_php_fpm_service_effective }}"
+      - -n
+      - "100"
+      - --no-pager
+  register: librenms_php_fpm_handler_journal
+  changed_when: false
+  failed_when: false
+  listen: Restart PHP-FPM
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_handler_restart.rc | default(0) != 0
+
+- name: Capture LibreNMS PHP-FPM socket owner after failed restart
+  ansible.builtin.shell: |
+    set -o pipefail
+    ss -xlpn | grep -F -- {{ librenms_php_fpm_socket | quote }} || true
+  args:
+    executable: /bin/bash
+  register: librenms_php_fpm_handler_socket_owner
+  changed_when: false
+  failed_when: false
+  listen: Restart PHP-FPM
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_handler_restart.rc | default(0) != 0
+
+- name: Fail with PHP-FPM restart diagnostics
+  ansible.builtin.fail:
+    msg: |-
+      Failed to restart {{ librenms_php_fpm_service_effective }} on {{ inventory_hostname }}.
+
+      PHP-FPM configuration test:
+      {{ librenms_php_fpm_handler_config_test.stdout | default('') }}
+      {{ librenms_php_fpm_handler_config_test.stderr | default('') }}
+
+      systemctl restart:
+      {{ librenms_php_fpm_handler_restart.stdout | default('') }}
+      {{ librenms_php_fpm_handler_restart.stderr | default('') }}
+
+      systemctl status:
+      {{ librenms_php_fpm_handler_status.stdout | default('') }}
+      {{ librenms_php_fpm_handler_status.stderr | default('') }}
+
+      recent journal:
+      {{ librenms_php_fpm_handler_journal.stdout | default('') }}
+
+      listener for {{ librenms_php_fpm_socket }}:
+      {{ librenms_php_fpm_handler_socket_owner.stdout | default('none') }}
+  listen: Restart PHP-FPM
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_php_fpm_handler_restart.rc | default(0) != 0
 
 - name: Validate nginx configuration before restart
   command:

@@ -1203,7 +1203,11 @@ librenms_ubuntu_php_version_override: "8.5"
 
 The role validates the version, verifies the PPA signing key, installs the
 matching versioned PHP CLI/FPM packages, selects the matching `php` alternative,
-and lets the application role derive the matching PHP-FPM unit. An empty
+and lets the application role derive the matching PHP-FPM unit. During that
+handoff, it validates the selected PHP-FPM configuration, stops older FPM
+streams that still contain the role-managed LibreNMS pool, and removes only
+those stale `librenms.conf` pool files before starting the selected stream. This
+prevents two PHP-FPM versions from competing for the shared LibreNMS socket. An empty
 override is the safe default and does not add the PPA on Ubuntu 24.04/26.04.
 Stage an explicit stream on a clone first, then run the PHP runtime check,
 Composer validation, and the VIP web-health probe before changing production.

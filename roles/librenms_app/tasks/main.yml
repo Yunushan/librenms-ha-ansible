@@ -2162,6 +2162,95 @@
     enabled: true
   when: librenms_manage_nginx | bool
 
+- name: Validate selected PHP-FPM configuration before service handoff
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_php_fpm_binary_effective }}"
+      - -t
+  register: librenms_php_fpm_pre_handoff_config_test
+  changed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+
+- name: Find stale role-managed PHP-FPM pool files
+  ansible.builtin.find:
+    paths: /etc/php
+    patterns: librenms.conf
+    file_type: file
+    recurse: true
+  register: librenms_php_fpm_managed_pool_files
+  changed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_php_fpm_retire_stale_managed_streams | bool
+
+- name: Record stale role-managed PHP-FPM pool files
+  ansible.builtin.set_fact:
+    librenms_php_fpm_stale_managed_pool_files: >-
+      {{
+        librenms_php_fpm_managed_pool_files.files
+        | default([])
+        | map(attribute='path')
+        | select('match', '^/etc/php/[0-9]+[.][0-9]+/fpm/pool[.]d/librenms[.]conf$')
+        | reject('equalto', librenms_php_fpm_pool_dir_effective ~ '/librenms.conf')
+        | list
+      }}
+  when:
+    - librenms_manage_php_fpm | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_php_fpm_retire_stale_managed_streams | bool
+
+- name: Gather services before PHP-FPM stream handoff
+  ansible.builtin.service_facts:
+  when:
+    - librenms_php_fpm_stale_managed_pool_files | default([]) | length > 0
+
+- name: Stop stale role-managed PHP-FPM streams before handoff
+  vars:
+    librenms_php_fpm_stale_service: >-
+      php{{ item | regex_replace('^/etc/php/([^/]+)/.*$', '\\1') }}-fpm
+  ansible.builtin.service:
+    name: "{{ librenms_php_fpm_stale_service }}"
+    state: stopped
+    enabled: false
+  loop: "{{ librenms_php_fpm_stale_managed_pool_files | default([]) }}"
+  loop_control:
+    label: "{{ librenms_php_fpm_stale_service }}"
+  when:
+    - >-
+      (librenms_php_fpm_stale_service ~ '.service')
+      in (ansible_facts.services | default({}))
+
+- name: Remove stale role-managed PHP-FPM pool files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ librenms_php_fpm_stale_managed_pool_files | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Inspect PHP-FPM socket listeners before selected stream startup
+  ansible.builtin.command:
+    argv:
+      - ss
+      - -H
+      - -xlpn
+  register: librenms_php_fpm_socket_listeners_before_handoff
+  changed_when: false
+  when:
+    - librenms_manage_php_fpm | bool
+
+- name: Remove unowned stale PHP-FPM socket before selected stream startup
+  ansible.builtin.file:
+    path: "{{ librenms_php_fpm_socket }}"
+    state: absent
+  when:
+    - librenms_manage_php_fpm | bool
+    - >-
+      librenms_php_fpm_socket
+      not in (librenms_php_fpm_socket_listeners_before_handoff.stdout | default(''))
+
 - name: Enable PHP-FPM
   service:
     name: "{{ librenms_php_fpm_service_effective }}"
