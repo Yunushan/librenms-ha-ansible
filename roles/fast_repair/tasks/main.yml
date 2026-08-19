@@ -165,8 +165,23 @@
       probe findmnt --noheadings --mountpoint "${RRD_PATH}" --output FSTYPE 2>/dev/null || true
     }
 
+    rrd_io_probe() {
+      probe_file="${RRD_PATH}/.librenms-fast-repair-probe.$$"
+      if probe runuser -u "${LIBRENMS_USER}" -- sh -c '
+        probe_file=$1
+        printf "%s\n" fast-repair > "${probe_file}" &&
+          IFS= read -r probe_value < "${probe_file}" &&
+          rm -f -- "${probe_file}" &&
+          [ "${probe_value}" = fast-repair ]
+      ' _ "${probe_file}"; then
+        return 0
+      fi
+      probe rm -f -- "${probe_file}" >/dev/null 2>&1 || true
+      return 1
+    }
+
     mount_is_healthy() {
-      [ -d "${RRD_PATH}" ] || return 1
+      probe test -d "${RRD_PATH}" || return 1
       fstype="$(mount_fstype | tr -d '[:space:]')"
       case "${RRD_MODE}" in
         glusterfs)
@@ -185,7 +200,7 @@
           fstype="local"
           ;;
       esac
-      probe runuser -u "${LIBRENMS_USER}" -- test -w "${RRD_PATH}"
+      rrd_io_probe
     }
 
     repair_rrd_mount() {
@@ -363,8 +378,16 @@
       attempt=1
       while [ "${attempt}" -le "${MAX_ATTEMPTS}" ]; do
         wsrep="$(probe mysql --protocol=socket --batch --skip-column-names -e \
-          "SELECT CONCAT(@@wsrep_cluster_status, '|', @@wsrep_local_state_comment);" \
-          2>/dev/null || true)"
+          "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_local_state_comment');" \
+          2>/dev/null | awk '
+            $1 == "wsrep_cluster_status" { cluster_status=$2 }
+            $1 == "wsrep_local_state_comment" { local_state=$2 }
+            END {
+              if (cluster_status != "" && local_state != "") {
+                print cluster_status "|" local_state
+              }
+            }
+          ' || true)"
         if printf '%s\n' "${wsrep}" | grep -qx 'Primary|Synced'; then
           wsrep_ok=true
           break
