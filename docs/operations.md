@@ -1040,7 +1040,10 @@ After recovery, run `post-reboot.yml`, then `validate.yml`.
 
 LibreNMS validation checks the application state, not just Linux service state.
 If a node is powered off, stale dispatcher rows can remain visible until the
-surviving dispatcher updates or prunes them.
+surviving dispatcher updates them or an operator runs explicit registration
+convergence. The watchdog does not delete peer rows after a single failed web
+probe by default; set `librenms_dispatcher_failover_prune_unreachable_nodes`
+only when that destructive policy has been reviewed for the environment.
 
 During a node-loss test, validation should pass once at least one surviving
 dispatcher is active and has reported recently. If it fails with no active

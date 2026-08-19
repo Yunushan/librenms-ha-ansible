@@ -12,11 +12,40 @@ librenms_fast_repair_mount_repair_enabled: true
 librenms_fast_repair_lazy_unmount_enabled: true
 librenms_fast_repair_rrd_mountpoint: "{{ librenms_gluster_mountpoint | default(librenms_install_dir ~ '/rrd') }}"
 librenms_fast_repair_rrd_mode: "{{ librenms_rrd_mode | default('local') }}"
+librenms_fast_repair_rrdcached_service: "{{ librenms_rrdcached_service_name | default('rrdcached') }}"
+librenms_fast_repair_rrdcached_pidfile: "{{ librenms_rrdcached_pidfile | default('/run/rrdcached.pid') }}"
+librenms_fast_repair_rrdcached_socket: "{{ librenms_rrdcached_socket | default('/run/rrdcached.sock') }}"
+librenms_fast_repair_rrdcached_stable_attempts: 5
+librenms_fast_repair_rrdcached_required: >-
+  {{
+    librenms_manage_rrdcached | default(true) | bool
+    and (
+      librenms_rrdcached_scope | default('all') == 'all'
+      or (
+        librenms_rrdcached_scope | default('all') == 'primary'
+        and inventory_hostname == (
+          groups.get('librenms_nodes', [])
+          | difference(librenms_inactive_inventory_nodes | default([]))
+          | first
+          | default('')
+        )
+      )
+    )
+  }}
 librenms_fast_repair_user: "{{ librenms_user | default('librenms') }}"
 librenms_fast_repair_install_dir: "{{ librenms_install_dir | default('/opt/librenms') }}"
 librenms_fast_repair_env_path: "{{ librenms_fast_repair_install_dir }}/.env"
 librenms_fast_repair_runtime_wait_path: "{{ librenms_dispatcher_runtime_wait_path | default('/usr/local/sbin/librenms-ha-runtime-wait') }}"
 librenms_fast_repair_dispatcher_recover_path: /usr/local/sbin/librenms-dispatcher-ha-recover
+librenms_fast_repair_dispatcher_recovery_attempts: 3
+librenms_fast_repair_dispatcher_recovery_delay: 3
+librenms_fast_repair_dispatcher_recovery_enabled: >-
+  {{
+    librenms_manage_dispatcher | default(true) | bool
+    and librenms_dispatcher_failover_recovery_enabled | default(true) | bool
+  }}
+librenms_fast_repair_dispatcher_prune_unreachable_nodes: >-
+  {{ librenms_dispatcher_failover_prune_unreachable_nodes | default(false) | bool }}
 librenms_fast_repair_runtime_gate_timeout: 45
 librenms_fast_repair_local_galera_runtime: >-
   {{

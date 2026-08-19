@@ -7,7 +7,7 @@ try:
     import pymysql
 except Exception as exc:
     print(f"PyMySQL is unavailable: {exc}", file=sys.stderr)
-    sys.exit(0)
+    sys.exit(1)
 
 
 LOCAL_HOST = {{ inventory_hostname | to_json }}
@@ -46,13 +46,24 @@ def service_active():
 def restart_dispatcher(reason):
     print(f"Restarting librenms.service: {reason}")
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["systemctl", "restart", "librenms.service"],
             check=False,
             timeout=RESTART_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         print("Timed out while restarting librenms.service", file=sys.stderr)
+        return False
+    if result.returncode != 0:
+        print(
+            f"Failed to restart librenms.service (rc={result.returncode})",
+            file=sys.stderr,
+        )
+        return False
+    if not service_active():
+        print("librenms.service is not active after restart", file=sys.stderr)
+        return False
+    return True
 
 
 def tcp_reachable(host, port):
@@ -148,19 +159,28 @@ def prune_node(conn, node):
 
 def main():
     if not service_active():
-        restart_dispatcher("dispatcher service is not active")
+        if not restart_dispatcher("dispatcher service is not active"):
+            return 1
 
     try:
         conn = db_connect()
     except Exception as exc:
         print(f"Unable to connect to LibreNMS database through {DB_HOST}:{DB_PORT}: {exc}", file=sys.stderr)
-        return 0
+        return 1
 
     with conn:
-        if service_active() and not local_registration_is_active(conn):
-            restart_dispatcher("local dispatcher registration is stale")
+        if not local_registration_is_active(conn):
             if REFRESH_LOCAL_REGISTRATION:
                 refresh_local_registration(conn)
+                if not local_registration_is_active(conn):
+                    print(
+                        f"Failed to refresh local dispatcher registration for {LOCAL_NODE_ID}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                print(f"Refreshed local dispatcher registration for {LOCAL_NODE_ID}")
+            elif not restart_dispatcher("local dispatcher registration is stale"):
+                return 1
 
         if PRUNE_UNREACHABLE_NODES:
             for node in NODES:

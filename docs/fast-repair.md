@@ -75,6 +75,9 @@ The repair path may:
   Gluster, rrdcached, and LibreNMS timer units;
 - start Redis/Sentinel and rrdcached before `librenms.service`, whose runtime
   gate depends on those services;
+- require rrdcached to remain active across a bounded stability window and,
+  after proving no rrdcached process exists, remove only stale configured PID
+  and socket files under `/run` before one bounded retry;
 - verify a local Galera member is `Primary|Synced`, repair its bounded
   readiness listener when necessary, reconcile stale runtime files to the
   configured local Galera endpoint, and run the deployed runtime gate before
@@ -93,6 +96,10 @@ The repair path may:
 - report bounded readiness-agent, configured database path, HAProxy, unit,
   journal, and runtime-gate diagnostics when an application service still
   cannot start;
+- disable destructive peer-row pruning in the deployed dispatcher watchdog by
+  default, invoke that watchdog after `librenms.service` is active, and require
+  it to restore the local `poller_cluster` registration before maintenance
+  timers resume;
 - repair the configured RRD mount using the existing `/etc/fstab` entry,
   including a lazy detach of the exact stale mountpoint and a bounded
   create/read/delete probe as the `librenms` user;
@@ -109,6 +116,12 @@ It never stops a healthy MariaDB service, bootstraps Galera, edits
 `grastate.dat`, runs database migrations, runs `daily.sh`, updates LibreNMS,
 or deletes an RRD/Gluster directory. A Galera `Primary|Synced` failure still
 requires the separate, operator-confirmed `galera-recover` procedure.
+
+The RRD permission helper fixes the shared mount root during ordinary startup.
+It does not recursively walk the complete RRD tree unless
+`librenms_rrd_permission_repair_recursive: true` is explicitly selected for a
+reviewed one-time ownership repair. This keeps rrdcached startup bounded on a
+large or temporarily slow Gluster mount.
 
 Do not start a second repair while one is running. If a previous `make site`
 process is still attached to the terminal, press `Ctrl+C` first. Review the

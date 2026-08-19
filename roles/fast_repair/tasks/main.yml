@@ -12,6 +12,11 @@
     RRD_PATH={{ librenms_fast_repair_rrd_mountpoint | quote }}
     GLUSTER_VOLUME={{ librenms_gluster_volume_name | default('librenms-rrd') | quote }}
     RRD_MODE={{ librenms_fast_repair_rrd_mode | quote }}
+    RRDCACHED_SERVICE={{ librenms_fast_repair_rrdcached_service | quote }}
+    RRDCACHED_PIDFILE={{ librenms_fast_repair_rrdcached_pidfile | quote }}
+    RRDCACHED_SOCKET={{ librenms_fast_repair_rrdcached_socket | quote }}
+    RRDCACHED_STABLE_ATTEMPTS={{ librenms_fast_repair_rrdcached_stable_attempts | int }}
+    RRDCACHED_REQUIRED={{ librenms_fast_repair_rrdcached_required | bool | ternary('true', 'false') | quote }}
     LIBRENMS_USER={{ librenms_fast_repair_user | quote }}
     LIBRENMS_DIR={{ librenms_fast_repair_install_dir | quote }}
     LIBRENMS_ENV_PATH={{ librenms_fast_repair_env_path | quote }}
@@ -25,6 +30,10 @@
     REDIS_MODE={{ librenms_redis_mode | default('local') | quote }}
     RUNTIME_WAIT_PATH={{ librenms_fast_repair_runtime_wait_path | quote }}
     DISPATCHER_RECOVER_PATH={{ librenms_fast_repair_dispatcher_recover_path | quote }}
+    DISPATCHER_RECOVERY_ATTEMPTS={{ librenms_fast_repair_dispatcher_recovery_attempts | int }}
+    DISPATCHER_RECOVERY_DELAY={{ librenms_fast_repair_dispatcher_recovery_delay | int }}
+    DISPATCHER_RECOVERY_ENABLED={{ librenms_fast_repair_dispatcher_recovery_enabled | bool | ternary('true', 'false') | quote }}
+    DISPATCHER_PRUNE_UNREACHABLE={{ librenms_fast_repair_dispatcher_prune_unreachable_nodes | bool | ternary('True', 'False') | quote }}
     RUNTIME_GATE_TIMEOUT={{ librenms_fast_repair_runtime_gate_timeout | int }}
     READINESS_HOST={{ librenms_fast_repair_readiness_host | quote }}
     READINESS_PORT={{ librenms_fast_repair_readiness_port | int }}
@@ -37,9 +46,11 @@
     RRD_MOUNT_CHANGED=0
     RRD_SHARED=false
     RRD_READY=false
+    RRDCACHED_READY=false
     GALERA_READY=true
     DB_ENDPOINT_READY=true
     RUNTIME_READY=false
+    LIBRENMS_READY=false
     RUNTIME_DB_CHANGED=0
     RUNTIME_ENV_CHANGED=0
     LAST_REPLACE_CHANGED=0
@@ -105,6 +116,18 @@
         attempt=$((attempt + 1))
       done
       return 1
+    }
+
+    wait_until_stably_active() {
+      stable_unit="$1"
+      stable_attempts="$2"
+      stable_attempt=1
+      while [ "${stable_attempt}" -le "${stable_attempts}" ]; do
+        [ "$(unit_state "${stable_unit}")" = active ] || return 1
+        [ "${stable_attempt}" -lt "${stable_attempts}" ] && sleep "${POLL_DELAY}"
+        stable_attempt=$((stable_attempt + 1))
+      done
+      return 0
     }
 
     wait_until_stopped() {
@@ -330,6 +353,67 @@
       mv -f -- "${replacement_path}" "${assignment_path}" || return 1
       LAST_REPLACE_CHANGED=1
       REPAIR_CHANGED=1
+    }
+
+    replace_python_bool_assignment() {
+      assignment_path="$1"
+      assignment_key="$2"
+      assignment_value="$3"
+      LAST_REPLACE_CHANGED=0
+
+      case "${assignment_value}" in
+        True|False) ;;
+        *)
+          echo "refusing invalid Python boolean for ${assignment_key}: ${assignment_value}" >&2
+          return 1
+          ;;
+      esac
+      [ -f "${assignment_path}" ] || {
+        echo "dispatcher recovery helper is missing: ${assignment_path}" >&2
+        return 1
+      }
+      replacement_dir="$(dirname -- "${assignment_path}")"
+      replacement_base="$(basename -- "${assignment_path}")"
+      replacement_path="$(mktemp "${replacement_dir}/.${replacement_base}.fast-repair.XXXXXX")" || return 1
+
+      if ! awk -v key="${assignment_key}" -v value="${assignment_value}" '
+        BEGIN { matches=0 }
+        $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+          print key " = " value
+          matches++
+          next
+        }
+        { print }
+        END { if (matches != 1) exit 42 }
+      ' "${assignment_path}" > "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        echo "could not locate one ${assignment_key} assignment in ${assignment_path}" >&2
+        return 1
+      fi
+
+      if cmp -s -- "${assignment_path}" "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        return 0
+      fi
+      if ! preserve_replacement_metadata "${assignment_path}" "${replacement_path}"; then
+        rm -f -- "${replacement_path}"
+        return 1
+      fi
+      mv -f -- "${replacement_path}" "${assignment_path}" || return 1
+      LAST_REPLACE_CHANGED=1
+      REPAIR_CHANGED=1
+    }
+
+    reconcile_dispatcher_recovery_policy() {
+      [ "${DISPATCHER_RECOVERY_ENABLED}" = true ] || return 0
+      [ -x "${DISPATCHER_RECOVER_PATH}" ] || {
+        echo "dispatcher recovery helper is missing or not executable: ${DISPATCHER_RECOVER_PATH}" >&2
+        return 1
+      }
+      replace_python_bool_assignment \
+        "${DISPATCHER_RECOVER_PATH}" \
+        PRUNE_UNREACHABLE_NODES \
+        "${DISPATCHER_PRUNE_UNREACHABLE}"
     }
 
     reconcile_runtime_db_endpoint() {
@@ -601,6 +685,100 @@
       return "${quiesce_failed}"
     }
 
+    cleanup_stale_rrdcached_runtime() {
+      pgrep_rc=0
+      probe pgrep -x rrdcached >/dev/null 2>&1 || pgrep_rc=$?
+      case "${pgrep_rc}" in
+        0)
+          echo "rrdcached still has a live process; refusing to remove runtime files" >&2
+          return 1
+          ;;
+        1) ;;
+        *)
+          echo "could not prove that rrdcached has no live process (pgrep rc=${pgrep_rc})" >&2
+          return 1
+          ;;
+      esac
+
+      for runtime_path in "${RRDCACHED_PIDFILE}" "${RRDCACHED_SOCKET}"; do
+        case "${runtime_path}" in
+          /run/*|/var/run/*) ;;
+          *)
+            echo "refusing unsafe RRDCacheD runtime path: ${runtime_path}" >&2
+            return 1
+            ;;
+        esac
+        if [ -e "${runtime_path}" ] || [ -L "${runtime_path}" ]; then
+          echo "removing stale RRDCacheD runtime file ${runtime_path}"
+          rm -f -- "${runtime_path}" || return 1
+          REPAIR_CHANGED=1
+        fi
+      done
+    }
+
+    ensure_rrdcached_started() {
+      unit_exists "${RRDCACHED_SERVICE}" || {
+        echo "required RRDCacheD unit is missing: ${RRDCACHED_SERVICE}" >&2
+        return 1
+      }
+
+      if ensure_started "${RRDCACHED_SERVICE}" && \
+         wait_until_stably_active "${RRDCACHED_SERVICE}" "${RRDCACHED_STABLE_ATTEMPTS}"; then
+        return 0
+      fi
+
+      echo "${RRDCACHED_SERVICE} did not remain active; retrying after bounded runtime cleanup" >&2
+      stop_stuck_service "${RRDCACHED_SERVICE}" || return 1
+      cleanup_stale_rrdcached_runtime || return 1
+      systemctl_bounded reset-failed "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || true
+
+      if ensure_started "${RRDCACHED_SERVICE}" && \
+         wait_until_stably_active "${RRDCACHED_SERVICE}" "${RRDCACHED_STABLE_ATTEMPTS}"; then
+        return 0
+      fi
+
+      echo "${RRDCACHED_SERVICE} failed its bounded stability check after cleanup" >&2
+      print_unit_diagnostics "${RRDCACHED_SERVICE}"
+      return 1
+    }
+
+    recover_dispatcher_registration() {
+      [ "${DISPATCHER_RECOVERY_ENABLED}" = true ] || return 0
+      [ -x "${DISPATCHER_RECOVER_PATH}" ] || {
+        echo "dispatcher recovery helper is missing or not executable: ${DISPATCHER_RECOVER_PATH}" >&2
+        return 1
+      }
+      unit_is_active librenms.service || {
+        echo "librenms.service is not active; refusing to publish a dispatcher registration" >&2
+        return 1
+      }
+
+      dispatcher_attempt=1
+      dispatcher_output=""
+      dispatcher_rc=1
+      while [ "${dispatcher_attempt}" -le "${DISPATCHER_RECOVERY_ATTEMPTS}" ]; do
+        dispatcher_output="$(bounded "${DISPATCHER_RECOVER_PATH}" 2>&1)"
+        dispatcher_rc=$?
+        [ -z "${dispatcher_output}" ] || printf '%s\n' "${dispatcher_output}"
+        case "${dispatcher_output}" in
+          *"PyMySQL is unavailable"*|*"Unable to connect to LibreNMS database"*|*"Timed out while restarting librenms.service"*)
+            dispatcher_rc=1
+            ;;
+        esac
+        if [ "${dispatcher_rc}" -eq 0 ] && unit_is_active librenms.service; then
+          return 0
+        fi
+        [ "${dispatcher_attempt}" -lt "${DISPATCHER_RECOVERY_ATTEMPTS}" ] && \
+          sleep "${DISPATCHER_RECOVERY_DELAY}"
+        dispatcher_attempt=$((dispatcher_attempt + 1))
+      done
+
+      echo "local dispatcher registration recovery failed after ${DISPATCHER_RECOVERY_ATTEMPTS} attempts (rc=${dispatcher_rc})" >&2
+      [ -z "${dispatcher_output}" ] || printf '%s\n' "${dispatcher_output}" >&2
+      print_unit_diagnostics librenms.service
+      return 1
+    }
+
     mount_fstype() {
       probe findmnt --noheadings --mountpoint "${RRD_PATH}" --output FSTYPE 2>/dev/null || true
     }
@@ -780,7 +958,11 @@
     fi
 
     if [ "${RRD_READY}" = true ]; then
-      if ! ensure_started rrdcached; then
+      if [ "${RRDCACHED_REQUIRED}" != true ]; then
+        RRDCACHED_READY=true
+      elif ensure_rrdcached_started; then
+        RRDCACHED_READY=true
+      else
         REPAIR_FAILURE=1
       fi
     else
@@ -810,10 +992,16 @@
       fi
     fi
 
+    if ! reconcile_dispatcher_recovery_policy; then
+      DB_ENDPOINT_READY=false
+      REPAIR_FAILURE=1
+    fi
+
     # The dispatcher ExecStartPre gate checks DB, Redis, and RRDCacheD. Run the
     # same gate before queuing the service so a broken runtime database path
     # cannot leave an unbounded systemd activation job behind.
-    if [ "${RRD_READY}" = true ] && [ "${GALERA_READY}" = true ] && [ "${DB_ENDPOINT_READY}" = true ]; then
+    if [ "${RRD_READY}" = true ] && [ "${RRDCACHED_READY}" = true ] && \
+       [ "${GALERA_READY}" = true ] && [ "${DB_ENDPOINT_READY}" = true ]; then
       if runtime_gate_ready; then
         RUNTIME_READY=true
         if ! refresh_php_fpm_for_runtime_db_change; then
@@ -827,14 +1015,20 @@
     fi
 
     if [ "${RUNTIME_READY}" = true ]; then
-      if ! ensure_started librenms.service; then
+      if ensure_started librenms.service; then
+        LIBRENMS_READY=true
+        if ! recover_dispatcher_registration; then
+          LIBRENMS_READY=false
+          REPAIR_FAILURE=1
+        fi
+      else
         REPAIR_FAILURE=1
       fi
     else
       echo "skipping librenms.service until its runtime dependency gate passes" >&2
     fi
 
-    if [ "${RUNTIME_READY}" = true ]; then
+    if [ "${LIBRENMS_READY}" = true ]; then
       for timer in \
         librenms-scheduler.timer \
         librenms-ha-startup-repair.timer \
@@ -844,7 +1038,7 @@
         fi
       done
     else
-      echo "skipping LibreNMS maintenance timers until the runtime dependency gate passes" >&2
+      echo "skipping LibreNMS maintenance timers until the dispatcher is active and registered" >&2
     fi
 
     echo "systemd jobs after repair:"

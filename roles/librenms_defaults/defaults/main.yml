@@ -891,6 +891,9 @@ librenms_startup_repair_runtime_retries: 18
 librenms_startup_repair_runtime_delay: 10
 librenms_startup_repair_fix_git_rrd_placeholder: true
 librenms_startup_repair_fix_writable_ownership: true
+# Keep RRDCacheD startup bounded on shared filesystems. Enable this only for a
+# deliberate one-time ownership repair of an existing RRD tree.
+librenms_rrd_permission_repair_recursive: false
 # HA database failovers can leave long-lived PHP workers holding connections
 # that HAProxy has correctly closed. Recycle those workers with a graceful,
 # rate-limited reload only after a fresh application-level DB probe succeeds.
@@ -955,7 +958,10 @@ librenms_dispatcher_failover_recovery_interval: 15s
 librenms_dispatcher_failover_tcp_timeout: 1
 librenms_dispatcher_failover_db_timeout: 3
 librenms_dispatcher_failover_restart_timeout: 20
-librenms_dispatcher_failover_prune_unreachable_nodes: true
+# A transient web probe must not delete another dispatcher's database row.
+# Stale/unmanaged row cleanup remains available through the explicit
+# dispatcher registration convergence tasks.
+librenms_dispatcher_failover_prune_unreachable_nodes: false
 librenms_dispatcher_failover_refresh_local_registration: true
 librenms_dispatcher_registration_nodes: >-
   {{
