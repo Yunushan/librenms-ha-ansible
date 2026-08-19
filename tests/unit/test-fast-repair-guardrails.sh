@@ -26,9 +26,8 @@ grep -q 'librenms-fast-repair-probe' "${TASKS}"
 grep -q 'probe test -d "${RRD_PATH}"' "${TASKS}"
 grep -q 'print_rrd_mount_diagnostics' "${TASKS}"
 grep -q "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_local_state_comment')" "${TASKS}"
-grep -q 'skipping librenms.service until the RRD mount is healthy' "${TASKS}"
 grep -q 'skipping rrdcached until the RRD mount is healthy' "${TASKS}"
-grep -q 'skipping LibreNMS maintenance timers until the RRD mount is healthy' "${TASKS}"
+grep -q 'skipping LibreNMS maintenance timers until the runtime dependency gate passes' "${TASKS}"
 grep -q 'print_unit_diagnostics "${unit}"' "${TASKS}"
 grep -q 'if wait_until_active "${unit}"; then' "${TASKS}"
 grep -q 'systemctl_bounded start --no-block "${unit}"' "${TASKS}"
@@ -38,14 +37,24 @@ grep -q 'systemctl_bounded kill --kill-whom=all --signal=TERM "${stop_unit}"' "$
 grep -q 'systemctl_bounded kill --kill-whom=all --signal=KILL "${stop_unit}"' "${TASKS}"
 grep -q 'if ! quiesce_stuck_units; then' "${TASKS}"
 grep -q -- '--- librenms.service runtime gate ---' "${TASKS}"
+grep -q 'repair_local_readiness()' "${TASKS}"
+grep -q 'runtime_gate_ready()' "${TASKS}"
+grep -q 'skipping librenms.service until its runtime dependency gate passes' "${TASKS}"
+grep -q 'print_database_path_diagnostics' "${TASKS}"
 
 redis_start_line=$(grep -nF 'if [ "${REDIS_MODE}" = sentinel ]; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 rrdcached_start_line=$(grep -nF 'if ! ensure_started rrdcached; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 dispatcher_start_line=$(grep -nF 'if ! ensure_started librenms.service; then' "${TASKS}" | head -n 1 | cut -d: -f1)
+runtime_gate_line=$(grep -nF 'if runtime_gate_ready; then' "${TASKS}" | head -n 1 | cut -d: -f1)
 
 if [ "${redis_start_line}" -ge "${dispatcher_start_line}" ] || \
    [ "${rrdcached_start_line}" -ge "${dispatcher_start_line}" ]; then
     echo "fast repair must start Redis and RRDCacheD before librenms.service" >&2
+    exit 1
+fi
+
+if [ "${runtime_gate_line}" -ge "${dispatcher_start_line}" ]; then
+    echo "fast repair must pass the runtime dependency gate before starting librenms.service" >&2
     exit 1
 fi
 

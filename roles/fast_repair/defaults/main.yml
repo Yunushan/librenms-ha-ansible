@@ -14,3 +14,27 @@ librenms_fast_repair_rrd_mountpoint: "{{ librenms_gluster_mountpoint | default(l
 librenms_fast_repair_rrd_mode: "{{ librenms_rrd_mode | default('local') }}"
 librenms_fast_repair_user: "{{ librenms_user | default('librenms') }}"
 librenms_fast_repair_runtime_wait_path: "{{ librenms_dispatcher_runtime_wait_path | default('/usr/local/sbin/librenms-ha-runtime-wait') }}"
+librenms_fast_repair_runtime_gate_timeout: 45
+librenms_fast_repair_db_host: >-
+  {{
+    librenms_db_host
+    if librenms_db_host | default('') | length > 0
+    else
+    (
+      librenms_vip_ip
+      if (
+        librenms_db_mode | default('local') == 'galera'
+        and librenms_vip_enabled | default(false) | bool
+        and librenms_vip_ip | default('') | length > 0
+      )
+      else (ansible_host | default(inventory_hostname))
+    )
+  }}
+librenms_fast_repair_db_port: "{{ librenms_db_port | default(3306) }}"
+librenms_fast_repair_readiness_host: "{{ ansible_host | default(inventory_hostname) }}"
+librenms_fast_repair_readiness_port: "{{ librenms_galera_readiness_agent_port | default(9201) }}"
+librenms_fast_repair_readiness_path: >-
+  {{ librenms_galera_readiness_agent_path | default('/usr/local/sbin/librenms-galera-readiness-agent') }}
+librenms_fast_repair_readiness_reset_path: /usr/local/sbin/librenms-galera-readiness-agent-reset
+librenms_fast_repair_readiness_socket_unit: >-
+  {{ librenms_galera_readiness_agent_socket_unit | default('librenms-galera-readiness-agent.socket') }}

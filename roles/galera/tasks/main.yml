@@ -42,6 +42,21 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
 
+- name: Deploy persistent Galera readiness server
+  template:
+    src: librenms-galera-readiness-agent-server.py.j2
+    dest: "{{ librenms_galera_readiness_agent_server_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /usr/bin/python3 -m py_compile %s
+  notify:
+    - Clear stale Galera readiness agent workers
+    - Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
 - name: Deploy Galera readiness agent reset helper
   template:
     src: librenms-galera-readiness-agent-reset.sh.j2
@@ -70,11 +85,22 @@
 
 - name: Deploy Galera readiness agent service
   template:
-    src: librenms-galera-readiness-agent@.service.j2
+    src: librenms-galera-readiness-agent.service.j2
     dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_service_unit }}"
     owner: root
     group: root
     mode: "0644"
+  notify:
+    - Clear stale Galera readiness agent workers
+    - Restart Galera readiness agent socket
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
+- name: Remove legacy per-connection Galera readiness service template
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ librenms_galera_readiness_agent_legacy_service_unit }}"
+    state: absent
   notify:
     - Clear stale Galera readiness agent workers
     - Restart Galera readiness agent socket

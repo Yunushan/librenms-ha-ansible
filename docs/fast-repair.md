@@ -74,9 +74,13 @@ The repair path may:
 - enable and start inactive web, PHP-FPM, Redis/Sentinel, HAProxy, Keepalived,
   Gluster, rrdcached, and LibreNMS timer units;
 - start Redis/Sentinel and rrdcached before `librenms.service`, whose runtime
-  gate depends on those services, queue service starts without blocking on the
-  systemd transaction, and report bounded unit, journal, and runtime-gate
-  diagnostics when a service still cannot start;
+  gate depends on those services;
+- verify a local Galera member is `Primary|Synced`, repair its bounded
+  readiness listener when necessary, and run the deployed runtime gate against
+  the database VIP before queuing `librenms.service`; this prevents an empty
+  HAProxy database backend from leaving the service stuck in `activating`;
+- report bounded readiness-agent, database VIP, HAProxy, unit, journal, and
+  runtime-gate diagnostics when an application service still cannot start;
 - repair the configured RRD mount using the existing `/etc/fstab` entry,
   including a lazy detach of the exact stale mountpoint and a bounded
   create/read/delete probe as the `librenms` user;

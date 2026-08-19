@@ -17,14 +17,24 @@
     LAZY_UNMOUNT={{ librenms_fast_repair_lazy_unmount_enabled | bool | ternary('true', 'false') | quote }}
     CONFIRM={{ librenms_fast_repair_confirm | bool | ternary('true', 'false') | quote }}
     DB_MODE={{ librenms_db_mode | default('local') | quote }}
+    DB_HOST={{ librenms_fast_repair_db_host | quote }}
+    DB_PORT={{ librenms_fast_repair_db_port | int }}
     REDIS_MODE={{ librenms_redis_mode | default('local') | quote }}
     RUNTIME_WAIT_PATH={{ librenms_fast_repair_runtime_wait_path | quote }}
+    RUNTIME_GATE_TIMEOUT={{ librenms_fast_repair_runtime_gate_timeout | int }}
+    READINESS_HOST={{ librenms_fast_repair_readiness_host | quote }}
+    READINESS_PORT={{ librenms_fast_repair_readiness_port | int }}
+    READINESS_PATH={{ librenms_fast_repair_readiness_path | quote }}
+    READINESS_RESET_PATH={{ librenms_fast_repair_readiness_reset_path | quote }}
+    READINESS_SOCKET_UNIT={{ librenms_fast_repair_readiness_socket_unit | quote }}
 
     REPAIR_FAILURE=0
     REPAIR_CHANGED=0
     RRD_MOUNT_CHANGED=0
     RRD_SHARED=false
     RRD_READY=false
+    GALERA_READY=true
+    RUNTIME_READY=false
     case "${RRD_MODE}" in
       glusterfs|external|external_nfs|nfs) RRD_SHARED=true ;;
     esac
@@ -120,6 +130,130 @@
         [ -z "${runtime_gate_output}" ] || printf '%s\n' "${runtime_gate_output}" >&2
         echo "runtime gate rc=${runtime_gate_rc}" >&2
       fi
+    }
+
+    local_galera_state() {
+      probe mysql --protocol=socket --batch --skip-column-names -e \
+        "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_local_state_comment');" \
+        2>/dev/null | awk '
+          $1 == "wsrep_cluster_status" { cluster_status=$2 }
+          $1 == "wsrep_local_state_comment" { local_state=$2 }
+          END {
+            if (cluster_status != "" && local_state != "") {
+              print cluster_status "|" local_state
+            }
+          }
+        '
+    }
+
+    wait_for_local_galera() {
+      wsrep=""
+      attempt=1
+      while [ "${attempt}" -le "${MAX_ATTEMPTS}" ]; do
+        wsrep="$(local_galera_state || true)"
+        if [ "${wsrep}" = 'Primary|Synced' ]; then
+          echo "Galera local state: Primary|Synced"
+          return 0
+        fi
+        [ "${attempt}" -lt "${MAX_ATTEMPTS}" ] && sleep "${POLL_DELAY}"
+        attempt=$((attempt + 1))
+      done
+
+      echo "Galera is not Primary/Synced after ${MAX_ATTEMPTS} bounded probes;" \
+        "fast repair will not bootstrap it (state: ${wsrep:-unavailable})" >&2
+      return 1
+    }
+
+    probe_readiness_socket() {
+      response="$(probe bash -c '
+        exec 3<>/dev/tcp/"$1"/"$2"
+        IFS= read -r response <&3
+        printf "%s\n" "${response}"
+      ' _ "${READINESS_HOST}" "${READINESS_PORT}" 2>/dev/null || true)"
+      [ "${response}" = up ]
+    }
+
+    print_database_path_diagnostics() {
+      echo "--- local Galera readiness command ---" >&2
+      probe "${READINESS_PATH}" >&2 || true
+      echo "--- local Galera readiness socket ---" >&2
+      socket_response="$(probe bash -c '
+        exec 3<>/dev/tcp/"$1"/"$2"
+        IFS= read -r response <&3
+        printf "%s\n" "${response}"
+      ' _ "${READINESS_HOST}" "${READINESS_PORT}" 2>/dev/null || true)"
+      printf 'response=%s host=%s port=%s\n' \
+        "${socket_response:-<empty>}" "${READINESS_HOST}" "${READINESS_PORT}" >&2
+      echo "--- readiness socket unit ---" >&2
+      probe systemctl status "${READINESS_SOCKET_UNIT}" --no-pager --full >&2 || true
+      echo "--- database VIP TCP path ---" >&2
+      if probe bash -c 'exec 3<>/dev/tcp/"$1"/"$2"' _ "${DB_HOST}" "${DB_PORT}"; then
+        echo "TCP connect succeeded: ${DB_HOST}:${DB_PORT}" >&2
+      else
+        echo "TCP connect failed: ${DB_HOST}:${DB_PORT}" >&2
+      fi
+      echo "--- HAProxy Galera backend events ---" >&2
+      probe journalctl -u haproxy --since=-10min --no-pager -n 80 >&2 || true
+    }
+
+    repair_local_readiness() {
+      [ "${DB_MODE}" = galera ] || return 0
+      [ "${GALERA_READY}" = true ] || return 1
+
+      if probe_readiness_socket; then
+        return 0
+      fi
+
+      echo "repairing local Galera readiness listener at ${READINESS_HOST}:${READINESS_PORT}"
+      if [ ! -x "${READINESS_RESET_PATH}" ]; then
+        echo "readiness reset helper is missing: ${READINESS_RESET_PATH}" >&2
+        return 1
+      fi
+      if ! bounded "${READINESS_RESET_PATH}"; then
+        echo "readiness reset helper failed" >&2
+        return 1
+      fi
+      if ! systemctl_bounded daemon-reload >/dev/null 2>&1; then
+        echo "systemd daemon-reload failed before readiness restart" >&2
+        return 1
+      fi
+      if ! ensure_started "${READINESS_SOCKET_UNIT}"; then
+        echo "failed to start ${READINESS_SOCKET_UNIT}" >&2
+        return 1
+      fi
+
+      attempt=1
+      while [ "${attempt}" -le "${MAX_ATTEMPTS}" ]; do
+        if probe_readiness_socket; then
+          REPAIR_CHANGED=1
+          return 0
+        fi
+        sleep "${POLL_DELAY}"
+        attempt=$((attempt + 1))
+      done
+
+      echo "local Galera readiness listener did not report up after repair" >&2
+      print_database_path_diagnostics
+      return 1
+    }
+
+    runtime_gate_ready() {
+      [ -x "${RUNTIME_WAIT_PATH}" ] || {
+        echo "runtime dependency gate is missing: ${RUNTIME_WAIT_PATH}" >&2
+        return 1
+      }
+
+      runtime_gate_output="$(
+        timeout --foreground --kill-after=5s "${RUNTIME_GATE_TIMEOUT}s" \
+          "${RUNTIME_WAIT_PATH}" 2>&1
+      )"
+      runtime_gate_rc=$?
+      if [ "${runtime_gate_rc}" -eq 0 ]; then
+        return 0
+      fi
+      [ -z "${runtime_gate_output}" ] || printf '%s\n' "${runtime_gate_output}" >&2
+      echo "runtime dependency gate failed (rc=${runtime_gate_rc})" >&2
+      return 1
     }
 
     ensure_started() {
@@ -436,17 +570,39 @@
       fi
     done
 
-    # The dispatcher ExecStartPre gate checks Redis and RRDCacheD. Start those
-    # dependencies first so systemctl does not spend the repair timeout waiting.
-    if [ "${RRD_READY}" = true ]; then
+    if [ "${DB_MODE}" = galera ]; then
+      if wait_for_local_galera; then
+        GALERA_READY=true
+      else
+        GALERA_READY=false
+        REPAIR_FAILURE=1
+      fi
+      if ! repair_local_readiness; then
+        REPAIR_FAILURE=1
+      fi
+    fi
+
+    # The dispatcher ExecStartPre gate checks DB, Redis, and RRDCacheD. Run the
+    # same gate before queuing the service so a broken DB VIP cannot leave an
+    # unbounded systemd activation job behind.
+    if [ "${RRD_READY}" = true ] && [ "${GALERA_READY}" = true ]; then
+      if runtime_gate_ready; then
+        RUNTIME_READY=true
+      else
+        print_database_path_diagnostics
+        REPAIR_FAILURE=1
+      fi
+    fi
+
+    if [ "${RUNTIME_READY}" = true ]; then
       if ! ensure_started librenms.service; then
         REPAIR_FAILURE=1
       fi
     else
-      echo "skipping librenms.service until the RRD mount is healthy" >&2
+      echo "skipping librenms.service until its runtime dependency gate passes" >&2
     fi
 
-    if [ "${RRD_READY}" = true ]; then
+    if [ "${RUNTIME_READY}" = true ]; then
       for timer in \
         librenms-scheduler.timer \
         librenms-ha-startup-repair.timer \
@@ -456,39 +612,7 @@
         fi
       done
     else
-      echo "skipping LibreNMS maintenance timers until the RRD mount is healthy" >&2
-    fi
-
-    if [ "${DB_MODE}" = galera ] && command -v mysql >/dev/null 2>&1; then
-      wsrep=""
-      wsrep_ok=false
-      attempt=1
-      while [ "${attempt}" -le "${MAX_ATTEMPTS}" ]; do
-        wsrep="$(probe mysql --protocol=socket --batch --skip-column-names -e \
-          "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_local_state_comment');" \
-          2>/dev/null | awk '
-            $1 == "wsrep_cluster_status" { cluster_status=$2 }
-            $1 == "wsrep_local_state_comment" { local_state=$2 }
-            END {
-              if (cluster_status != "" && local_state != "") {
-                print cluster_status "|" local_state
-              }
-            }
-          ' || true)"
-        if printf '%s\n' "${wsrep}" | grep -qx 'Primary|Synced'; then
-          wsrep_ok=true
-          break
-        fi
-        [ "${attempt}" -lt "${MAX_ATTEMPTS}" ] && sleep "${POLL_DELAY}"
-        attempt=$((attempt + 1))
-      done
-      if [ "${wsrep_ok}" = true ]; then
-        echo "Galera local state: Primary|Synced"
-      else
-        echo "Galera is not Primary/Synced after ${MAX_ATTEMPTS} bounded probes;" \
-          "fast repair will not bootstrap it (state: ${wsrep:-unavailable})" >&2
-        REPAIR_FAILURE=1
-      fi
+      echo "skipping LibreNMS maintenance timers until the runtime dependency gate passes" >&2
     fi
 
     echo "systemd jobs after repair:"

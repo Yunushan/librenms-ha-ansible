@@ -1726,7 +1726,7 @@ Remote syslog ingestion uses a disk-assisted rsyslog action queue by default.
 If `syslog.php` cannot reach the database, rsyslog retains pending messages in
 `/var/spool/rsyslog/librenms`, retries every 30 seconds instead of restarting
 PHP every second, and resumes delivery after the database recovers. The default
-queue is bounded to `1g`. Successful socket-activated Galera readiness-agent
+queue is bounded to `1g`. Legacy socket-worker Galera readiness-agent
 lifecycle messages are discarded from rsyslog while failures remain visible,
 preventing health checks from feeding a logging loop during an outage. UDP
 senders still receive no end-to-end delivery guarantee, so size the queue and

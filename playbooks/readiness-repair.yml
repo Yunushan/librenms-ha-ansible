@@ -39,6 +39,15 @@
         mode: "0750"
         validate: /bin/bash -n %s
 
+    - name: Deploy persistent Galera readiness server
+      ansible.builtin.template:
+        src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent-server.py.j2"
+        dest: "{{ librenms_galera_readiness_agent_server_path }}"
+        owner: root
+        group: root
+        mode: "0750"
+        validate: /usr/bin/python3 -m py_compile %s
+
     - name: Deploy bounded Galera readiness agent reset helper
       ansible.builtin.template:
         src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent-reset.sh.j2"
@@ -56,13 +65,18 @@
         group: root
         mode: "0644"
 
-    - name: Deploy bounded Galera readiness worker unit
+    - name: Deploy persistent Galera readiness service unit
       ansible.builtin.template:
-        src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent@.service.j2"
+        src: "{{ readiness_template_dir }}/librenms-galera-readiness-agent.service.j2"
         dest: "/etc/systemd/system/{{ librenms_galera_readiness_agent_service_unit }}"
         owner: root
         group: root
         mode: "0644"
+
+    - name: Remove legacy per-connection readiness worker template
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ librenms_galera_readiness_agent_legacy_service_unit }}"
+        state: absent
 
     - name: Stop stale readiness workers before socket restart
       ansible.builtin.command:

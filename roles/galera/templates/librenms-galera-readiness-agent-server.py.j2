@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Serve cached Galera readiness over a systemd-activated TCP socket."""
+
+import os
+import signal
+import socket
+import subprocess
+import sys
+import threading
+from time import sleep
+
+
+AGENT_PATH = {{ librenms_galera_readiness_agent_path | to_json }}
+AGENT_TIMEOUT = {{ (librenms_galera_readiness_agent_query_timeout | int) + 1 }}
+REFRESH_INTERVAL = max(1, {{ librenms_galera_readiness_agent_refresh_interval | int }})
+ALLOWED_STATES = {"up", "down", "drain"}
+
+stop_event = threading.Event()
+state_lock = threading.Lock()
+readiness_state = "down"
+
+
+def query_agent() -> str:
+    try:
+        result = subprocess.run(
+            [AGENT_PATH],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+            timeout=AGENT_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "down"
+
+    state = result.stdout.splitlines()[0].strip() if result.stdout else "down"
+    return state if result.returncode == 0 and state in ALLOWED_STATES else "down"
+
+
+def refresh_state() -> None:
+    global readiness_state
+
+    while not stop_event.is_set():
+        state = query_agent()
+        with state_lock:
+            readiness_state = state
+        stop_event.wait(REFRESH_INTERVAL)
+
+
+def handle_signal(_signum: int, _frame: object) -> None:
+    stop_event.set()
+
+
+def activated_socket() -> socket.socket:
+    try:
+        listen_pid = int(os.environ.get("LISTEN_PID", "0"))
+        listen_fds = int(os.environ.get("LISTEN_FDS", "0"))
+    except ValueError as exc:
+        raise RuntimeError("invalid systemd socket activation environment") from exc
+
+    if listen_pid != os.getpid() or listen_fds != 1:
+        raise RuntimeError("exactly one systemd-activated socket is required")
+
+    listener = socket.socket(fileno=3)
+    listener.settimeout(1.0)
+    return listener
+
+
+def main() -> int:
+    global readiness_state
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    try:
+        listener = activated_socket()
+    except (OSError, RuntimeError) as exc:
+        print(f"readiness server startup failed: {exc}", file=sys.stderr)
+        return 1
+
+    readiness_state = query_agent()
+    updater = threading.Thread(target=refresh_state, name="galera-readiness", daemon=True)
+    updater.start()
+
+    with listener:
+        while not stop_event.is_set():
+            try:
+                connection, _peer = listener.accept()
+            except (socket.timeout, TimeoutError):
+                continue
+            except OSError as exc:
+                if stop_event.is_set():
+                    break
+                print(f"readiness accept failed: {exc}", file=sys.stderr)
+                sleep(0.1)
+                continue
+
+            with connection:
+                connection.settimeout(1.0)
+                with state_lock:
+                    response = readiness_state
+                try:
+                    connection.sendall(f"{response}\n".encode("ascii"))
+                except OSError:
+                    pass
+
+    stop_event.set()
+    updater.join(timeout=AGENT_TIMEOUT + REFRESH_INTERVAL)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

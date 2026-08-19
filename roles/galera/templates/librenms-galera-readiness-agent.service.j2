@@ -1,0 +1,14 @@
+[Unit]
+Description=LibreNMS Galera readiness agent
+Requires={{ librenms_galera_readiness_agent_socket_unit }}
+After={{ librenms_galera_readiness_agent_socket_unit }} mariadb.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 {{ librenms_galera_readiness_agent_server_path }}
+Restart=on-failure
+RestartSec=1s
+TimeoutStopSec={{ librenms_galera_readiness_agent_service_timeout }}
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal

@@ -916,23 +916,26 @@ resume interval, so an unavailable LibreNMS database sink is buffered instead
 of spawning a failing PHP process every second. Tune
 `librenms_syslog_action_queue_max_disk_space` for the expected message rate and
 outage window. The queue is isolated under `/var/spool/rsyslog/librenms`.
-Successful socket-activated Galera readiness-agent lifecycle messages are
-filtered before local storage and forwarding, but agent failures remain
-visible. This queue cannot add delivery acknowledgement to UDP senders.
+Legacy socket-worker lifecycle messages are filtered before local storage and
+forwarding, but agent failures remain visible. New deployments use one
+persistent socket-activated readiness service, so normal HAProxy checks no
+longer create transient systemd units. This queue cannot add delivery
+acknowledgement to UDP senders.
 
-If a readiness agent stops answering after a burst of health checks, use the
-bounded repair target instead of a full site run. It closes the listener,
-reaps accepted `librenms-galera-readiness-agent@*.service` workers, and then
-restarts the socket without changing MariaDB data:
+If a readiness agent stops answering, use the bounded repair target instead of
+a full site run. It closes the listener, stops the persistent readiness
+service, reaps any legacy `librenms-galera-readiness-agent@*.service` workers,
+and restarts the socket without changing MariaDB data:
 
 ```bash
 make readiness-repair-ask-become-pass READINESS_REPAIR_LIMIT=lnms3
 ```
 
-The socket has an explicit backlog and connection cap, and each worker has a
-bounded database query and service timeout. The repair now reports the socket
-response, direct-agent response, Galera status, drain-marker state, and socket
-unit status when the final probe is not `up`:
+The socket has an explicit backlog. A single persistent service caches a
+bounded local Galera query and answers HAProxy immediately, preventing health
+checks from exhausting systemd's transient-unit queue. The repair reports the
+socket response, direct-agent response, Galera status, drain-marker state, and
+socket unit status when the final probe is not `up`:
 
 * `down` means the local MariaDB member is not simultaneously `Primary`,
   `wsrep_ready=ON`, and `Synced`; repair Galera before changing HAProxy.
