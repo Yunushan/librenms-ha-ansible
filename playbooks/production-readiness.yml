@@ -1,8 +1,9 @@
 ---
 - name: Verify production readiness requirements
-  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes:!decommission_nodes
   become: true
   gather_facts: true
+  any_errors_fatal: true
   roles:
     - role: doctor
       vars:

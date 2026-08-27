@@ -22,6 +22,8 @@
 ## Validation
 
 - [ ] Required GitHub checks, including `dependency-review`, are green.
+- [ ] Code-owner review is complete for automation, inventory, playbook, role,
+      and CI changes.
 - [ ] `python scripts/ci-python-smoke.py`
 - [ ] `yamllint .`
 - [ ] `ansible-lint`

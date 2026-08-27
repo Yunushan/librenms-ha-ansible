@@ -54,6 +54,7 @@ librenms_production_readiness_shared_lock_probe_timeout: 30
 librenms_production_readiness_write_evidence: true
 librenms_production_readiness_evidence_dir: /var/lib/librenms-ha/production-readiness-evidence
 librenms_production_readiness_evidence_retention_days: 365
+librenms_production_readiness_evidence_max_age_seconds: 86400
 librenms_production_readiness_evidence_integrity_enabled: true
 librenms_production_readiness_evidence_hmac_enabled: >-
   {{ librenms_production_readiness_evidence_integrity_enabled | bool }}

@@ -122,6 +122,11 @@ ruleset before declaring a release production-ready:
   author when the repository has more than one maintainer.
 - Require resolved review conversations, disallow force pushes, and retain
   GitHub private vulnerability reporting.
+- Keep `.github/CODEOWNERS` current and require code-owner approval for changes
+  to automation, inventories, playbooks, roles, and CI before merging.
+- Where the organization supports it, enforce the ruleset for administrators
+  and require signed commits; record any deliberate exception in the release
+  change record.
 - Keep GitHub secret-scanning push protection, Dependabot alerts and automated
   security updates, and CodeQL default setup enabled; triage every open alert
   before release.

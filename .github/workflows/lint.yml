@@ -8,6 +8,10 @@ name: lint
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   platform-package-matrix:
     name: platform-packages (${{ matrix.name }})

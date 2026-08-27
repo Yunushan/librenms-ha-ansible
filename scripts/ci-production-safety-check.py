@@ -860,6 +860,13 @@ def main() -> int:
             )
     if "permissions:\n  contents: read" not in lint_workflow:
         failures.append("Lint workflow must use a read-only GitHub token")
+    if not re.search(
+        r"(?ms)^concurrency:\s*\n\s+group:\s+\$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\s*\n\s+cancel-in-progress:\s+true\s*$",
+        lint_workflow,
+    ):
+        failures.append(
+            "Lint workflow must cancel overlapping runs for the same ref"
+        )
     if "runs-on: ubuntu-24.04" not in lint_workflow:
         failures.append("Lint workflow must pin its runner to ubuntu-24.04")
     if "timeout-minutes: 20" not in lint_workflow:
@@ -876,6 +883,13 @@ def main() -> int:
     dependency_review_workflow = read(".github/workflows/dependency-review.yml")
     if "permissions:\n  contents: read" not in dependency_review_workflow:
         failures.append("Dependency review workflow must use a read-only GitHub token")
+    if not re.search(
+        r"(?ms)^concurrency:\s*\n\s+group:\s+\$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\s*\n\s+cancel-in-progress:\s+true\s*$",
+        dependency_review_workflow,
+    ):
+        failures.append(
+            "Dependency review workflow must cancel overlapping runs for the same ref"
+        )
     if "runs-on: ubuntu-24.04" not in dependency_review_workflow:
         failures.append("Dependency review workflow must pin its runner to ubuntu-24.04")
     if "timeout-minutes: 10" not in dependency_review_workflow:
@@ -889,6 +903,29 @@ def main() -> int:
         )
     if "fail-on-severity: moderate" not in dependency_review_workflow:
         failures.append("Dependency review workflow must fail on moderate vulnerabilities")
+
+    codeowners = read(".github/CODEOWNERS")
+    if not re.search(
+        r"(?m)^\s*\*\s+@[A-Za-z0-9-]+(?:\s+@[A-Za-z0-9-]+)*\s*$",
+        codeowners,
+    ):
+        failures.append(
+            "CODEOWNERS must assign an explicit owner for the complete repository"
+        )
+
+    workflow_root = ROOT / ".github" / "workflows"
+    for workflow_path in sorted(workflow_root.glob("*.y*ml")):
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+        if "pull_request_target:" in workflow_text:
+            failures.append(
+                f"{workflow_path.relative_to(ROOT)} must not execute untrusted pull requests with write-capable target context"
+            )
+        for line_number, line in enumerate(workflow_text.splitlines(), 1):
+            action_match = re.match(r"^\s+uses:\s+\S+@([^ #]+)", line)
+            if action_match and not re.fullmatch(r"[0-9a-f]{40}", action_match.group(1)):
+                failures.append(
+                    f"{workflow_path.relative_to(ROOT)}:{line_number} must pin GitHub actions to an immutable commit"
+                )
 
     ci_requirements = read("requirements-ci.txt")
     ci_tool_versions: dict[str, str] = {}
