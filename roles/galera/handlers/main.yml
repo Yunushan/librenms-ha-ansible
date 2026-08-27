@@ -16,3 +16,11 @@
   when:
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
+
+- name: Start persistent Galera readiness agent server after socket restart
+  systemd:
+    name: "{{ librenms_galera_readiness_agent_service_unit }}"
+    state: started
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool

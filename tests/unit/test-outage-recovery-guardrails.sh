@@ -38,7 +38,7 @@ main() {
         'if [ "${DB_MODE}" = "galera" ] && [ "${unit}" = "${MARIADB_SERVICE}" ]; then' \
         'Generic service recovery must not bypass Galera quorum guards.'
     require_text "${STARTUP_REPAIR}" \
-        'systemctl --no-block "${service_action}" "${MARIADB_SERVICE}"' \
+        'systemctl_bounded --no-block "${service_action}" "${MARIADB_SERVICE}"' \
         'Galera rejoin must use a bounded normal systemd service action.'
     require_text "${STARTUP_REPAIR}" \
         'wait_for_local_galera_ready' \
@@ -46,6 +46,33 @@ main() {
     require_text "${STARTUP_REPAIR}" \
         'journalctl -u "${MARIADB_SERVICE}"' \
         'A failed automatic rejoin must retain bounded diagnostics.'
+    require_text "${STARTUP_REPAIR}" \
+        'ensure_load_balancer || true' \
+        'Startup repair must recover a broken VIP data path within bounded limits.'
+    require_text "${STARTUP_REPAIR}" \
+        'ensure_readiness_agent || true' \
+        'Startup repair must recover a stale readiness socket without bootstrapping Galera.'
+    require_text "${STARTUP_REPAIR}" \
+        'LOAD_BALANCER_RESTART_COOLDOWN' \
+        'Load-balancer recovery must be rate-limited to avoid restart storms.'
+    require_text "${STARTUP_REPAIR}" \
+        'timeout --kill-after=2s "${SYSTEMD_ACTION_TIMEOUT}s"' \
+        'Every startup-repair systemd action must be bounded.'
+    require_text "${STARTUP_REPAIR}" \
+        'systemctl_bounded --no-block "${service_action}" "${MARIADB_SERVICE}"' \
+        'Galera rejoin requests must remain bounded even when systemd is degraded.'
+    require_text "${STARTUP_REPAIR}" \
+        'runtime_galera_ready()' \
+        'Application startup must validate the local Galera member before serving traffic.'
+    require_text "${STARTUP_REPAIR}" \
+        'runtime_galera_ready || return 1' \
+        'A local unsynced Galera member must keep application units quiesced.'
+    require_text "${STARTUP_REPAIR}" \
+        '[[ "${RRD_MODE}" == glusterfs || "${RRD_MODE}" == external ]]' \
+        'Shared RRD modes must gate RRDCacheD recovery.'
+    require_text "${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-startup-repair.service.j2" \
+        'TimeoutStartSec={{ librenms_startup_repair_service_timeout }}' \
+        'The startup-repair oneshot must have a whole-service timeout.'
 
     generic_units="$(
         awk '
@@ -77,7 +104,7 @@ main() {
     fi
 
     attempt_marker_line="$(grep -n -F 'galera-restarted-at"' <<<"${recovery_block}" | tail -n 1 | cut -d: -f1)"
-    systemd_action_line="$(grep -n -F 'systemctl --no-block' <<<"${recovery_block}" | cut -d: -f1)"
+    systemd_action_line="$(grep -n -F 'systemctl_bounded --no-block' <<<"${recovery_block}" | cut -d: -f1)"
     if [[ -z "${attempt_marker_line}" || -z "${systemd_action_line}" \
         || "${attempt_marker_line}" -ge "${systemd_action_line}" ]]; then
         printf 'Galera cooldown marker must be written before the service action.\n' >&2

@@ -19,6 +19,7 @@ GLUSTER_MOUNT_HEALTH_RETRIES={{ librenms_gluster_mount_health_retries | int }}
 GLUSTER_MOUNT_HEALTH_RETRY_DELAY={{ librenms_gluster_mount_health_retry_delay | int }}
 GLUSTER_STALE_UNMOUNT_TIMEOUT={{ librenms_gluster_stale_unmount_timeout | int }}
 RRDCACHED_SERVICE={{ librenms_rrdcached_service_name | quote }}
+RRDCACHED_REQUIRED={{ (librenms_manage_rrdcached | bool) | ternary('1', '0') }}
 RUNTIME_RETRIES={{ librenms_startup_repair_runtime_retries | int }}
 RUNTIME_DELAY={{ librenms_startup_repair_runtime_delay | int }}
 FIX_GIT_RRD_PLACEHOLDER={{ (librenms_startup_repair_fix_git_rrd_placeholder | bool) | ternary('1', '0') }}
@@ -27,6 +28,7 @@ SERVICE_RECOVERY_ENABLED={{ (librenms_startup_repair_service_recovery_enabled | 
 SERVICE_RECOVERY_TIMEOUT={{ librenms_startup_repair_service_recovery_timeout | int }}
 SERVICE_RECOVERY_DELAY={{ librenms_startup_repair_service_recovery_delay | int }}
 PHP_FPM_SERVICE={{ librenms_php_fpm_service_effective | default(librenms_php_fpm_service_name | default('')) | quote }}
+PHP_FPM_REQUIRED={{ (librenms_manage_php_fpm | bool) | ternary('1', '0') }}
 RESTART_PHP_FPM_ON_DB_GONE_AWAY={{ (librenms_startup_repair_restart_php_fpm_on_db_gone_away | bool) | ternary('1', '0') }}
 RELOAD_PHP_FPM_AFTER_DB_RECOVERY={{ (librenms_startup_repair_reload_php_fpm_after_db_recovery | bool) | ternary('1', '0') }}
 DB_READINESS_MARKER={{ librenms_startup_repair_db_readiness_marker | quote }}
@@ -38,8 +40,32 @@ DB_MODE={{ librenms_db_mode | quote }}
 DB_PORT={{ librenms_db_port | int }}
 DB_USER={{ librenms_db_user | quote }}
 DB_PASSWORD={{ librenms_db_password | quote }}
+DB_HOST={{ librenms_db_host_effective | quote }}
+DB_NAME={{ librenms_db_name | quote }}
+LOCAL_DB_ADDRESS={{ ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname)) | quote }}
 MARIADB_SERVICE={{ librenms_mariadb_service_name | quote }}
 MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
+SYSTEMD_ACTION_TIMEOUT={{ librenms_startup_repair_systemd_action_timeout | int }}
+LOAD_BALANCER_ENABLED={{ (librenms_startup_repair_load_balancer_enabled | bool) | ternary('1', '0') }}
+LOAD_BALANCER_SERVICE={{ librenms_haproxy_service_name | quote }}
+LOAD_BALANCER_CONFIG={{ librenms_startup_repair_load_balancer_config_path | quote }}
+LOAD_BALANCER_ADDRESS={{ librenms_vip_ip | quote }}
+LOAD_BALANCER_DB_PORT={{ librenms_haproxy_db_port | int }}
+LOAD_BALANCER_PROBE_TIMEOUT={{ librenms_startup_repair_load_balancer_probe_timeout | int }}
+LOAD_BALANCER_ACTION_TIMEOUT={{ librenms_startup_repair_load_balancer_action_timeout | int }}
+LOAD_BALANCER_RESTART_COOLDOWN={{ librenms_startup_repair_load_balancer_restart_cooldown | int }}
+LOAD_BALANCER_RESTART_MARKER={{ librenms_startup_repair_load_balancer_restart_marker | quote }}
+KEEPALIVED_SERVICE={{ librenms_keepalived_service_name | quote }}
+READINESS_AGENT_ENABLED={{ (librenms_startup_repair_readiness_agent_enabled | bool) | ternary('1', '0') }}
+READINESS_AGENT_ADDRESS={{ ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname)) | quote }}
+READINESS_AGENT_PORT={{ librenms_galera_readiness_agent_port | int }}
+READINESS_AGENT_SOCKET_UNIT={{ librenms_galera_readiness_agent_socket_unit | quote }}
+READINESS_AGENT_SERVICE_UNIT={{ librenms_galera_readiness_agent_service_unit | quote }}
+READINESS_AGENT_RESET_PATH=/usr/local/sbin/librenms-galera-readiness-agent-reset
+READINESS_AGENT_PROBE_TIMEOUT={{ librenms_startup_repair_readiness_agent_probe_timeout | int }}
+READINESS_AGENT_FAILURE_THRESHOLD={{ librenms_startup_repair_readiness_agent_failure_threshold | int }}
+READINESS_AGENT_RESTART_COOLDOWN={{ librenms_startup_repair_readiness_agent_restart_cooldown | int }}
+READINESS_AGENT_RESTART_MARKER={{ librenms_startup_repair_readiness_agent_restart_marker | quote }}
 GALERA_SELF_HEAL_ENABLED={{ (librenms_galera_self_heal_enabled | bool) | ternary('1', '0') }}
 GALERA_SELF_HEAL_FAILURE_THRESHOLD={{ librenms_galera_self_heal_failure_threshold | int }}
 GALERA_SELF_HEAL_RESTART_COOLDOWN={{ librenms_galera_self_heal_restart_cooldown | int }}
@@ -72,6 +98,79 @@ log() {
 
 run_as_librenms() {
   runuser -u "${LIBRENMS_USER}" -- "$@"
+}
+
+systemctl_bounded() {
+  timeout --kill-after=2s "${SYSTEMD_ACTION_TIMEOUT}s" \
+    systemctl "$@"
+}
+
+unit_available() {
+  timeout 5 systemctl list-unit-files "$1" >/dev/null 2>&1
+}
+
+unit_state() {
+  timeout 5 systemctl is-active "$1" 2>/dev/null || true
+}
+
+vip_is_local() {
+  [ "${LOAD_BALANCER_ENABLED}" = "1" ] || return 1
+  [ -n "${LOAD_BALANCER_ADDRESS}" ] || return 1
+  command -v ip >/dev/null 2>&1 || return 1
+
+  ip -4 -o addr show 2>/dev/null \
+    | awk -v vip="${LOAD_BALANCER_ADDRESS}" '
+        { split($4, address, "/"); if (address[1] == vip) found=1 }
+        END { exit(found ? 0 : 1) }
+      '
+}
+
+tcp_listener_present() {
+  local address=$1
+  local port=$2
+
+  command -v ss >/dev/null 2>&1 || return 1
+  ss -H -ltn 2>/dev/null \
+    | awk -v address="${address}" -v port=":${port}" '
+        {
+          endpoint=$4
+          if (endpoint == address port ||
+              endpoint == "0.0.0.0" port ||
+              endpoint == "*" port) found=1
+        }
+        END { exit(found ? 0 : 1) }'
+}
+
+database_tcp_ready() {
+  local endpoint=$1
+  local probe_timeout=${2:-${LOAD_BALANCER_PROBE_TIMEOUT}}
+  [ -n "${endpoint}" ] || return 1
+  command -v mysql >/dev/null 2>&1 || return 1
+
+  MYSQL_PWD="${DB_PASSWORD}" timeout "${probe_timeout}s" mysql \
+    --protocol=tcp -h "${endpoint}" -P "${DB_PORT}" -u "${DB_USER}" \
+    --connect-timeout="${probe_timeout}" \
+    --batch --skip-column-names --silent "${DB_NAME}" -e 'SELECT 1' \
+    2>/dev/null | grep -qx '1'
+}
+
+any_db_backend_ready() {
+  local endpoint
+  for endpoint in "${LOCAL_DB_ADDRESS}" "${DB_HOST}" "${GALERA_PEERS[@]}"; do
+    [ -n "${endpoint}" ] || continue
+    database_tcp_ready "${endpoint}" && return 0
+  done
+
+  return 1
+}
+
+readiness_socket_probe() {
+  command -v bash >/dev/null 2>&1 || return 1
+  timeout "${READINESS_AGENT_PROBE_TIMEOUT}s" bash -c '
+    exec 3<>/dev/tcp/"$1"/"$2" || exit 1
+    IFS= read -r response <&3 || exit 1
+    [ "${response}" = up ]
+  ' _ "${READINESS_AGENT_ADDRESS}" "${READINESS_AGENT_PORT}"
 }
 
 rrd_mount_present() {
@@ -118,9 +217,9 @@ recover_stale_rrd_mount() {
   [ "${GLUSTER_STALE_MOUNT_RECOVERY}" = "1" ] || return 1
 
   local restart_rrdcached=0
-  if systemctl is-active --quiet "${RRDCACHED_SERVICE}"; then
+  if systemctl_bounded is-active --quiet "${RRDCACHED_SERVICE}"; then
     restart_rrdcached=1
-    systemctl stop "${RRDCACHED_SERVICE}" || return 1
+    systemctl_bounded stop "${RRDCACHED_SERVICE}" || return 1
   fi
 
   log "detaching inaccessible Gluster RRD mount ${RRD_PATH}"
@@ -136,7 +235,7 @@ recover_stale_rrd_mount() {
   rrd_path_accessible || return 1
 
   if [ "${restart_rrdcached}" = "1" ]; then
-    systemctl start "${RRDCACHED_SERVICE}" || return 1
+    systemctl_bounded start "${RRDCACHED_SERVICE}" || return 1
   fi
 
   log "restored accessible Gluster RRD mount ${RRD_PATH}"
@@ -181,20 +280,21 @@ recover_systemd_units() {
       if [ "${DB_MODE}" = "galera" ] && [ "${unit}" = "${MARIADB_SERVICE}" ]; then
         continue
       fi
-      # RRDCacheD must not start against an absent or stale Gluster mount.
+      # RRDCacheD must not start against an absent or stale shared RRD mount.
       # wait_for_rrd_mount and ensure_rrdcached handle it after mount health is
       # known, while the other HA services can recover normally here.
-      if [ "${RRD_MODE}" = "glusterfs" ] && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then
+      if [[ "${RRD_MODE}" == glusterfs || "${RRD_MODE}" == external ]] \
+        && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then
         continue
       fi
-      systemctl list-unit-files "${unit}" >/dev/null 2>&1 || continue
+      unit_available "${unit}" || continue
 
-      state=$(systemctl is-active "${unit}" 2>/dev/null || true)
+      state=$(unit_state "${unit}")
       if [ "${state}" != "active" ]; then
         pending=1
         log "starting ${unit} (state=${state:-unknown})"
-        systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
-        systemctl start "${unit}" >/dev/null 2>&1 || true
+        systemctl_bounded reset-failed "${unit}" >/dev/null 2>&1 || true
+        systemctl_bounded start "${unit}" >/dev/null 2>&1 || true
       fi
     done
 
@@ -205,6 +305,174 @@ recover_systemd_units() {
     fi
     sleep "${SERVICE_RECOVERY_DELAY}"
   done
+}
+
+restart_load_balancer() {
+  local reason=$1
+  local force_restart=${2:-0}
+  local previous_restart=0
+  local now
+  local state
+  local marker_dir
+
+  [ "${LOAD_BALANCER_ENABLED}" = "1" ] || return 0
+  unit_available "${LOAD_BALANCER_SERVICE}" || return 1
+
+  if ! command -v haproxy >/dev/null 2>&1; then
+    log "cannot repair ${LOAD_BALANCER_SERVICE}: haproxy executable is unavailable"
+    return 1
+  fi
+  if ! timeout "${LOAD_BALANCER_ACTION_TIMEOUT}s" haproxy -c -f \
+      "${LOAD_BALANCER_CONFIG}" >/dev/null 2>&1; then
+    log "refusing ${LOAD_BALANCER_SERVICE} recovery because its configuration is invalid"
+    return 1
+  fi
+
+  marker_dir=$(dirname "${LOAD_BALANCER_RESTART_MARKER}")
+  mkdir -p "${marker_dir}" >/dev/null 2>&1 || return 1
+  previous_restart=$(cat "${LOAD_BALANCER_RESTART_MARKER}" 2>/dev/null || printf '0')
+  case "${previous_restart}" in
+    *[!0-9]*|'') previous_restart=0 ;;
+  esac
+  now=$(date +%s)
+  if [ $((now - previous_restart)) -lt "${LOAD_BALANCER_RESTART_COOLDOWN}" ]; then
+    log "${reason}; ${LOAD_BALANCER_SERVICE} recovery cooldown is active"
+    return 75
+  fi
+
+  # Record before touching HAProxy. If systemd or the kernel is slow, the
+  # 30-second repair timer must not create a reload/restart storm.
+  printf '%s\n' "${now}" > "${LOAD_BALANCER_RESTART_MARKER}" 2>/dev/null || true
+  state=$(unit_state "${LOAD_BALANCER_SERVICE}")
+  if [ "${force_restart}" = "0" ] && [ "${state}" = "active" ]; then
+    log "${reason}; reloading ${LOAD_BALANCER_SERVICE}"
+    if ! systemctl_bounded reload "${LOAD_BALANCER_SERVICE}" >/dev/null 2>&1; then
+      log "${LOAD_BALANCER_SERVICE} reload failed; trying a bounded restart"
+      systemctl_bounded restart "${LOAD_BALANCER_SERVICE}" >/dev/null 2>&1 || return 1
+    fi
+  else
+    log "${reason}; restarting ${LOAD_BALANCER_SERVICE}"
+    systemctl_bounded reset-failed "${LOAD_BALANCER_SERVICE}" >/dev/null 2>&1 || true
+    systemctl_bounded restart "${LOAD_BALANCER_SERVICE}" >/dev/null 2>&1 || \
+      systemctl_bounded start "${LOAD_BALANCER_SERVICE}" >/dev/null 2>&1 || return 1
+  fi
+
+  state=$(unit_state "${LOAD_BALANCER_SERVICE}")
+  [ "${state}" = "active" ] || return 1
+  if vip_is_local && ! tcp_listener_present "${LOAD_BALANCER_ADDRESS}" "${LOAD_BALANCER_DB_PORT}"; then
+    log "${LOAD_BALANCER_SERVICE} is active but the local VIP database listener is still absent"
+    return 1
+  fi
+}
+
+ensure_load_balancer() {
+  local state
+  local keepalived_state
+
+  [ "${LOAD_BALANCER_ENABLED}" = "1" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  unit_available "${LOAD_BALANCER_SERVICE}" || return 0
+
+  state=$(unit_state "${LOAD_BALANCER_SERVICE}")
+  if [ "${state}" != "active" ]; then
+    systemctl_bounded reset-failed "${LOAD_BALANCER_SERVICE}" >/dev/null 2>&1 || true
+    log "starting ${LOAD_BALANCER_SERVICE} (state=${state:-unknown})"
+    systemctl_bounded start "${LOAD_BALANCER_SERVICE}" >/dev/null 2>&1 || true
+  fi
+
+  if unit_available "${KEEPALIVED_SERVICE}"; then
+    keepalived_state=$(unit_state "${KEEPALIVED_SERVICE}")
+    if [ "${keepalived_state}" != "active" ]; then
+      systemctl_bounded reset-failed "${KEEPALIVED_SERVICE}" >/dev/null 2>&1 || true
+      log "starting ${KEEPALIVED_SERVICE} (state=${keepalived_state:-unknown})"
+      systemctl_bounded start "${KEEPALIVED_SERVICE}" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # A standby node is allowed not to own the VIP. Only the owner must expose
+  # the database listener and pass an actual MySQL login probe.
+  if vip_is_local; then
+    if ! tcp_listener_present "${LOAD_BALANCER_ADDRESS}" "${LOAD_BALANCER_DB_PORT}"; then
+      restart_load_balancer \
+        "local VIP ${LOAD_BALANCER_ADDRESS} has no database listener" 1 || true
+    elif ! database_tcp_ready "${LOAD_BALANCER_ADDRESS}"; then
+      if any_db_backend_ready; then
+        restart_load_balancer \
+          "local VIP ${LOAD_BALANCER_ADDRESS} rejects database login while a Galera backend is ready" 0 || true
+      else
+        log "local VIP database login failed, but no Galera backend passed the direct probe; preserving cluster state"
+      fi
+    fi
+  fi
+}
+
+ensure_readiness_agent() {
+  local state
+  local local_status
+  local failures=0
+  local previous_restart=0
+  local now
+  local marker_dir
+
+  [ "${READINESS_AGENT_ENABLED}" = "1" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  unit_available "${READINESS_AGENT_SOCKET_UNIT}" || return 0
+
+  state=$(unit_state "${READINESS_AGENT_SOCKET_UNIT}")
+  if [ "${state}" != "active" ]; then
+    systemctl_bounded reset-failed "${READINESS_AGENT_SOCKET_UNIT}" >/dev/null 2>&1 || true
+    log "starting ${READINESS_AGENT_SOCKET_UNIT} (state=${state:-unknown})"
+    systemctl_bounded start "${READINESS_AGENT_SOCKET_UNIT}" >/dev/null 2>&1 || true
+  fi
+
+  readiness_socket_probe && {
+    rm -f "${READINESS_AGENT_RESTART_MARKER}.failures"
+    return 0
+  }
+
+  # A down response is valid while this member is joining or the cluster is
+  # unavailable. Only repair the socket when MariaDB is already verified
+  # Primary/ready/Synced and the transport itself is broken.
+  local_status=$(local_galera_status)
+  if ! galera_status_is_ready "${local_status}"; then
+    rm -f "${READINESS_AGENT_RESTART_MARKER}.failures"
+    return 0
+  fi
+
+  marker_dir=$(dirname "${READINESS_AGENT_RESTART_MARKER}")
+  mkdir -p "${marker_dir}" >/dev/null 2>&1 || return 0
+  failures=$(cat "${READINESS_AGENT_RESTART_MARKER}.failures" 2>/dev/null || printf '0')
+  case "${failures}" in
+    *[!0-9]*|'') failures=0 ;;
+  esac
+  failures=$((failures + 1))
+  printf '%s\n' "${failures}" > "${READINESS_AGENT_RESTART_MARKER}.failures" 2>/dev/null || true
+  if [ "${failures}" -lt "${READINESS_AGENT_FAILURE_THRESHOLD}" ]; then
+    log "readiness socket is unresponsive while local Galera is ready; retry ${failures}/${READINESS_AGENT_FAILURE_THRESHOLD}"
+    return 0
+  fi
+
+  previous_restart=$(cat "${READINESS_AGENT_RESTART_MARKER}" 2>/dev/null || printf '0')
+  case "${previous_restart}" in
+    *[!0-9]*|'') previous_restart=0 ;;
+  esac
+  now=$(date +%s)
+  if [ $((now - previous_restart)) -lt "${READINESS_AGENT_RESTART_COOLDOWN}" ]; then
+    log "readiness socket is unresponsive; readiness-agent recovery cooldown is active"
+    return 0
+  fi
+
+  printf '%s\n' "${now}" > "${READINESS_AGENT_RESTART_MARKER}" 2>/dev/null || true
+  log "resetting stale ${READINESS_AGENT_SOCKET_UNIT} after a healthy local Galera probe"
+  if [ -x "${READINESS_AGENT_RESET_PATH}" ]; then
+    timeout "${LOAD_BALANCER_ACTION_TIMEOUT}s" \
+      "${READINESS_AGENT_RESET_PATH}" >/dev/null 2>&1 || true
+  fi
+  if ! readiness_socket_probe; then
+    systemctl_bounded restart "${READINESS_AGENT_SOCKET_UNIT}" >/dev/null 2>&1 || true
+  fi
+  readiness_socket_probe || \
+    log "${READINESS_AGENT_SOCKET_UNIT} remains unresponsive after bounded recovery"
 }
 
 repair_writable_path() {
@@ -254,36 +522,106 @@ repair_git_rrd_placeholder() {
 }
 
 ensure_systemd_units() {
-  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl_bounded daemon-reload >/dev/null 2>&1 || true
 
+  local runtime_ready=0
+  local service_state
+  local state
+  local unit
+
+  # Enablement records the desired boot state without starting an application
+  # during a database, RRD, or cache outage. Starts are handled below only
+  # after the complete local runtime dependency set is healthy.
   for unit in \
     librenms.service \
     librenms-scheduler.timer \
     librenms-daily.timer \
     librenms-dispatcher-ha-recover.timer; do
-    if systemctl list-unit-files "${unit}" >/dev/null 2>&1; then
-      systemctl enable --now "${unit}" >/dev/null 2>&1 || true
+    if unit_available "${unit}"; then
+      systemctl_bounded enable "${unit}" >/dev/null 2>&1 || true
     fi
   done
+
+  if runtime_dependencies_ready; then
+    runtime_ready=1
+  fi
+
+  if [ "${runtime_ready}" -ne 1 ]; then
+    log 'database, RRD, or RRDCacheD dependencies are not ready; keeping LibreNMS application units quiesced'
+
+    # Timers must not launch polling or maintenance jobs while the VIP/DB
+    # path is unavailable. They remain enabled and will be started on the
+    # next bounded repair pass after dependencies recover.
+    for unit in \
+      librenms-scheduler.timer \
+      librenms-daily.timer \
+      librenms-dispatcher-ha-recover.timer; do
+      if unit_available "${unit}"; then
+        state=$(unit_state "${unit}")
+        case "${state}" in
+          active|activating|deactivating)
+            systemctl_bounded stop "${unit}" >/dev/null 2>&1 || true
+            ;;
+        esac
+      fi
+    done
+
+    # A dispatcher stuck in its startup gate should not remain in an
+    # activating loop while the database is unavailable. Do not stop a
+    # healthy active dispatcher; it can reconnect when the outage clears.
+    if unit_available librenms.service; then
+      service_state=$(unit_state librenms.service)
+      if [ "${service_state}" = activating ]; then
+        log 'librenms.service is waiting on unavailable runtime dependencies; stopping its startup attempt'
+        systemctl_bounded stop librenms.service >/dev/null 2>&1 || true
+      fi
+    fi
+    return 0
+  fi
+
+  if unit_available librenms.service; then
+    service_state=$(unit_state librenms.service)
+    if [ "${service_state}" != active ]; then
+      log "starting librenms.service after runtime dependencies were confirmed (state=${service_state:-unknown})"
+      systemctl_bounded reset-failed librenms.service >/dev/null 2>&1 || true
+      systemctl_bounded start librenms.service >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # Timers are useful only once the dispatcher is actually running. This
+  # ordering prevents a recovered database from immediately spawning jobs
+  # against a still-starting application service.
+  if unit_available librenms.service && [ "$(unit_state librenms.service)" = active ]; then
+    for unit in \
+      librenms-scheduler.timer \
+      librenms-daily.timer \
+      librenms-dispatcher-ha-recover.timer; do
+      if unit_available "${unit}"; then
+        systemctl_bounded start "${unit}" >/dev/null 2>&1 || true
+      fi
+    done
+  else
+    log 'librenms.service is not active after a bounded start; leaving LibreNMS timers stopped'
+  fi
 }
 
 ensure_rrdcached() {
   [ "${SERVICE_RECOVERY_ENABLED}" = "1" ] || return 0
   command -v systemctl >/dev/null 2>&1 || return 0
-  systemctl list-unit-files "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || return 0
+  unit_available "${RRDCACHED_SERVICE}" || return 0
 
-  if [ "${RRD_MODE}" = "glusterfs" ]; then
+  if [[ "${RRD_MODE}" == glusterfs || "${RRD_MODE}" == external ]]; then
     rrd_mount_present || return 0
     rrd_path_accessible || return 0
   fi
 
   local state
-  state=$(systemctl is-active "${RRDCACHED_SERVICE}" 2>/dev/null || true)
+  state=$(unit_state "${RRDCACHED_SERVICE}")
   [ "${state}" = "active" ] && return 0
 
   log "starting ${RRDCACHED_SERVICE} after RRD readiness was confirmed (state=${state:-unknown})"
-  systemctl reset-failed "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || true
-  systemctl start "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || true
+  systemctl_bounded reset-failed "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || true
+  systemctl_bounded start "${RRDCACHED_SERVICE}" >/dev/null 2>&1 || true
 }
 
 configure_librenms_runtime() {
@@ -311,13 +649,56 @@ latest_db_gone_away_error() {
   [ -r "${log_file}" ] || return 1
 
   tail -n "${DB_GONE_AWAY_LOG_LINES}" "${log_file}" 2>/dev/null \
-    | grep -E 'SQLSTATE\[HY000\].*\[2006\]|MySQL server has gone away|Lost connection to MySQL server' \
+    | grep -E 'SQLSTATE\[HY000\].*\[(2002|2006|2013)\]|MySQL server has gone away|Lost connection to MySQL server|Connection refused' \
     | tail -n 1
 }
 
 librenms_database_ready() {
+  if [ "${LOAD_BALANCER_ENABLED}" = "1" ]; then
+    database_tcp_ready "${DB_HOST}" "${DB_GONE_AWAY_DB_CHECK_TIMEOUT}" || return 1
+  fi
+
   run_as_librenms timeout "${DB_GONE_AWAY_DB_CHECK_TIMEOUT}" \
     "${LIBRENMS_DIR}/lnms" config:get distributed_poller >/dev/null 2>&1
+}
+
+runtime_rrd_ready() {
+  case "${RRD_MODE}" in
+    glusterfs|external)
+      rrd_mount_present && rrd_path_accessible
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+runtime_rrdcached_ready() {
+  [ "${RRDCACHED_REQUIRED}" = 1 ] || return 0
+  unit_available "${RRDCACHED_SERVICE}" || return 1
+  [ "$(unit_state "${RRDCACHED_SERVICE}")" = active ]
+}
+
+runtime_php_fpm_ready() {
+  [ "${PHP_FPM_REQUIRED}" = 1 ] || return 0
+  [ -n "${PHP_FPM_SERVICE}" ] || return 1
+  unit_available "${PHP_FPM_SERVICE}" || return 1
+  [ "$(unit_state "${PHP_FPM_SERVICE}")" = active ]
+}
+
+runtime_galera_ready() {
+  [ "${DB_MODE}" = galera ] || return 0
+  # Web-only nodes may use the VIP without running a local MariaDB member.
+  [ "${GALERA_SELF_HEAL_LOCAL_MEMBER}" = 1 ] || return 0
+  galera_status_is_ready "$(local_galera_status)"
+}
+
+runtime_dependencies_ready() {
+  runtime_rrd_ready || return 1
+  runtime_rrdcached_ready || return 1
+  librenms_database_ready || return 1
+  runtime_php_fpm_ready || return 1
+  runtime_galera_ready || return 1
 }
 
 galera_status_is_ready() {
@@ -360,7 +741,7 @@ wait_for_local_galera_ready() {
       return 0
     fi
 
-    service_state=$(systemctl is-active "${MARIADB_SERVICE}" 2>/dev/null || true)
+    service_state=$(unit_state "${MARIADB_SERVICE}")
     if [ "${service_state}" = "failed" ]; then
       return 1
     fi
@@ -411,7 +792,7 @@ recover_persistently_unready_local_galera() {
   [ "${GALERA_SELF_HEAL_MIN_HEALTHY_PEERS}" -gt 0 ] || return 0
   command -v systemctl >/dev/null 2>&1 || return 0
 
-  service_state=$(systemctl is-active "${MARIADB_SERVICE}" 2>/dev/null || true)
+  service_state=$(unit_state "${MARIADB_SERVICE}")
   local_status=$(local_galera_status)
   if galera_status_is_ready "${local_status}"; then
     rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
@@ -474,8 +855,8 @@ recover_persistently_unready_local_galera() {
   # same cooldown as a successful one instead of creating a restart storm.
   printf '%s\n' "${now}" > "${GALERA_SELF_HEAL_STATE_DIR}/galera-restarted-at"
   log "requesting normal Galera ${service_action} with ${healthy_peers} synced peer(s)"
-  systemctl reset-failed "${MARIADB_SERVICE}" >/dev/null 2>&1 || true
-  if timeout 10 systemctl --no-block "${service_action}" "${MARIADB_SERVICE}" \
+  systemctl_bounded reset-failed "${MARIADB_SERVICE}" >/dev/null 2>&1 || true
+  if systemctl_bounded --no-block "${service_action}" "${MARIADB_SERVICE}" \
       >/dev/null 2>&1 && wait_for_local_galera_ready; then
     rm -f "${GALERA_SELF_HEAL_STATE_DIR}/galera-not-ready.count"
     if exit_local_galera_web_drain; then
@@ -519,7 +900,7 @@ gracefully_reload_php_fpm_after_database_recovery() {
   fi
 
   log "${reason}; gracefully reloading ${PHP_FPM_SERVICE}"
-  if systemctl reload "${PHP_FPM_SERVICE}" >/dev/null 2>&1; then
+  if systemctl_bounded reload "${PHP_FPM_SERVICE}" >/dev/null 2>&1; then
     printf '%s\n' "${now}" > "${DB_GONE_AWAY_MARKER}.handled-at" 2>/dev/null || true
     return 0
   else
@@ -591,13 +972,18 @@ recover_php_fpm_after_db_gone_away() {
 }
 
 recover_php_fpm_after_db_recovery || true
+ensure_readiness_agent || true
+ensure_load_balancer || true
 recover_persistently_unready_local_galera || true
+ensure_readiness_agent || true
 recover_systemd_units || true
 wait_for_rrd_mount || true
 repair_writable_paths
 repair_git_rrd_placeholder
 ensure_rrdcached || true
 ensure_systemd_units
+ensure_readiness_agent || true
+ensure_load_balancer || true
 recover_php_fpm_after_db_recovery || true
 if librenms_database_ready; then
   configure_librenms_runtime || true

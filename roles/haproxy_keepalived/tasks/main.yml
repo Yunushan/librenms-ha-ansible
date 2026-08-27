@@ -754,14 +754,35 @@
           {{ librenms_haproxy_nginx_config.stderr | default('') }}
 
 - name: Deploy Keepalived config when VIP is enabled
-  template:
-    src: keepalived.conf.j2
-    dest: /etc/keepalived/keepalived.conf
-    owner: root
-    group: root
-    mode: "0640"
+  block:
+    - name: Deploy HAProxy health check for Keepalived when VIP is enabled
+      template:
+        src: librenms-keepalived-haproxy-check.sh.j2
+        dest: "{{ librenms_keepalived_haproxy_check_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+        validate: "/bin/sh -n %s"
+      notify: Restart Keepalived
+
+    - name: Deploy Keepalived config when VIP is enabled
+      template:
+        src: keepalived.conf.j2
+        dest: /etc/keepalived/keepalived.conf
+        owner: root
+        group: root
+        mode: "0640"
+      notify: Restart Keepalived
   when: librenms_vip_enabled | bool
-  notify: Restart Keepalived
+
+- name: Validate Keepalived health check when VIP is enabled
+  command:
+    argv:
+      - /bin/sh
+      - -n
+      - "{{ librenms_keepalived_haproxy_check_path }}"
+  changed_when: false
+  when: librenms_vip_enabled | bool
 
 - name: Validate Keepalived configuration when VIP is enabled
   command:

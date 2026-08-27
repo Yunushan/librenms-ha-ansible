@@ -55,9 +55,9 @@ require_file_text "$STARTUP_REPAIR_TEMPLATE" \
 require_file_text "$STARTUP_REPAIR_TEMPLATE" \
     'umount --lazy -- "${RRD_PATH}"'
 require_file_text "$STARTUP_REPAIR_TEMPLATE" \
-    'systemctl stop "${RRDCACHED_SERVICE}"'
+    'systemctl_bounded stop "${RRDCACHED_SERVICE}"'
 require_file_text "$STARTUP_REPAIR_TEMPLATE" \
-    'systemctl start "${RRDCACHED_SERVICE}"'
+    'systemctl_bounded start "${RRDCACHED_SERVICE}"'
 require_file_text "$RUNTIME_WAIT_TEMPLATE" "--nocanonicalize"
 require_file_text "$RUNTIME_WAIT_TEMPLATE" \
     'RRD_PATH={{ librenms_rrdcached_base_path | quote }}'
@@ -95,13 +95,13 @@ startup_health_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
 startup_enable_line="$(last_line_number "$STARTUP_REPAIR_TEMPLATE" \
     'GLUSTER_STALE_MOUNT_RECOVERY')"
 startup_stop_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
-    'systemctl stop "${RRDCACHED_SERVICE}"')"
+    'systemctl_bounded stop "${RRDCACHED_SERVICE}"')"
 startup_unmount_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
     'umount --lazy -- "${RRD_PATH}"')"
 startup_mount_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
     'mount_rrd_path || return 1')"
 startup_start_line="$(first_line_number "$STARTUP_REPAIR_TEMPLATE" \
-    'systemctl start "${RRDCACHED_SERVICE}"')"
+    'systemctl_bounded start "${RRDCACHED_SERVICE}"')"
 
 if ((startup_health_line >= startup_enable_line \
     || startup_enable_line >= startup_stop_line \

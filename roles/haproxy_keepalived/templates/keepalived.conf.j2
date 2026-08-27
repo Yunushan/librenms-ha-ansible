@@ -4,9 +4,12 @@ global_defs {
 }
 
 vrrp_script chk_haproxy {
-  script "/usr/bin/pgrep -x haproxy"
+  script "{{ librenms_keepalived_haproxy_check_path }}"
   interval {{ librenms_keepalived_track_haproxy_interval }}
-  weight 20
+  timeout {{ librenms_keepalived_haproxy_check_timeout }}
+  fall {{ librenms_keepalived_haproxy_check_fall }}
+  rise {{ librenms_keepalived_haproxy_check_rise }}
+  weight {{ librenms_keepalived_haproxy_check_weight }}
 }
 
 vrrp_instance VI_1 {

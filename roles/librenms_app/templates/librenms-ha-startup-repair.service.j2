@@ -9,11 +9,14 @@ After={{ librenms_mariadb_service_name }}.service
 After={{ librenms_haproxy_service_name }}.service
 After={{ librenms_redis_service_name }}.service
 After={{ librenms_redis_sentinel_service_name_effective }}.service
-RequiresMountsFor={{ librenms_install_dir }}{{ (' ' ~ librenms_install_dir ~ '/rrd') if librenms_rrd_mode in ['glusterfs', 'external'] else '' }}
+RequiresMountsFor={{ librenms_install_dir }}
 
 [Service]
 Type=oneshot
 ExecStart={{ librenms_startup_repair_path }}
+TimeoutStartSec={{ librenms_startup_repair_service_timeout }}
+TimeoutStopSec={{ librenms_startup_repair_service_stop_timeout }}
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target

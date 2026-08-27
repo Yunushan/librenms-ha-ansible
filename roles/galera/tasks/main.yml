@@ -118,6 +118,15 @@
     - librenms_db_mode == 'galera'
     - librenms_galera_readiness_agent_enabled | bool
 
+- name: Start persistent Galera readiness agent server
+  systemd:
+    name: "{{ librenms_galera_readiness_agent_service_unit }}"
+    state: started
+    daemon_reload: true
+  when:
+    - librenms_db_mode == 'galera'
+    - librenms_galera_readiness_agent_enabled | bool
+
 - name: Apply Galera readiness agent before database convergence
   meta: flush_handlers
 

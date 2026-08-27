@@ -91,6 +91,12 @@
         enabled: true
         daemon_reload: true
 
+    - name: Start persistent Galera readiness server after socket repair
+      ansible.builtin.systemd:
+        name: "{{ librenms_galera_readiness_agent_service_unit }}"
+        state: started
+        daemon_reload: true
+
     - name: Verify local readiness agent after repair
       ansible.builtin.shell: |-
         set +e

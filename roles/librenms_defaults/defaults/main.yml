@@ -641,6 +641,11 @@ librenms_keepalived_auth_pass: CHANGE_ME_VRRP_PASSWORD
 librenms_keepalived_vrid: 51
 librenms_keepalived_priority: 100
 librenms_keepalived_track_haproxy_interval: 1
+librenms_keepalived_haproxy_check_path: /usr/local/sbin/librenms-keepalived-haproxy-check
+librenms_keepalived_haproxy_check_timeout: 3
+librenms_keepalived_haproxy_check_fall: 2
+librenms_keepalived_haproxy_check_rise: 2
+librenms_keepalived_haproxy_check_weight: 50
 librenms_keepalived_advert_interval: 1
 librenms_keepalived_garp_master_delay: 0
 librenms_keepalived_garp_master_repeat: 5
@@ -906,6 +911,37 @@ librenms_startup_repair_db_gone_away_log_lines: 2000
 librenms_startup_repair_db_gone_away_marker: /run/librenms-ha-startup-repair/db-gone-away.last
 librenms_startup_repair_db_gone_away_db_check_timeout: 10
 librenms_startup_repair_db_gone_away_php_fpm_cooldown: 120
+# The startup repair timer must validate the real HA data path, not only the
+# HAProxy/Keepalived unit state. A service can be active while its VIP listener
+# is absent or all Galera backends are unusable.
+librenms_startup_repair_load_balancer_enabled: >-
+  {{ librenms_mode == 'ha' and (librenms_vip_enabled | bool) }}
+librenms_startup_repair_load_balancer_config_path: /etc/haproxy/haproxy.cfg
+librenms_startup_repair_load_balancer_probe_timeout: 3
+librenms_startup_repair_load_balancer_action_timeout: 20
+librenms_startup_repair_load_balancer_restart_cooldown: 60
+librenms_startup_repair_load_balancer_restart_marker: /run/librenms-ha-startup-repair/load-balancer-restarted-at
+# A stale socket-activated readiness worker can make every Galera backend look
+# down while MariaDB is healthy. Repair it only after the local Galera state is
+# verified and only within a bounded, rate-limited loop.
+librenms_startup_repair_readiness_agent_enabled: >-
+  {{
+    librenms_mode == 'ha'
+    and librenms_db_mode == 'galera'
+    and (librenms_galera_readiness_agent_enabled | bool)
+  }}
+librenms_startup_repair_readiness_agent_probe_timeout: 5
+librenms_startup_repair_readiness_agent_failure_threshold: 2
+librenms_startup_repair_readiness_agent_restart_cooldown: 60
+librenms_startup_repair_readiness_agent_restart_marker: /run/librenms-ha-startup-repair/readiness-agent-restarted-at
+# Keep each individual systemd operation bounded. The repair service runs from
+# a timer and must not remain wedged behind a stalled systemd manager.
+librenms_startup_repair_systemd_action_timeout: 30
+# Keep the whole timer invocation bounded as well. This is long enough for the
+# configured Gluster and service-recovery probes, but prevents an outage from
+# consuming the timer indefinitely.
+librenms_startup_repair_service_timeout: 420s
+librenms_startup_repair_service_stop_timeout: 30s
 librenms_startup_repair_service_recovery_enabled: true
 librenms_startup_repair_service_recovery_timeout: 180
 librenms_startup_repair_service_recovery_delay: 5
@@ -932,6 +968,13 @@ librenms_startup_repair_service_recovery_units:
     {{
       librenms_rrdcached_service_name
       if librenms_manage_rrdcached | bool
+      else ''
+    }}
+  - >-
+    {{
+      librenms_php_fpm_service_effective
+      | default(librenms_php_fpm_service_name | default(''))
+      if librenms_manage_php_fpm | bool
       else ''
     }}
   - >-

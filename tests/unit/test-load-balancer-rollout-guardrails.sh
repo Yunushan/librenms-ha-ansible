@@ -32,7 +32,20 @@ require_rolling_load_balancer_play "${ROOT_DIR}/playbooks/syslog.yml"
 
 readonly HAPROXY_TASKS="${ROOT_DIR}/roles/haproxy_keepalived/tasks/main.yml"
 readonly HAPROXY_TEMPLATE="${ROOT_DIR}/roles/haproxy_keepalived/templates/haproxy.cfg.j2"
+readonly KEEPALIVED_TEMPLATE="${ROOT_DIR}/roles/haproxy_keepalived/templates/keepalived.conf.j2"
+readonly KEEPALIVED_HEALTH_TEMPLATE="${ROOT_DIR}/roles/haproxy_keepalived/templates/librenms-keepalived-haproxy-check.sh.j2"
 readonly DEFAULTS="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
+
+require_file_text() {
+    local file="$1"
+    local expected="$2"
+    local message="$3"
+
+    if ! grep -Fq -- "${expected}" "${file}"; then
+        printf '%s\nMissing in %s: %s\n' "${message}" "${file}" "${expected}" >&2
+        exit 1
+    fi
+}
 
 grep -Fq 'librenms_galera_readiness_agent_probe_timeout' "${HAPROXY_TASKS}" || {
     printf 'Galera agent preflight must use its bounded probe timeout.\n' >&2
@@ -91,5 +104,51 @@ if ((probe_retries < 2)); then
     printf 'Galera readiness deployment preflight must allow convergence retries.\n' >&2
     exit 1
 fi
+
+require_file_text "${HAPROXY_TASKS}" \
+    'src: librenms-keepalived-haproxy-check.sh.j2' \
+    'Keepalived must receive a deployed data-plane health check.'
+require_file_text "${HAPROXY_TASKS}" \
+    'validate: "/bin/sh -n %s"' \
+    'The Keepalived health check must pass shell syntax validation before deployment.'
+require_file_text "${KEEPALIVED_TEMPLATE}" \
+    'script "{{ librenms_keepalived_haproxy_check_path }}"' \
+    'Keepalived must execute the data-plane health check.'
+require_file_text "${KEEPALIVED_TEMPLATE}" \
+    'weight {{ librenms_keepalived_haproxy_check_weight }}' \
+    'Keepalived must adjust node priority when HAProxy data-plane checks fail.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'local_database_ready()' \
+    'The Keepalived health check must validate local Galera readiness.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'LOCAL_DB_MEMBER=' \
+    'The Keepalived health check must know whether the local host is a database member.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    '[ "${LOCAL_DB_MEMBER}" = 1 ] || return 0' \
+    'Non-database nodes must not fail the local database/readiness probe.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'readiness_agent_ready()' \
+    'Keepalived must reject a node with a broken Galera readiness socket.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'web_frontend_ready()' \
+    'The VIP owner must pass a real web frontend probe.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'command -v curl >/dev/null 2>&1 || return 1' \
+    'The VIP owner must fail closed when its web probe dependency is missing.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'if vip_is_local; then' \
+    'Only the current VIP owner should validate the VIP listener path.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'has_listener "${VIP}" "${DB_PORT}"' \
+    'The VIP owner must expose the database listener.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'vip_database_ready' \
+    'The VIP owner must pass a real database login probe.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'haproxy -c -f "${HAPROXY_CONFIG}"' \
+    'The Keepalived health check must reject invalid HAProxy configuration.'
+require_file_text "${KEEPALIVED_HEALTH_TEMPLATE}" \
+    'command -v timeout >/dev/null 2>&1' \
+    'The Keepalived health check must verify its timeout dependency.'
 
 printf 'Load-balancer rollout guardrail test passed.\n'

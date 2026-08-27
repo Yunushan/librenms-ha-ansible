@@ -167,6 +167,18 @@ PY
         printf 'Persistent readiness-agent service must recover after a crash.\n' >&2
         return 1
     }
+    grep -Fq 'Start persistent Galera readiness agent server' "${ROOT_DIR}/roles/galera/tasks/main.yml" || {
+        printf 'Readiness-agent deployment must start the persistent server before HAProxy probes.\n' >&2
+        return 1
+    }
+    grep -Fq 'Start persistent Galera readiness agent server after socket restart' "${ROOT_DIR}/roles/galera/handlers/main.yml" || {
+        printf 'Readiness-agent recovery must start the persistent server after socket restart.\n' >&2
+        return 1
+    }
+    grep -Fq 'Start persistent Galera readiness server after socket repair' "${ROOT_DIR}/playbooks/readiness-repair.yml" || {
+        printf 'The standalone readiness repair must start the persistent server before probing it.\n' >&2
+        return 1
+    }
     grep -Fq 'Backlog={{ librenms_galera_readiness_agent_backlog | int }}' "${SOCKET_TEMPLATE}" || {
         printf 'Readiness-agent socket must use an explicit bounded backlog.\n' >&2
         return 1
@@ -209,6 +221,14 @@ PY
     fi
     grep -Fq 'systemctl_bounded kill --kill-who=all --signal=TERM' "${RESET_TEMPLATE}" || {
         printf 'Readiness-agent reset must terminate stale worker instances.\n' >&2
+        return 1
+    }
+    grep -Fq 'readonly SERVER_PATH=' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must identify the persistent server process exactly.\n' >&2
+        return 1
+    }
+    grep -Fq 'signal_server_processes KILL' "${RESET_TEMPLATE}" || {
+        printf 'Readiness-agent reset must have a bounded process kill fallback.\n' >&2
         return 1
     }
     if grep -Fq 'systemctl is-active' "${TEMPLATE}"; then

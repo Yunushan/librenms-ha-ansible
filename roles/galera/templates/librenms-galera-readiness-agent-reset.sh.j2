@@ -4,6 +4,7 @@ set -o pipefail
 
 readonly SOCKET_UNIT={{ librenms_galera_readiness_agent_socket_unit | quote }}
 readonly SERVICE_UNIT={{ librenms_galera_readiness_agent_service_unit | quote }}
+readonly SERVER_PATH={{ librenms_galera_readiness_agent_server_path | quote }}
 readonly LEGACY_SERVICE_GLOB={{ (librenms_galera_readiness_agent_legacy_service_unit | regex_replace('@\\.service$', '@*.service')) | quote }}
 readonly COMMAND_TIMEOUT={{ librenms_galera_readiness_agent_reset_timeout | int }}
 readonly QUIESCE_ATTEMPTS={{ librenms_galera_readiness_agent_reset_attempts | int }}
@@ -22,6 +23,49 @@ list_active_workers() {
     | awk '$3 == "active" || $3 == "activating" || $3 == "deactivating" { print $1 }'
 }
 
+server_pids() {
+  command -v pgrep >/dev/null 2>&1 || return 0
+  pgrep -f -- "${SERVER_PATH}" || true
+}
+
+signal_server_processes() {
+  local signal="$1"
+  local pids
+  local pid
+
+  pids="$(server_pids)"
+  [ -n "${pids}" ] || return 0
+  for pid in ${pids}; do
+    case "${pid}" in
+      ''|*[!0-9]*|1)
+        continue
+        ;;
+    esac
+    kill "-${signal}" "${pid}" >/dev/null 2>&1 || true
+  done
+}
+
+stop_server_processes() {
+  local pids
+
+  # The service unit normally owns this process. The explicit PID fallback
+  # also removes a server left behind by an interrupted legacy deployment.
+  for ((attempt = 1; attempt <= QUIESCE_ATTEMPTS; attempt++)); do
+    pids="$(server_pids)"
+    [ -n "${pids}" ] || return 0
+    signal_server_processes TERM
+    sleep 1
+  done
+
+  pids="$(server_pids)"
+  if [ -n "${pids}" ]; then
+    signal_server_processes KILL
+    sleep 1
+  fi
+
+  [ -z "$(server_pids)" ]
+}
+
 reap_workers() {
   local workers="$1"
 
@@ -32,6 +76,10 @@ reap_workers() {
   systemctl_bounded stop --no-block ${workers} >/dev/null 2>&1 || true
   # shellcheck disable=SC2086
   systemctl_bounded kill --kill-who=all --signal=TERM ${workers} >/dev/null 2>&1 || true
+  # A legacy accepted worker can remain in deactivating state while its
+  # socket is already closed. Do not leave it behind to accumulate in PID 1.
+  # shellcheck disable=SC2086
+  systemctl_bounded kill --kill-who=all --signal=KILL ${workers} >/dev/null 2>&1 || true
   # shellcheck disable=SC2086
   systemctl_bounded reset-failed ${workers} >/dev/null 2>&1 || true
 }
@@ -86,6 +134,39 @@ stop_persistent_service() {
   done
 
   systemctl_bounded kill --kill-who=all --signal=TERM "${SERVICE_UNIT}" >/dev/null 2>&1 || true
+  for ((attempt = 1; attempt <= QUIESCE_ATTEMPTS; attempt++)); do
+    service_state="$(systemctl_bounded is-active "${SERVICE_UNIT}" 2>/dev/null)"
+    service_rc=$?
+    if [ "${service_rc}" -eq 124 ]; then
+      sleep 1
+      continue
+    fi
+    case "${service_state}" in
+      inactive|failed|unknown)
+        systemctl_bounded reset-failed "${SERVICE_UNIT}" >/dev/null 2>&1 || true
+        return 0
+        ;;
+    esac
+    sleep 1
+  done
+
+  systemctl_bounded kill --kill-who=all --signal=KILL "${SERVICE_UNIT}" >/dev/null 2>&1 || true
+  for ((attempt = 1; attempt <= QUIESCE_ATTEMPTS; attempt++)); do
+    service_state="$(systemctl_bounded is-active "${SERVICE_UNIT}" 2>/dev/null)"
+    service_rc=$?
+    if [ "${service_rc}" -eq 124 ]; then
+      sleep 1
+      continue
+    fi
+    case "${service_state}" in
+      inactive|failed|unknown)
+        systemctl_bounded reset-failed "${SERVICE_UNIT}" >/dev/null 2>&1 || true
+        return 0
+        ;;
+    esac
+    sleep 1
+  done
+
   printf 'could not stop readiness service unit: %s (state=%s)\n' \
     "${SERVICE_UNIT}" "${service_state:-unknown}" >&2
   return 1
@@ -97,6 +178,10 @@ if ! stop_socket; then
   exit 1
 fi
 if ! stop_persistent_service; then
+  exit 1
+fi
+if ! stop_server_processes; then
+  printf 'readiness server process did not stop: %s\n' "${SERVER_PATH}" >&2
   exit 1
 fi
 

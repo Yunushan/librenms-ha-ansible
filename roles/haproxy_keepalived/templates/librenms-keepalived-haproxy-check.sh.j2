@@ -1,0 +1,148 @@
+#!/bin/sh
+set -eu
+
+VIP={{ librenms_vip_ip | quote }}
+DB_PORT={{ librenms_haproxy_db_port | int }}
+WEB_PORT={{ librenms_haproxy_web_port | int }}
+HTTPS_PORT={{ librenms_haproxy_https_port | int }}
+TLS_ENABLED={{ (librenms_haproxy_tls_enabled | bool) | ternary('1', '0') }}
+CHECK_TIMEOUT={{ librenms_keepalived_haproxy_check_timeout | int }}
+DB_MODE={{ librenms_db_mode | quote }}
+MARIADB_SOCKET={{ librenms_mariadb_socket | quote }}
+DB_CHECK_ENABLED={{ (librenms_haproxy_db_mysql_check_enabled | bool) | ternary('1', '0') }}
+DB_HEALTH_USER={{ librenms_haproxy_db_health_user | quote }}
+HAPROXY_CONFIG=/etc/haproxy/haproxy.cfg
+DRAIN_MARKER={{ librenms_galera_backend_drain_path | quote }}
+WEB_CHECK_PATH={{ (librenms_nginx_runtime_health_check_path if (librenms_haproxy_web_runtime_check_enabled | bool) else librenms_haproxy_web_check_path) | quote }}
+WEB_CHECK_HOST={{ librenms_haproxy_web_check_host_effective | quote }}
+READINESS_CHECK_ENABLED={{ (librenms_db_mode == 'galera' and (librenms_galera_readiness_agent_enabled | bool)) | ternary('1', '0') }}
+READINESS_AGENT_ADDRESS={{ ansible_host | default(ansible_facts.default_ipv4.address | default(inventory_hostname)) | quote }}
+READINESS_AGENT_PORT={{ librenms_galera_readiness_agent_port | int }}
+LOCAL_DB_MEMBER={{ (inventory_hostname in (librenms_active_db_nodes | default([]))) | ternary('1', '0') }}
+
+vip_is_local() {
+  ip -4 -o addr show 2>/dev/null \
+    | awk -v vip="${VIP}" '
+        { split($4, address, "/"); if (address[1] == vip) found=1 }
+        END { exit(found ? 0 : 1) }'
+}
+
+has_listener() {
+  address=$1
+  port=$2
+
+  ss -H -ltn 2>/dev/null \
+    | awk -v address="${address}" -v port=":${port}" '
+        {
+          endpoint=$4
+          if (endpoint == address port ||
+              endpoint == "0.0.0.0" port ||
+              endpoint == "*" port) found=1
+        }
+        END { exit(found ? 0 : 1) }'
+}
+
+local_frontends_ready() {
+  # ip_nonlocal_bind lets every standby validate the listeners it would use
+  # immediately after taking the VIP. This keeps Keepalived from selecting a
+  # node whose HAProxy process is active but has no usable frontend.
+  has_listener "${VIP}" "${DB_PORT}"
+  has_listener "${VIP}" "${WEB_PORT}"
+  if [ "${TLS_ENABLED}" = 1 ]; then
+    has_listener "${VIP}" "${HTTPS_PORT}"
+  fi
+}
+
+readiness_agent_ready() {
+  [ "${LOCAL_DB_MEMBER}" = 1 ] || return 0
+  [ "${READINESS_CHECK_ENABLED}" = 1 ] || return 0
+  command -v bash >/dev/null 2>&1 || return 1
+
+  timeout "${CHECK_TIMEOUT}s" bash -c '
+    exec 3<>/dev/tcp/"$1"/"$2" || exit 1
+    IFS= read -r response <&3 || exit 1
+    [ "${response}" = up ]
+  ' _ "${READINESS_AGENT_ADDRESS}" "${READINESS_AGENT_PORT}"
+}
+
+local_database_ready() {
+  [ "${LOCAL_DB_MEMBER}" = 1 ] || return 0
+  if [ "${DB_MODE}" = galera ]; then
+    status=$(timeout "${CHECK_TIMEOUT}s" mysql \
+      --protocol=socket --socket="${MARIADB_SOCKET}" -Nse \
+      "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment');" \
+      2>/dev/null || true)
+
+    printf '%s\n' "${status}" | grep -Eq 'wsrep_cluster_status[[:space:]]+Primary' \
+      && printf '%s\n' "${status}" | grep -Eq 'wsrep_ready[[:space:]]+ON' \
+      && printf '%s\n' "${status}" | grep -Eq 'wsrep_local_state_comment[[:space:]]+Synced'
+    return
+  fi
+
+  timeout "${CHECK_TIMEOUT}s" mysql \
+    --protocol=socket --socket="${MARIADB_SOCKET}" -Nse 'SELECT 1' \
+    2>/dev/null | grep -qx '1'
+}
+
+vip_database_ready() {
+  [ "${DB_CHECK_ENABLED}" = 1 ] || return 0
+  timeout "${CHECK_TIMEOUT}s" mysql \
+    --protocol=tcp -h "${VIP}" -P "${DB_PORT}" \
+    -u "${DB_HEALTH_USER}" --skip-password \
+    --connect-timeout="${CHECK_TIMEOUT}" \
+    --batch --skip-column-names --silent -e 'SELECT 1' \
+    2>/dev/null | grep -qx '1'
+}
+
+web_frontend_ready() {
+  command -v curl >/dev/null 2>&1 || return 1
+
+  if [ "${TLS_ENABLED}" = 1 ]; then
+    url="https://${VIP}:${HTTPS_PORT}${WEB_CHECK_PATH}"
+    if [ -n "${WEB_CHECK_HOST}" ]; then
+      timeout "${CHECK_TIMEOUT}s" curl --silent --show-error --fail \
+        --output /dev/null --max-time "${CHECK_TIMEOUT}" --insecure \
+        --header "Host: ${WEB_CHECK_HOST}" "${url}" >/dev/null 2>&1
+    else
+      timeout "${CHECK_TIMEOUT}s" curl --silent --show-error --fail \
+        --output /dev/null --max-time "${CHECK_TIMEOUT}" --insecure \
+        "${url}" >/dev/null 2>&1
+    fi
+    return
+  fi
+
+  url="http://${VIP}:${WEB_PORT}${WEB_CHECK_PATH}"
+  if [ -n "${WEB_CHECK_HOST}" ]; then
+    timeout "${CHECK_TIMEOUT}s" curl --silent --show-error --fail \
+      --output /dev/null --max-time "${CHECK_TIMEOUT}" \
+      --header "Host: ${WEB_CHECK_HOST}" "${url}" >/dev/null 2>&1
+  else
+    timeout "${CHECK_TIMEOUT}s" curl --silent --show-error --fail \
+      --output /dev/null --max-time "${CHECK_TIMEOUT}" \
+      "${url}" >/dev/null 2>&1
+  fi
+}
+
+[ -n "${VIP}" ]
+command -v ip >/dev/null 2>&1
+command -v ss >/dev/null 2>&1
+command -v pgrep >/dev/null 2>&1
+command -v timeout >/dev/null 2>&1
+command -v haproxy >/dev/null 2>&1
+pgrep -x haproxy >/dev/null
+timeout "${CHECK_TIMEOUT}s" haproxy -c -f "${HAPROXY_CONFIG}" \
+  >/dev/null 2>&1
+
+# A deliberately drained node must give up the VIP. This prevents planned
+# Galera maintenance from leaving the address on a node that is quiescing.
+[ ! -e "${DRAIN_MARKER}" ]
+local_frontends_ready
+local_database_ready
+readiness_agent_ready
+
+# Backups may have HAProxy listeners bound through ip_nonlocal_bind, but they
+# must not probe the unowned VIP. The owner alone verifies the real client path.
+if vip_is_local; then
+  vip_database_ready
+  web_frontend_ready
+fi
