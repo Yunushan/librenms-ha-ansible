@@ -135,6 +135,20 @@ These repository settings cannot be enforced from Ansible. Record their status
 in the release change record and recheck them after repository ownership or
 administrator changes.
 
+Run the read-only repository-side check from an authenticated workstation
+before declaring the branch ready:
+
+```bash
+make github-governance-check
+```
+
+This requires an authenticated GitHub CLI session with repository read access
+(for example, `gh auth login -h github.com -s repo`).
+
+It fails when `main` loses required checks, pull-request/code-owner review,
+conversation resolution, administrator enforcement, linear history, or the
+required security settings. It does not change GitHub settings.
+
 For a production-facing release, run these against a lab HA inventory before
 announcing readiness:
 
