@@ -283,8 +283,10 @@ recover_systemd_units() {
       # RRDCacheD must not start against an absent or stale shared RRD mount.
       # wait_for_rrd_mount and ensure_rrdcached handle it after mount health is
       # known, while the other HA services can recover normally here.
-      if [[ "${RRD_MODE}" == glusterfs || "${RRD_MODE}" == external ]] \
-        && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then
+      if [ "${RRD_MODE}" = "glusterfs" ] && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then
+        continue
+      fi
+      if [ "${RRD_MODE}" = "external" ] && [ "${unit}" = "${RRDCACHED_SERVICE}" ]; then
         continue
       fi
       unit_available "${unit}" || continue
