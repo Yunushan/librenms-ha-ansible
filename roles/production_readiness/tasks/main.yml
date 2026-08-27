@@ -1429,7 +1429,7 @@
     - librenms_backup_offsite_required | bool
   block:
     - name: Create disposable database restore target
-      ansible.mysql.mysql_db:
+      ansible.mariadb.mariadb_db:
         name: "{{ librenms_production_restore_database }}"
         state: present
         login_unix_socket: >-
@@ -1441,7 +1441,7 @@
       delegate_to: "{{ librenms_backup_scheduled_host }}"
 
     - name: Import generated database backup into disposable target
-      ansible.mysql.mysql_db:
+      ansible.mariadb.mariadb_db:
         name: "{{ librenms_production_restore_database }}"
         state: import
         target: >-
@@ -1456,7 +1456,7 @@
       delegate_to: "{{ librenms_backup_scheduled_host }}"
   always:
     - name: Remove disposable database restore target
-      ansible.mysql.mysql_db:
+      ansible.mariadb.mariadb_db:
         name: "{{ librenms_production_restore_database }}"
         state: absent
         login_unix_socket: >-

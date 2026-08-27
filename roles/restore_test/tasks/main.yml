@@ -416,7 +416,7 @@
   run_once: true
   block:
     - name: Create disposable database restore target
-      ansible.mysql.mysql_db:
+      ansible.mariadb.mariadb_db:
         name: "{{ librenms_restore_test_database_target }}"
         state: present
         encoding: utf8mb4
@@ -449,7 +449,7 @@
       delegate_to: "{{ librenms_restore_test_database_host }}"
 
     - name: Import backup into disposable restore target
-      ansible.mysql.mysql_db:
+      ansible.mariadb.mariadb_db:
         name: "{{ librenms_restore_test_database_target }}"
         state: import
         target: "{{ librenms_restore_test_database_path }}"
@@ -481,7 +481,7 @@
       delegate_to: "{{ librenms_restore_test_database_host }}"
   always:
     - name: Remove disposable database restore target
-      ansible.mysql.mysql_db:
+      ansible.mariadb.mariadb_db:
         name: "{{ librenms_restore_test_database_target }}"
         state: absent
         login_unix_socket: >-

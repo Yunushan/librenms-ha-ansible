@@ -97,7 +97,7 @@ write_manifest() {
 
 write_manifest ansible posix 2.2.2
 write_manifest community general 11.4.8
-write_manifest ansible mysql 5.2.0
+write_manifest ansible mariadb 6.0.2
 EOF
 
 cat > "${fake_bin}/ansible-playbook" <<'EOF'

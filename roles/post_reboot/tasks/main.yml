@@ -880,7 +880,7 @@
   run_once: true
 
 - name: Wait for LibreNMS dispatcher database registrations after reboot
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_post_reboot_db_probe_host }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"

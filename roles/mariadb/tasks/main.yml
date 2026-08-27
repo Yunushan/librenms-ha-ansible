@@ -308,7 +308,7 @@
   when: librenms_db_mode == 'local'
 
 - name: Create LibreNMS database in local mode
-  ansible.mysql.mysql_db:
+  ansible.mariadb.mariadb_db:
     name: "{{ librenms_db_name }}"
     state: present
     encoding: utf8mb4
@@ -320,7 +320,7 @@
     - inventory_hostname == (groups.get('librenms_db', [inventory_hostname]) | first)
 
 - name: Create LibreNMS database user in local mode
-  ansible.mysql.mysql_user:
+  ansible.mariadb.mariadb_user:
     name: "{{ librenms_db_user }}"
     password: "{{ librenms_db_password }}"
     host: "{{ librenms_db_user_host if librenms_mode != 'standalone' else 'localhost' }}"

@@ -113,7 +113,7 @@
   run_once: true
 
 - name: Dump local or Galera LibreNMS database
-  ansible.mysql.mysql_db:
+  ansible.mariadb.mariadb_db:
     name: "{{ librenms_db_name }}"
     state: dump
     target: "{{ librenms_backup_dir }}/{{ librenms_backup_database_filename }}"
@@ -131,7 +131,7 @@
   run_once: true
 
 - name: Dump external LibreNMS database
-  ansible.mysql.mysql_db:
+  ansible.mariadb.mariadb_db:
     name: "{{ librenms_db_name }}"
     state: dump
     target: "{{ librenms_backup_dir }}/{{ librenms_backup_database_filename }}"

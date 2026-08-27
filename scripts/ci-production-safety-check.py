@@ -836,10 +836,12 @@ def main() -> int:
 
     role_files = (ROOT / "roles").rglob("*.yml")
     if any("community.mysql." in path.read_text(encoding="utf-8") for path in role_files):
-        failures.append("MariaDB tasks must use ansible.mysql instead of deprecated community.mysql")
+        failures.append("MariaDB tasks must use ansible.mariadb instead of deprecated community.mysql")
+    if any("ansible.mysql." in path.read_text(encoding="utf-8") for path in role_files):
+        failures.append("MariaDB tasks must use ansible.mariadb instead of ansible.mysql")
 
     collections_requirements = read("requirements.yml")
-    for collection_name in ("ansible.posix", "community.general", "ansible.mysql"):
+    for collection_name in ("ansible.posix", "community.general", "ansible.mariadb"):
         if not re.search(
             rf"^  - name: {re.escape(collection_name)}\r?\n    version: \S+",
             collections_requirements,

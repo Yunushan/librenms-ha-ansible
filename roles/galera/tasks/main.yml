@@ -2209,7 +2209,7 @@
     - librenms_galera_local_service_expected | bool
 
 - name: Create LibreNMS database in Galera mode
-  ansible.mysql.mysql_db:
+  ansible.mariadb.mariadb_db:
     name: "{{ librenms_db_name }}"
     state: present
     encoding: utf8mb4
@@ -2222,7 +2222,7 @@
     - librenms_galera_local_service_expected | bool
 
 - name: Create LibreNMS database user in Galera mode
-  ansible.mysql.mysql_user:
+  ansible.mariadb.mariadb_user:
     name: "{{ librenms_db_user }}"
     password: "{{ librenms_db_password }}"
     host: "%"
@@ -2238,7 +2238,7 @@
 
 - name: Create HAProxy Galera health-check user
   no_log: true
-  ansible.mysql.mysql_user:
+  ansible.mariadb.mariadb_user:
     name: "{{ librenms_haproxy_db_health_user }}"
     password: ""
     host: "{{ librenms_haproxy_db_health_user_host }}"

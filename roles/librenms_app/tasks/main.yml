@@ -1323,7 +1323,7 @@
       until: librenms_install_db_wait is succeeded
 
     - name: Verify install-time database login
-      ansible.mysql.mysql_query:
+      ansible.mariadb.mariadb_query:
         login_host: "{{ librenms_db_host_install_effective }}"
         login_port: "{{ librenms_db_port }}"
         login_user: "{{ librenms_db_user }}"
@@ -1394,7 +1394,7 @@
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Read LibreNMS schema column definitions from database
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1445,7 +1445,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS notifications.datetime schema default
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1462,7 +1462,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Normalize LibreNMS users.created_at schema default
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1479,7 +1479,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Verify LibreNMS validation schema columns after normalization
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1727,7 +1727,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Wait for LibreNMS validation schema on every Galera backend
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ hostvars[item].ansible_host | default(item) }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -1928,7 +1928,7 @@
     - inventory_hostname == librenms_schema_fix_host_effective
 
 - name: Check if the initial LibreNMS admin user already exists
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_db_host_install_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -3589,7 +3589,7 @@
     - inventory_hostname == (groups.get('librenms_primary', groups.get('librenms_nodes', [inventory_hostname])) | first)
 
 - name: Check existing LibreNMS cluster node devices
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -4234,7 +4234,7 @@
           {{ librenms_runtime_db_galera_status.stderr | default('') }}
 
 - name: Verify final LibreNMS runtime database login
-  ansible.mysql.mysql_query:
+  ansible.mariadb.mariadb_query:
     login_host: "{{ librenms_db_host_effective }}"
     login_port: "{{ librenms_db_port }}"
     login_user: "{{ librenms_db_user }}"
@@ -4684,7 +4684,7 @@
       failed_when: false
 
     - name: Capture LibreNMS dispatcher table state
-      ansible.mysql.mysql_query:
+      ansible.mariadb.mariadb_query:
         login_host: "{{ librenms_db_host_effective }}"
         login_port: "{{ librenms_db_port }}"
         login_user: "{{ librenms_db_user }}"
