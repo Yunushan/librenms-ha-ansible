@@ -50,7 +50,7 @@ Ce depot vous fournit un projet Ansible unique capable de deployer:
 - une gestion optionnelle de l'agent SNMP local
 - le support SNMP **v1**, **v2c** et **v3**
 - des workflows pour **ajouter** et **retirer** des noeuds LibreNMS
-- une structure de depot prete pour GitHub avec licence MIT, workflow de lint, documents CONTRIBUTING et SECURITY, inventories d'exemple et generateur de secrets
+- une structure de depot prete pour GitHub avec licence 0BSD, workflow de lint, documents CONTRIBUTING et SECURITY, inventories d'exemple et generateur de secrets
 
 ---
 

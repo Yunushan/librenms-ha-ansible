@@ -50,7 +50,7 @@ Dieses Repository liefert dir ein einziges Ansible-Projekt, das Folgendes bereit
 - optionale Verwaltung des lokalen SNMP-Agenten
 - Unterstuetzung fuer SNMP **v1**, **v2c** und **v3**
 - Workflows zum **Hinzufuegen** und **Entfernen** von LibreNMS-Knoten
-- eine GitHub-faehige Repo-Struktur mit MIT-Lizenz, Lint-Workflow, CONTRIBUTING- und SECURITY-Dokumenten, Beispiel-Inventories und Hilfsskript zur Secret-Erzeugung
+- eine GitHub-faehige Repo-Struktur mit 0BSD-Lizenz, Lint-Workflow, CONTRIBUTING- und SECURITY-Dokumenten, Beispiel-Inventories und Hilfsskript zur Secret-Erzeugung
 
 ---
 
