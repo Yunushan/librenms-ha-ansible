@@ -316,13 +316,16 @@
         case "${diagnostic_state}" in
           D*)
             echo "PID ${diagnostic_pid} is in uninterruptible kernel I/O (state ${diagnostic_state})." >&2
-            echo "Signals cannot terminate a D-state process; keep this node drained and perform a controlled node reboot after verifying the remaining HA nodes." >&2
+            echo "Signals cannot terminate a D-state process; keep this node drained and" \
+              "perform a controlled node reboot after verifying the remaining HA nodes." >&2
             ;;
           Z*)
-            echo "PID ${diagnostic_pid} is a zombie (state ${diagnostic_state}) awaiting parent reaping; keep this node drained and recover systemd or reboot it in a controlled manner." >&2
+            echo "PID ${diagnostic_pid} is a zombie (state ${diagnostic_state}) awaiting parent" \
+              "reaping; keep this node drained and recover systemd or reboot it in a controlled manner." >&2
             ;;
           *)
-            echo "PID ${diagnostic_pid} survived the bounded cgroup SIGKILL attempt (state ${diagnostic_state:-unknown}); refusing unsafe runtime-file cleanup." >&2
+            echo "PID ${diagnostic_pid} survived the bounded cgroup SIGKILL attempt (state" \
+              "${diagnostic_state:-unknown}); refusing unsafe runtime-file cleanup." >&2
             ;;
         esac
       done
