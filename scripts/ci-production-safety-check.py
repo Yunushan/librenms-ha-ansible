@@ -918,6 +918,14 @@ def main() -> int:
         failures.append(
             "GitHub governance check must verify private vulnerability reporting"
         )
+    if "dependabot/alerts?state=open&per_page=1" not in github_governance_check:
+        failures.append(
+            "GitHub governance check must verify that no open Dependabot alerts remain"
+        )
+    if "code-scanning/default-setup" not in github_governance_check:
+        failures.append(
+            "GitHub governance check must verify CodeQL default setup"
+        )
     if "protection/required_pull_request_reviews" not in github_governance_check:
         failures.append(
             "GitHub governance check must query the authoritative review-protection endpoint"

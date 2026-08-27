@@ -68,7 +68,12 @@ def github_environment() -> dict[str, str]:
     return GH_ENV
 
 
-def run_gh_api(endpoint: str, *, allow_not_found: bool = False) -> dict[str, Any]:
+def run_gh_api(
+    endpoint: str,
+    *,
+    allow_not_found: bool = False,
+    allow_list: bool = False,
+) -> dict[str, Any] | list[Any]:
     """Read one GitHub REST resource without exposing command credentials."""
 
     command = ["gh", "api", endpoint]
@@ -103,8 +108,8 @@ def run_gh_api(endpoint: str, *, allow_not_found: bool = False) -> dict[str, Any
         value = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"gh api {endpoint} returned invalid JSON") from exc
-    if not isinstance(value, dict):
-        raise RuntimeError(f"gh api {endpoint} returned a non-object response")
+    if not isinstance(value, dict) and not (allow_list and isinstance(value, list)):
+        raise RuntimeError(f"gh api {endpoint} returned an unexpected JSON response")
     return value
 
 
@@ -164,6 +169,13 @@ def main() -> int:
             reviews = protection["required_pull_request_reviews"]
         vulnerability_reporting = run_gh_api(
             f"repos/{repo}/private-vulnerability-reporting"
+        )
+        dependabot_alerts = run_gh_api(
+            f"repos/{repo}/dependabot/alerts?state=open&per_page=1",
+            allow_list=True,
+        )
+        codeql_default_setup = run_gh_api(
+            f"repos/{repo}/code-scanning/default-setup"
         )
     except (OSError, RuntimeError) as exc:
         print(f"GitHub governance check failed: {exc}", file=sys.stderr)
@@ -243,6 +255,16 @@ def main() -> int:
     if vulnerability_reporting.get("enabled") is not True:
         failures.append("GitHub private vulnerability reporting must be enabled")
 
+    if not isinstance(dependabot_alerts, list):
+        failures.append("GitHub Dependabot alerts did not return a list")
+    elif dependabot_alerts:
+        failures.append("repository must have no open Dependabot alerts")
+
+    if not isinstance(codeql_default_setup, dict):
+        failures.append("GitHub CodeQL default setup did not return an object")
+    elif codeql_default_setup.get("state") != "configured":
+        failures.append("GitHub CodeQL default setup must be configured")
+
     print(f"Repository: {repo}")
     print(f"Protected branch: {args.branch}")
     print(
@@ -253,6 +275,14 @@ def main() -> int:
     print(
         "Private vulnerability reporting: "
         f"{'yes' if vulnerability_reporting.get('enabled') is True else 'no'}"
+    )
+    print(
+        "Open Dependabot alerts: "
+        f"{'no' if isinstance(dependabot_alerts, list) and not dependabot_alerts else 'yes'}"
+    )
+    print(
+        "CodeQL default setup: "
+        f"{'yes' if isinstance(codeql_default_setup, dict) and codeql_default_setup.get('state') == 'configured' else 'no'}"
     )
 
     if failures:

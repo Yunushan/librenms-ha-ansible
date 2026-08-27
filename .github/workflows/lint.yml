@@ -150,6 +150,9 @@ jobs:
       - name: Test Gluster RRD mount guardrails
         run: make test-gluster-rrd-mount-guardrails
 
+      - name: Test GitHub governance guardrails
+        run: make test-github-governance-guardrails
+
       - name: Run ansible-lint
         run: ansible-lint
 
