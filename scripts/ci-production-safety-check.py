@@ -929,6 +929,38 @@ def main() -> int:
         failures.append(
             "GitHub governance check must request the explicit github.com auth token"
         )
+    required_check_block = re.search(
+        r"REQUIRED_CHECKS\s*=\s*\{(?P<body>.*?)\n\}",
+        github_governance_check,
+        flags=re.DOTALL,
+    )
+    expected_required_checks = (
+        "python-314-runtime",
+        "platform-packages (ubuntu-22.04)",
+        "platform-packages (ubuntu-24.04)",
+        "platform-packages (ubuntu-24.04-php-8.4)",
+        "platform-packages (ubuntu-24.04-php-8.5)",
+        "platform-packages (ubuntu-26.04)",
+        "platform-packages (rocky-8)",
+        "platform-packages (rocky-9)",
+        "platform-packages (rocky-10)",
+        "platform-packages (almalinux-8)",
+        "platform-packages (almalinux-9)",
+        "platform-packages (almalinux-10)",
+    )
+    if required_check_block is None:
+        failures.append("GitHub governance check must declare its required checks")
+    else:
+        missing_required_checks = [
+            check
+            for check in expected_required_checks
+            if f'"{check}"' not in required_check_block.group("body")
+        ]
+        if missing_required_checks:
+            failures.append(
+                "GitHub governance check must require every supported platform job: "
+                + ", ".join(missing_required_checks)
+            )
 
     workflow_root = ROOT / ".github" / "workflows"
     for workflow_path in sorted(workflow_root.glob("*.y*ml")):

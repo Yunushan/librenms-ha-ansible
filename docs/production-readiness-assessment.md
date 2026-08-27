@@ -26,8 +26,8 @@ playbook verifies root ownership and restrictive modes before publishing them.
 
 The 100 / 100 standard requires:
 
-1. Green `lint` checks, including the controller-image and all HA integration
-   jobs.
+1. Green `lint` checks, including every supported-platform matrix job, the
+   Python runtime job, the controller-image job, and all HA integration jobs.
 2. A green pull-request `dependency-review` check with no accepted moderate or
    higher dependency vulnerability.
 3. Branch protection or an equivalent ruleset that requires those checks,
