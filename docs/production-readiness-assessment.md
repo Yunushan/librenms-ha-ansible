@@ -88,14 +88,26 @@ controller. Verify the newest record before attaching it to the change record:
 ```bash
 cd /var/lib/librenms-ha/production-readiness-evidence
 latest=$(ls -1t production-readiness-*.json | head -n 1)
+# Obtain these three expected values from the approved deployment/change
+# record. Do not copy them from an untrusted evidence file.
+source_revision='<40-character LibreNMS Git SHA>'
+automation_revision='<40-character automation-project Git SHA>'
+inventory_fingerprint='<64-character approved inventory SHA-256>'
 sudo /usr/local/sbin/librenms-production-readiness-evidence-verify \
-  --evidence "$latest" --app-key-stdin \
+  --evidence "$latest" \
+  --source-revision "$source_revision" \
+  --automation-revision "$automation_revision" \
+  --inventory-fingerprint "$inventory_fingerprint" \
+  --app-key-stdin \
   < /root/.config/librenms/app-key
 ```
 
 The application key is supplied through protected standard input so the
 controller verifier does not require the managed host's `.env` file or expose
-the key in process arguments.
+the key in process arguments. The source, automation, and inventory identity
+arguments are mandatory so retained evidence cannot be accepted without
+checking it against the currently approved deployment identity. Standalone
+evidence may leave the VIP empty; HA evidence must include the approved VIP.
 
 Finally, complete the planned maintenance and failover drills in the
 [production readiness gates](support-matrix.md#production-readiness-gates).

@@ -29,6 +29,8 @@
       {{ groups.get('librenms_redis', []) | difference(librenms_production_inactive_nodes) }}
     librenms_production_active_lb_nodes: >-
       {{ groups.get('lb_nodes', []) | difference(librenms_production_inactive_nodes) }}
+    librenms_production_active_nodes: >-
+      {{ groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes) }}
     librenms_production_active_web_nodes: >-
       {{ groups.get('librenms_web', groups.get('librenms_nodes', [])) | difference(librenms_production_inactive_nodes) }}
 
@@ -784,7 +786,7 @@
     - librenms_production_readiness_verify_shared_lock | bool
     - librenms_daily_global_lock_backend == 'shared_file'
 
-- name: Launch shared maintenance lock probes on every web node
+- name: Launch shared maintenance lock probes on every active LibreNMS node
   command:
     argv:
       - /bin/sh
@@ -798,7 +800,7 @@
       - "{{ librenms_production_readiness_shared_lock_probe_hold | int }}"
   async: "{{ librenms_production_readiness_shared_lock_probe_timeout | int }}"
   poll: 0
-  loop: "{{ librenms_production_active_web_nodes }}"
+  loop: "{{ librenms_production_active_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_production_shared_lock_jobs
   changed_when: false
@@ -1146,7 +1148,7 @@
       - "{{ librenms_install_dir }}"
       - rev-parse
       - HEAD
-  loop: "{{ librenms_production_active_web_nodes }}"
+  loop: "{{ librenms_production_active_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_production_git_revisions
   changed_when: false
@@ -1157,7 +1159,7 @@
     that:
       - >-
         (librenms_production_git_revisions.results | length)
-        == (librenms_production_active_web_nodes | length)
+        == (librenms_production_active_nodes | length)
       - >-
         (
           librenms_production_git_revisions.results
@@ -1165,7 +1167,7 @@
           | select('equalto', 0)
           | list
           | length
-        ) == (librenms_production_active_web_nodes | length)
+        ) == (librenms_production_active_nodes | length)
       - >-
         (
           librenms_production_git_revisions.results
@@ -1177,7 +1179,7 @@
         ) is match('^[0-9a-f]{40}$')
     fail_msg: >-
       Production readiness could not establish a complete, valid Git revision
-      result for every active LibreNMS web node. Do not certify a partial or
+      result for every active LibreNMS node. Do not certify a partial or
       mixed application deployment.
   no_log: true
   run_once: true
@@ -1195,7 +1197,7 @@
           | length
         ) == 1
     fail_msg: >-
-      LibreNMS application nodes are running different Git revisions. Finish a
+      LibreNMS nodes are running different Git revisions. Finish a
       controlled cluster update and rerun the gate before accepting browser
       traffic from every backend.
   run_once: true
@@ -1212,7 +1214,7 @@
       - "{{ librenms_install_dir }}"
       - status
       - --porcelain
-  loop: "{{ librenms_production_active_web_nodes }}"
+  loop: "{{ librenms_production_active_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_production_git_worktrees
   changed_when: false
@@ -1223,7 +1225,7 @@
     that:
       - >-
         (librenms_production_git_worktrees.results | length)
-        == (librenms_production_active_web_nodes | length)
+        == (librenms_production_active_nodes | length)
       - >-
         (
           librenms_production_git_worktrees.results
@@ -1231,10 +1233,10 @@
           | select('equalto', 0)
           | list
           | length
-        ) == (librenms_production_active_web_nodes | length)
+        ) == (librenms_production_active_nodes | length)
     fail_msg: >-
       Production readiness could not establish clean working-tree evidence for
-      every active LibreNMS web node.
+      every active LibreNMS node.
   no_log: true
   run_once: true
 
@@ -1310,6 +1312,7 @@
           'database_nodes': librenms_production_active_db_nodes | sort,
           'redis_nodes': librenms_production_active_redis_nodes | sort,
           'load_balancer_nodes': librenms_production_active_lb_nodes | sort,
+          'application_nodes': librenms_production_active_nodes | sort,
           'web_nodes': librenms_production_active_web_nodes | sort,
           'inactive_nodes': librenms_production_inactive_nodes | sort
         }
@@ -1888,6 +1891,7 @@
           'database_nodes': librenms_production_active_db_nodes,
           'redis_nodes': librenms_production_active_redis_nodes,
           'load_balancer_nodes': librenms_production_active_lb_nodes,
+          'application_nodes': librenms_production_active_nodes,
           'web_nodes': librenms_production_active_web_nodes,
           'inactive_nodes': librenms_production_inactive_nodes
         }
@@ -2041,14 +2045,30 @@
     - librenms_production_readiness_write_evidence | bool
     - librenms_production_readiness_evidence_hmac_enabled | bool
 
+- name: Build production readiness evidence artifact list
+  set_fact:
+    librenms_production_readiness_evidence_artifacts: >-
+      {{
+        [
+          librenms_production_readiness_evidence.dest,
+          librenms_production_readiness_evidence.dest ~ '.sha256'
+        ]
+        + (
+          [librenms_production_readiness_evidence.dest ~ '.hmac']
+          if librenms_production_readiness_evidence_hmac_enabled | bool
+          else []
+        )
+      }}
+  run_once: true
+  when:
+    - librenms_production_readiness_write_evidence | bool
+    - librenms_production_readiness_evidence_integrity_enabled | bool
+
 - name: Inspect production readiness evidence artifact permissions
   stat:
     path: "{{ item }}"
     follow: false
-  loop:
-    - "{{ librenms_production_readiness_evidence.dest }}"
-    - "{{ librenms_production_readiness_evidence.dest }}.sha256"
-    - "{{ librenms_production_readiness_evidence.dest }}.hmac"
+  loop: "{{ librenms_production_readiness_evidence_artifacts | default([]) }}"
   delegate_to: localhost
   become: true
   register: librenms_production_readiness_artifact_stats

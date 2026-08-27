@@ -32,6 +32,7 @@ HA_REQUIRED_NODE_LISTS = {
     "database_nodes": 3,
     "redis_nodes": 3,
     "load_balancer_nodes": 2,
+    "application_nodes": 2,
     "web_nodes": 2,
     "inactive_nodes": 0,
 }
@@ -179,7 +180,14 @@ def validate_evidence_record(path: Path) -> dict[str, object]:
         )
     parse_completed_at(record)
     mode = require_nonempty_string(record, "mode")
-    require_nonempty_string(record, "vip")
+    if mode not in {"ha", "standalone"}:
+        fail("evidence record mode must be ha or standalone")
+    vip = record.get("vip", "")
+    if mode == "ha":
+        if not isinstance(vip, str) or not vip.strip():
+            fail("evidence record field vip must be a non-empty string for HA")
+    elif not isinstance(vip, str):
+        fail("evidence record field vip must be a string for standalone mode")
     source_revision = require_nonempty_string(record, "source_revision")
     automation_revision = require_nonempty_string(record, "automation_revision")
     inventory_fingerprint = require_nonempty_string(record, "inventory_fingerprint")
@@ -189,9 +197,6 @@ def validate_evidence_record(path: Path) -> dict[str, object]:
         fail("evidence record automation_revision is not a 40-character Git SHA")
     if not re.fullmatch(r"[0-9a-f]{64}", inventory_fingerprint):
         fail("evidence record inventory_fingerprint is not a SHA-256 digest")
-    if mode not in {"ha", "standalone"}:
-        fail("evidence record mode must be ha or standalone")
-
     if mode == "ha":
         for field in HA_REQUIRED_BOOLEAN_FIELDS:
             require_true_boolean(record, field)
@@ -225,14 +230,17 @@ def main() -> None:
     parser.add_argument("--evidence", required=True, type=Path)
     parser.add_argument(
         "--source-revision",
+        required=True,
         help="Require the evidence to match this exact 40-character Git SHA.",
     )
     parser.add_argument(
         "--automation-revision",
+        required=True,
         help="Require the evidence to match this exact automation Git SHA.",
     )
     parser.add_argument(
         "--inventory-fingerprint",
+        required=True,
         help="Require the evidence to match this exact inventory SHA-256 digest.",
     )
     parser.add_argument(
@@ -262,25 +270,22 @@ def main() -> None:
 
     record = validate_evidence_record(evidence)
     require_fresh_evidence(record, args.max_age_seconds)
-    if args.source_revision:
-        if not re.fullmatch(r"[0-9a-f]{40}", args.source_revision):
-            fail("--source-revision is not a 40-character Git SHA")
-        if record["source_revision"] != args.source_revision:
-            fail("evidence record source_revision does not match the expected revision")
-    if args.automation_revision:
-        if not re.fullmatch(r"[0-9a-f]{40}", args.automation_revision):
-            fail("--automation-revision is not a 40-character Git SHA")
-        if record["automation_revision"] != args.automation_revision:
-            fail(
-                "evidence record automation_revision does not match the expected revision"
-            )
-    if args.inventory_fingerprint:
-        if not re.fullmatch(r"[0-9a-f]{64}", args.inventory_fingerprint):
-            fail("--inventory-fingerprint is not a SHA-256 digest")
-        if record["inventory_fingerprint"] != args.inventory_fingerprint:
-            fail(
-                "evidence record inventory_fingerprint does not match the expected inventory"
-            )
+    if not re.fullmatch(r"[0-9a-f]{40}", args.source_revision):
+        fail("--source-revision is not a 40-character Git SHA")
+    if record["source_revision"] != args.source_revision:
+        fail("evidence record source_revision does not match the expected revision")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.automation_revision):
+        fail("--automation-revision is not a 40-character Git SHA")
+    if record["automation_revision"] != args.automation_revision:
+        fail(
+            "evidence record automation_revision does not match the expected revision"
+        )
+    if not re.fullmatch(r"[0-9a-f]{64}", args.inventory_fingerprint):
+        fail("--inventory-fingerprint is not a SHA-256 digest")
+    if record["inventory_fingerprint"] != args.inventory_fingerprint:
+        fail(
+            "evidence record inventory_fingerprint does not match the expected inventory"
+        )
 
     hmac_digest = read_sidecar(evidence.with_suffix(".json.hmac"), evidence.name, "HMAC")
     app_key = (
