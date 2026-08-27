@@ -918,6 +918,10 @@ def main() -> int:
         failures.append(
             "GitHub governance check must verify private vulnerability reporting"
         )
+    if "protection/required_pull_request_reviews" not in github_governance_check:
+        failures.append(
+            "GitHub governance check must query the authoritative review-protection endpoint"
+        )
     if (
         '["gh", "auth", "token", "--hostname", "github.com"]'
         not in github_governance_check

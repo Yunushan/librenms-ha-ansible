@@ -56,7 +56,7 @@ def github_environment() -> dict[str, str]:
     return GH_ENV
 
 
-def run_gh_api(endpoint: str) -> dict[str, Any]:
+def run_gh_api(endpoint: str, *, allow_not_found: bool = False) -> dict[str, Any]:
     """Read one GitHub REST resource without exposing command credentials."""
 
     command = ["gh", "api", endpoint]
@@ -70,6 +70,8 @@ def run_gh_api(endpoint: str) -> dict[str, Any]:
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        if allow_not_found and ("404" in detail or "not found" in detail.lower()):
+            return {}
         if "401" not in detail and "authentication" not in detail.lower():
             raise RuntimeError(f"gh api {endpoint} failed: {detail}")
         result = subprocess.run(
@@ -82,6 +84,8 @@ def run_gh_api(endpoint: str) -> dict[str, Any]:
         )
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            if allow_not_found and ("404" in detail or "not found" in detail.lower()):
+                return {}
             raise RuntimeError(f"gh api {endpoint} failed: {detail}")
     try:
         value = json.loads(result.stdout)
@@ -140,6 +144,12 @@ def main() -> int:
         repo = args.repo or remote_repository()
         repository = run_gh_api(f"repos/{repo}")
         protection = run_gh_api(f"repos/{repo}/branches/{args.branch}/protection")
+        reviews = run_gh_api(
+            f"repos/{repo}/branches/{args.branch}/protection/required_pull_request_reviews",
+            allow_not_found=True,
+        )
+        if not reviews and isinstance(protection.get("required_pull_request_reviews"), dict):
+            reviews = protection["required_pull_request_reviews"]
         vulnerability_reporting = run_gh_api(
             f"repos/{repo}/private-vulnerability-reporting"
         )
@@ -183,7 +193,6 @@ def main() -> int:
     if not enabled(protection.get("enforce_admins")):
         failures.append("administrator enforcement must be enabled")
 
-    reviews = protection.get("required_pull_request_reviews")
     if not isinstance(reviews, dict):
         failures.append("main must require pull-request approval")
     else:

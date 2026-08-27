@@ -142,8 +142,9 @@ before declaring the branch ready:
 make github-governance-check
 ```
 
-This requires an authenticated GitHub CLI session with repository read access
-(for example, `gh auth login -h github.com -s repo`).
+This requires an authenticated GitHub CLI session with permission to read the
+repository's branch-protection settings (normally repository administration
+access; for example, `gh auth login -h github.com -s repo`).
 
 It fails when `main` loses required checks, pull-request/code-owner review,
 conversation resolution, administrator enforcement, linear history, or the
