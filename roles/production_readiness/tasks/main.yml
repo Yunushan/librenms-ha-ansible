@@ -415,8 +415,12 @@
   command:
     argv:
       - systemctl
-      - is-failed
+      - show
       - librenms-backup-daily.service
+      - --property=LoadState
+      - --property=ActiveState
+      - --property=Result
+      - --value
   register: librenms_production_daily_backup_service
   changed_when: false
   failed_when: false
@@ -429,10 +433,15 @@
 - name: Require scheduled daily backup health
   assert:
     that:
+      - librenms_production_daily_backup_timer.rc == 0
       - librenms_production_daily_backup_timer.stdout_lines | length >= 2
       - librenms_production_daily_backup_timer.stdout_lines[0] == 'active'
       - librenms_production_daily_backup_timer.stdout_lines[1] | length > 0
-      - librenms_production_daily_backup_service.stdout | trim != 'failed'
+      - librenms_production_daily_backup_service.rc == 0
+      - librenms_production_daily_backup_service.stdout_lines | length >= 3
+      - librenms_production_daily_backup_service.stdout_lines[0] == 'loaded'
+      - librenms_production_daily_backup_service.stdout_lines[1] in ['active', 'inactive']
+      - librenms_production_daily_backup_service.stdout_lines[2] == 'success'
     fail_msg: >-
       The managed daily backup timer is inactive, has no next scheduled run, or
       its last service execution is failed on {{ librenms_backup_scheduled_host }}.
