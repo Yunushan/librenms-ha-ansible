@@ -1127,7 +1127,9 @@
       - "{{ librenms_install_dir }}/validate.php"
   register: librenms_production_validate
   changed_when: false
-  failed_when: "'[FAIL]' in librenms_production_validate.stdout"
+  failed_when: >-
+    librenms_production_validate.rc != 0
+    or '[FAIL]' in librenms_production_validate.stdout
   when:
     - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes))
 
@@ -1499,6 +1501,7 @@
         | regex_findall('backup completed at (.+)')
         | last
         | default('')
+        | trim
       }}
   delegate_to: "{{ librenms_backup_scheduled_host }}"
   run_once: true
@@ -1512,6 +1515,8 @@
   assert:
     that:
       - librenms_production_backup_dir | length > 0
+      - librenms_production_backup_dir is match('^/')
+      - librenms_production_backup_dir is not match('(^|/)\.\.(?:/|$)')
     fail_msg: >-
       The scheduled backup completed without reporting its backup directory, so
       its manifest and artifacts cannot be verified.
@@ -1565,6 +1570,29 @@
     - librenms_backup_offsite_enabled | bool
     - librenms_backup_offsite_required | bool
 
+- name: Require safe production backup manifest and artifact filenames
+  assert:
+    that:
+      - librenms_backup_manifest_filename is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - >-
+        not (librenms_production_backup_manifest.database.included | default(false) | bool)
+        or (librenms_production_backup_manifest.database.file | default(''))
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - >-
+        not (librenms_production_backup_manifest.config.included | default(false) | bool)
+        or (librenms_production_backup_manifest.config.file | default(''))
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+    fail_msg: >-
+      Production backup manifest and artifact names must be plain filenames.
+      Refusing a path containing directory traversal or shell-special components.
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
 - name: Calculate generated database backup SHA-256 checksum
   stat:
     path: >-
@@ -1598,6 +1626,10 @@
 - name: Require generated backup manifest SHA-256 checksums to match
   assert:
     that:
+      - librenms_production_database_backup_stat.stat.isreg | default(false) | bool
+      - not (librenms_production_database_backup_stat.stat.islnk | default(false) | bool)
+      - librenms_production_config_backup_stat.stat.isreg | default(false) | bool
+      - not (librenms_production_config_backup_stat.stat.islnk | default(false) | bool)
       - >-
         (librenms_production_backup_manifest.database.checksum_sha256
         | default('')) is match('^[A-Fa-f0-9]{64}$')

@@ -83,7 +83,10 @@ EOF
         -e 's@{{ librenms_galera_readiness_agent_refresh_interval | int }}@1@' \
         "${SERVER_TEMPLATE}" >"${rendered_server}"
     python3 -m py_compile "${rendered_server}"
-    python3 - "${rendered_server}" <<'PY'
+    if python3 -c 'import os; raise SystemExit(0 if os.name == "nt" else 1)'; then
+        printf 'Skipping systemd socket-activation process integration on Windows; static checks continue.\n'
+    else
+        python3 - "${rendered_server}" <<'PY'
 import os
 import socket
 import subprocess
@@ -154,6 +157,7 @@ if process.returncode not in (0, -15):
         f"persistent readiness server exited with {process.returncode}: {stdout} {stderr}"
     )
 PY
+    fi
 
     grep -Fq 'ExecStart=/usr/bin/python3 {{ librenms_galera_readiness_agent_server_path }}' "${SERVICE_TEMPLATE}" || {
         printf 'Readiness-agent service must run the persistent socket server.\n' >&2
