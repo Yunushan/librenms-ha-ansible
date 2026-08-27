@@ -913,6 +913,19 @@ def main() -> int:
             "CODEOWNERS must assign an explicit owner for the complete repository"
         )
 
+    github_governance_check = read("scripts/ci-github-governance-check.py")
+    if "private-vulnerability-reporting" not in github_governance_check:
+        failures.append(
+            "GitHub governance check must verify private vulnerability reporting"
+        )
+    if (
+        '["gh", "auth", "token", "--hostname", "github.com"]'
+        not in github_governance_check
+    ):
+        failures.append(
+            "GitHub governance check must request the explicit github.com auth token"
+        )
+
     workflow_root = ROOT / ".github" / "workflows"
     for workflow_path in sorted(workflow_root.glob("*.y*ml")):
         workflow_text = workflow_path.read_text(encoding="utf-8")

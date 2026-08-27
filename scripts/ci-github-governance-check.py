@@ -42,7 +42,7 @@ def github_environment() -> dict[str, str]:
         return GH_ENV
 
     result = subprocess.run(
-        ["gh", "auth", "token"],
+        ["gh", "auth", "token", "--hostname", "github.com"],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -140,6 +140,9 @@ def main() -> int:
         repo = args.repo or remote_repository()
         repository = run_gh_api(f"repos/{repo}")
         protection = run_gh_api(f"repos/{repo}/branches/{args.branch}/protection")
+        vulnerability_reporting = run_gh_api(
+            f"repos/{repo}/private-vulnerability-reporting"
+        )
     except (OSError, RuntimeError) as exc:
         print(f"GitHub governance check failed: {exc}", file=sys.stderr)
         return 2
@@ -216,6 +219,9 @@ def main() -> int:
             if not status_enabled(security.get(key)):
                 failures.append(f"{label} must be enabled")
 
+    if vulnerability_reporting.get("enabled") is not True:
+        failures.append("GitHub private vulnerability reporting must be enabled")
+
     print(f"Repository: {repo}")
     print(f"Protected branch: {args.branch}")
     print(
@@ -223,6 +229,10 @@ def main() -> int:
         f"{len(REQUIRED_CHECKS & configured_checks)}/{len(REQUIRED_CHECKS)}"
     )
     print(f"Repository-wide CODEOWNERS: {'yes' if codeowners_ok else 'no'}")
+    print(
+        "Private vulnerability reporting: "
+        f"{'yes' if vulnerability_reporting.get('enabled') is True else 'no'}"
+    )
 
     if failures:
         print("GitHub governance checks failed:", file=sys.stderr)
