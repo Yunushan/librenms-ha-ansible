@@ -1,0 +1,4 @@
+# Require the repository owner to review every automation and inventory change.
+# Enable required code-owner review in the main-branch ruleset for this file to
+# become an enforced production gate.
+* @Yunushan

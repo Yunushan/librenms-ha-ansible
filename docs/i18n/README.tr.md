@@ -50,7 +50,7 @@ Bu repo size su modlari kurabilen tek bir Ansible projesi verir:
 - opsiyonel yerel SNMP agent yonetimi
 - SNMP **v1**, **v2c** ve **v3** destegi
 - LibreNMS dugumu ekleme ve kaldirma akislari
-- MIT lisansi, lint workflow'u, CONTRIBUTING ve SECURITY belgeleri, ornek inventory'ler ve helper secret uretici ile GitHub hazir repo yapisi
+- 0BSD lisansi, lint workflow'u, CONTRIBUTING ve SECURITY belgeleri, ornek inventory'ler ve helper secret uretici ile GitHub hazir repo yapisi
 
 ---
 

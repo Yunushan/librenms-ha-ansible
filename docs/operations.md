@@ -53,7 +53,10 @@ Keep the flag `false` for labs, migration work, and any environment where those
 network and certificate decisions have not yet been reviewed. The readiness
 gate already requires encrypted or externally validated secrets, a working
 offsite DB/config backup, a restore verification, and recent failover evidence
-for HA mode.
+for HA mode. A strict HA readiness run evaluates the complete declared
+topology; any host in `maintenance_nodes` or `decommission_nodes` makes the
+production certificate fail until it is returned to service or removed from the
+declared HA inventory through an approved change.
 
 ### First HA deployment
 
@@ -177,9 +180,12 @@ librenms_production_readiness_external_secret_validation_command:
   - secret/librenms-ha
 ```
 
-Set `librenms_production_readiness_require_encrypted_vault: false` only for a
-documented exception. It disables this certification gate, not the normal
-Ansible Vault or external-secret mechanism.
+For strict HA runs and a declared production profile, the encrypted-vault
+requirement cannot be disabled. An external secret provider is accepted when
+its reference and validation command are configured and the live validation
+passes. Set `librenms_production_readiness_require_encrypted_vault: false` only
+for a documented non-HA, non-production exception; it changes this
+certification gate, not the normal Ansible Vault or external-secret mechanism.
 
 6. Check HA state and then the application:
 
@@ -397,28 +403,45 @@ and retains them for 365 days. Both sidecars are verified immediately after
 they are written. The HMAC uses the existing app key without printing it, so a
 record and ordinary checksum changed together cannot be accepted by an actor
 who can modify evidence storage but cannot access the application secret. The
-record contains the completed time, topology, and which live verification
-scopes passed; it does not contain credentials, private keys, or backup paths.
+record contains the completed time, exact 40-character LibreNMS source
+revision, exact 40-character Ansible automation revision, SHA-256 inventory
+fingerprint, complete active topology, and which live
+verification scopes passed; it does not contain credentials, private keys, or
+backup paths. Strict HA evidence also records `inactive_nodes`, which must be
+empty, so a passing certificate cannot be reused while a declared node is in
+maintenance or decommissioning.
 Configure
-librenms_production_readiness_evidence_dir,
-librenms_production_readiness_evidence_retention_days, or set
-librenms_production_readiness_write_evidence: false to follow controller
-storage policy. Set
+librenms_production_readiness_evidence_dir and
+librenms_production_readiness_evidence_retention_days to match controller
+storage policy. HA and declared production profiles cannot disable the
+readiness record, its checksum, its HMAC, or positive retention; non-HA,
+non-production checks may use a different local policy. Set
 `librenms_production_readiness_evidence_integrity_enabled: false` or
-`librenms_production_readiness_evidence_hmac_enabled: false` only when an
-external immutable evidence store provides equivalent integrity protection.
+`librenms_production_readiness_evidence_hmac_enabled: false` only outside
+those profiles when an external immutable evidence store provides equivalent
+integrity protection.
 AWX also receives the result through job statistics.
 
 The readiness run installs a root-only controller verifier at
 `/usr/local/sbin/librenms-production-readiness-evidence-verify`. To validate
-the newest retained record later without exposing the app key, run:
+the newest retained record later, provide the app key through a protected
+stdin source; never put it in a command-line argument:
 
 ```bash
 cd /var/lib/librenms-ha/production-readiness-evidence
 latest=$(ls -1t production-readiness-*.json | head -n 1)
 sudo /usr/local/sbin/librenms-production-readiness-evidence-verify \
-  --evidence "$latest" --app-env /opt/librenms/.env
+  --evidence "$latest" --max-age-seconds 86400 --app-key-stdin \
+  < /root/.config/librenms/app-key
 ```
+
+The protected input file must contain only the raw `APP_KEY`, be readable only
+by root, and be supplied by the controller's secret-management process. The
+readiness playbook uses the same stdin mechanism and a one-day evidence-age
+limit automatically, so the controller does not need an `/opt/librenms/.env`
+copy. Use the same positive age limit when validating a retained record for a
+current production decision; integrity verification alone does not establish
+that the operational snapshot is recent.
 
 In HA mode, that gate also requires a successful controller-side failover drill
 record no older than 30 days by default. The drill must cover at least
@@ -436,8 +459,9 @@ The gate also verifies that the managed `librenms-backup-daily.timer` is active,
 has a future invocation, and that its most recent service execution is not in a
 failed state. This protects the ongoing recovery-point objective after the
 one-time backup and restore verification completes. Set
-`librenms_production_readiness_require_scheduled_daily_backup: false` only for
-a reviewed deployment that uses an independently managed backup scheduler.
+`librenms_production_readiness_require_scheduled_daily_backup: false` only
+outside strict HA and declared production profiles, for a reviewed deployment
+that uses an independently managed backup scheduler.
 
 The disposable database restore verification is also timed and must complete
 within 1,800 seconds by default. The resulting duration and objective are kept
@@ -502,9 +526,10 @@ Webhook delivery is delegated to the Ansible controller by default. Set
 reachable from a specific managed host instead. HA production-readiness runs
 require this channel by default: the webhook URL must use HTTPS, certificate
 validation must remain enabled, and `librenms_status_alerts_enabled` must be
-true. Set `librenms_production_readiness_require_status_alert_routing: false`
-only for a documented exception while an external alerting route is being
-established.
+true. Strict HA and declared production profiles cannot disable this
+requirement. Set `librenms_production_readiness_require_status_alert_routing:
+false` only for a documented non-HA, non-production exception while an
+external alerting route is being established.
 
 ### Diagnostics bundles
 
@@ -678,7 +703,7 @@ backup fails when either immediate verification fails.
 Before a production go-live, run the explicit configuration gate:
 
 ```bash
-make production-readiness PLAYBOOK_FLAGS=--ask-become-pass
+make production-readiness-ask-become-pass
 ```
 
 It requires non-placeholder secrets, a pinned MariaDB repository script when

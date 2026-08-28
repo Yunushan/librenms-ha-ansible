@@ -13,25 +13,36 @@ checks are green for that exact revision. The score is intentionally not stored
 as a static claim: a red CI run, an unprotected default branch, or skipped
 release checks means the current revision is below this standard.
 
+For strict HA certification, the gate must also cover the complete topology
+declared by the inventory. Lifecycle groups such as `maintenance_nodes` and
+`decommission_nodes` are excluded only from ordinary maintenance runs; a
+production evidence record must contain no inactive nodes. The record is bound
+to the exact LibreNMS source revision, the exact Ansible automation revision,
+and a SHA-256 fingerprint of the topology and critical HA settings, so
+evidence from another checkout, automation revision, or materially different
+configuration cannot be presented as proof for this one. The controller
+verifier also rejects symlinked or non-regular evidence artifacts, and the
+playbook verifies root ownership and restrictive modes before publishing them.
+
 The 100 / 100 standard requires:
 
-1. Green `lint` checks, including the controller-image and all HA integration
-   jobs.
+1. Green `lint` checks, including every supported-platform matrix job, the
+   Python runtime job, the controller-image job, and all HA integration jobs.
 2. A green pull-request `dependency-review` check with no accepted moderate or
    higher dependency vulnerability.
 3. Branch protection or an equivalent ruleset that requires those checks,
-   prevents force pushes, and requires review appropriate to the maintainer
-   model.
+   prevents force pushes, requires review appropriate to the maintainer model,
+   and enforces the repository owner in `.github/CODEOWNERS`.
 4. GitHub private vulnerability reporting enabled, plus a successful live
    `production-readiness.yml` run for each actual deployment.
 
 | Area | Score | Evidence and remaining limitation |
 | --- | ---: | --- |
 | Secrets and configuration safety | 20 / 20 | Inventory validation, encrypted-vault verification, runtime validation of configured external secret providers, placeholder checks, and CI scanning for obvious committed credentials or private keys are present. MariaDB binding, required offsite backup configuration, and an explicit UFW policy are also guarded. A declared production profile fails the live gate unless that policy has reviewed management and cluster CIDRs and the VIP has TLS enabled. Environment-specific secret-manager, firewall-rule, and certificate review remain part of live certification. |
-| HA design and failure containment | 20 / 20 | Three-member Galera and Sentinel expectations, HAProxy/Keepalived checks, shared maintenance-lock and RRD-mount verification, strict application probes, and one-at-a-time load-balancer rollouts are present. HAProxy uses a dedicated PHP runtime database probe to remove a web node whose workers cannot query MariaDB. Existing Galera clusters fail closed instead of selecting the first configured host after total primary-component loss. CI proves HAProxy keeps serving when a reachable backend deliberately fails its runtime health check, Redis Sentinel elects a writable master, and an isolated three-node MariaDB Galera cluster forms quorum, keeps accepting writes after its bootstrap node stops, then synchronizes the rejoined node. The production gate now requires retained evidence of a recent successful web-backend and VIP drill; Gluster healing and timing still require the live drill itself. |
+| HA design and failure containment | 20 / 20 | Three-member Galera and Sentinel expectations, HAProxy/Keepalived checks, shared maintenance-lock and RRD-mount verification, strict application probes, and one-at-a-time load-balancer rollouts are present. HAProxy uses a dedicated PHP runtime database probe to remove a web node whose workers cannot query MariaDB. Existing Galera clusters fail closed instead of selecting the first configured host after total primary-component loss. Strict HA readiness covers the complete declared topology and rejects maintenance/decommissioned nodes in a production certificate. CI proves HAProxy keeps serving when a reachable backend deliberately fails its runtime health check, Redis Sentinel elects a writable master, and an isolated three-node MariaDB Galera cluster forms quorum, keeps accepting writes after its bootstrap node stops, then synchronizes the rejoined node. The production gate now requires retained evidence of a recent successful web-backend and VIP drill; Gluster healing and timing still require the live drill itself. |
 | Backup and recovery | 15 / 15 | Scheduled and manual backups record SHA-256 artifact digests; restore and go-live checks reject checksum mismatches before archive parsing or disposable database imports. Offsite rsync copies receive a checksum comparison after transfer, the daily backup timer must be healthy, and the generated database restore is measured against a configurable recovery objective. |
 | Upgrade safety | 15 / 15 | Daily updates serialize with a shared lock, drain only the lock-holding node, repair Git metadata, validate Composer and schema work, then require a local application probe before HAProxy can return that node to rotation. In HA mode a deterministic canary must publish a same-day healthy completion record on the shared RRD filesystem before followers can update, so a failed canary stops the unattended rollout. Updates can be disabled or version-pinned. |
-| Automated quality assurance | 15 / 15 | GitHub Actions, the Docker lint image, and pre-commit share pinned core tooling; Ansible collections, the Docker base image, GitHub Actions, and integration-test container images are pinned. The CI Python toolchain is compiled from a small direct-input file with SHA-256 hashes for every transitive artifact, and both CI installation paths enforce those hashes and run `pip check`. CI builds the controller image and runs `make ci` inside it, Dependabot proposes monthly updates, and pull requests receive an immutable, least-privilege dependency review that fails for moderate or higher known vulnerabilities. CI runs daily-maintenance drain-ordering, Galera readiness-agent, HAProxy web failover, and five-container Redis Sentinel election/write tests on every change. |
+| Automated quality assurance | 15 / 15 | GitHub Actions, the Docker lint image, and pre-commit share pinned core tooling; Ansible collections, the Docker base image, GitHub Actions, and integration-test container images are pinned. The CI Python toolchain is compiled from a small direct-input file with SHA-256 hashes for every transitive artifact, and both CI installation paths enforce those hashes and run `pip check`. CI builds the controller image and runs `make ci` inside it, Dependabot proposes monthly updates, and pull requests receive an immutable, least-privilege dependency review that fails for moderate or higher known vulnerabilities. A static safety gate now rejects unpinned workflow actions and missing repository-wide code ownership. CI runs daily-maintenance drain-ordering, Galera readiness-agent, HAProxy web failover, and five-container Redis Sentinel election/write tests on every change. |
 | Operations and observability | 15 / 15 | Status, diagnostics, recovery, backup, restore-test, maintenance, and production-readiness playbooks are documented. Successful failover drills and full readiness runs require final dependency checks, write retained controller-side evidence records, and publish recovery durations into controller/AWX job statistics. AWX maintains a non-disruptive strict-status schedule every 10 minutes by default, and can optionally manage a weekly restore-test schedule and an explicitly enabled monthly failover drill during an approved maintenance window. HA production readiness requires certificate-validated HTTPS status-alert routing. Centralized logs, external monitoring, and on-call response targets still need deployment-specific verification. |
 
 ## What the Source Score Does Not Certify
@@ -67,7 +78,7 @@ make ci
 Then execute the live certification on the Ansible controller:
 
 ```bash
-make production-readiness PLAYBOOK_FLAGS=--ask-become-pass
+make production-readiness-ask-become-pass
 ```
 
 The passing run writes a root-readable JSON record plus SHA-256 and HMAC-SHA256
@@ -77,9 +88,26 @@ controller. Verify the newest record before attaching it to the change record:
 ```bash
 cd /var/lib/librenms-ha/production-readiness-evidence
 latest=$(ls -1t production-readiness-*.json | head -n 1)
+# Obtain these three expected values from the approved deployment/change
+# record. Do not copy them from an untrusted evidence file.
+source_revision='<40-character LibreNMS Git SHA>'
+automation_revision='<40-character automation-project Git SHA>'
+inventory_fingerprint='<64-character approved inventory SHA-256>'
 sudo /usr/local/sbin/librenms-production-readiness-evidence-verify \
-  --evidence "$latest" --app-env /opt/librenms/.env
+  --evidence "$latest" \
+  --source-revision "$source_revision" \
+  --automation-revision "$automation_revision" \
+  --inventory-fingerprint "$inventory_fingerprint" \
+  --app-key-stdin \
+  < /root/.config/librenms/app-key
 ```
+
+The application key is supplied through protected standard input so the
+controller verifier does not require the managed host's `.env` file or expose
+the key in process arguments. The source, automation, and inventory identity
+arguments are mandatory so retained evidence cannot be accepted without
+checking it against the currently approved deployment identity. Standalone
+evidence may leave the VIP empty; HA evidence must include the approved VIP.
 
 Finally, complete the planned maintenance and failover drills in the
 [production readiness gates](support-matrix.md#production-readiness-gates).

@@ -51,7 +51,7 @@ Este repositorio te da un unico proyecto Ansible capaz de desplegar:
 - soporte para SNMP **v1**, **v2c** y **v3**
 - flujos para **agregar** y **eliminar** nodos LibreNMS
 - estructura lista para GitHub con:
-  - licencia MIT
+  - licencia 0BSD
   - workflow de lint
   - documentos CONTRIBUTING y SECURITY
   - inventories de ejemplo

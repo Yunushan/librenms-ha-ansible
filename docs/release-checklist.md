@@ -115,6 +115,7 @@ ruleset before declaring a release production-ready:
 
 - Require pull requests; do not permit direct production changes to `main`.
 - Require a green `lint` workflow, including `ansible-lint`,
+  `python-314-runtime`, every `platform-packages (...)` matrix job,
   `controller-image`, `haproxy-web-failover`, `galera-failover`,
   `docker-ha-galera-config`, and `redis-sentinel-failover`.
 - Require a green `dependency-review` workflow for pull requests.
@@ -122,6 +123,11 @@ ruleset before declaring a release production-ready:
   author when the repository has more than one maintainer.
 - Require resolved review conversations, disallow force pushes, and retain
   GitHub private vulnerability reporting.
+- Keep `.github/CODEOWNERS` current and require code-owner approval for changes
+  to automation, inventories, playbooks, roles, and CI before merging.
+- Where the organization supports it, enforce the ruleset for administrators
+  and require signed commits; record any deliberate exception in the release
+  change record.
 - Keep GitHub secret-scanning push protection, Dependabot alerts and automated
   security updates, and CodeQL default setup enabled; triage every open alert
   before release.
@@ -129,6 +135,21 @@ ruleset before declaring a release production-ready:
 These repository settings cannot be enforced from Ansible. Record their status
 in the release change record and recheck them after repository ownership or
 administrator changes.
+
+Run the read-only repository-side check from an authenticated workstation
+before declaring the branch ready:
+
+```bash
+make github-governance-check
+```
+
+This requires an authenticated GitHub CLI session with permission to read the
+repository's branch-protection settings (normally repository administration
+access; for example, `gh auth login -h github.com -s repo`).
+
+It fails when `main` loses required checks, pull-request/code-owner review,
+conversation resolution, administrator enforcement, linear history, or the
+required security settings. It does not change GitHub settings.
 
 For a production-facing release, run these against a lab HA inventory before
 announcing readiness:

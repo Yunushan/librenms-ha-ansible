@@ -50,7 +50,41 @@ repair_venv="${temporary_dir}/controller-venv-without-pip"
 empty_requirements="${temporary_dir}/empty-requirements.txt"
 repair_output="${temporary_dir}/controller-repair.out"
 : > "${empty_requirements}"
-"${python_bin}" -m venv --without-pip "${repair_venv}"
+# The controller bootstrap script intentionally targets the Linux venv layout
+# (${venv_path}/bin/*). Use a small POSIX-shaped fixture so this test also runs
+# from Git Bash on Windows, whose real venv layout is ${venv_path}/Scripts/*.
+mkdir -p "${repair_venv}/bin"
+cat > "${repair_venv}/bin/python" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_file="$(dirname -- "${BASH_SOURCE[0]}")/pip-installed"
+
+if [ "${1:-}" = "-m" ] && [ "${2:-}" = "pip" ]; then
+    case "${3:-}" in
+        --version)
+            [ -f "${state_file}" ] || exit 1
+            printf 'pip 25.0\n'
+            ;;
+        install|check)
+            touch "${state_file}"
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
+
+if [ "${1:-}" = "-m" ] && [ "${2:-}" = "ensurepip" ]; then
+    touch "${state_file}"
+    exit 0
+fi
+
+printf 'Unexpected fake controller Python invocation: %s\n' "$*" >&2
+exit 1
+EOF
+chmod +x "${repair_venv}/bin/python"
 cat > "${repair_venv}/bin/ansible-playbook" <<'EOF'
 #!/usr/bin/env bash
 printf 'ansible-playbook [core 2.21.2]\n'
@@ -65,6 +99,10 @@ LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${empty_requirements}" \
 grep -Fq 'Controller virtual environment is missing pip; attempting repair with ensurepip.' \
     "${repair_output}"
 "${repair_venv}/bin/python" -m pip --version >/dev/null
+
+# Force the launcher through its system-command fallback for the fake command
+# assertions below, even when the checkout already has a controller venv.
+export LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/missing-controller-venv"
 
 fake_bin="${temporary_dir}/bin"
 call_log="${temporary_dir}/calls.log"

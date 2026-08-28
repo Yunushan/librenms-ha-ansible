@@ -10,16 +10,29 @@
       paths:
         - "{{ playbook_dir }}/../roles/common/vars"
 
+- name: Build production readiness inactive host list
+  set_fact:
+    librenms_production_inactive_nodes: >-
+      {{
+        (
+          (librenms_inactive_inventory_nodes | default([]) | list)
+          + (groups.get('maintenance_nodes', []) | list)
+          + (groups.get('decommission_nodes', []) | list)
+        ) | unique | sort
+      }}
+
 - name: Build production readiness host lists
   set_fact:
     librenms_production_active_db_nodes: >-
-      {{ groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes) }}
+      {{ groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes) }}
     librenms_production_active_redis_nodes: >-
-      {{ groups.get('librenms_redis', []) | difference(librenms_inactive_inventory_nodes) }}
+      {{ groups.get('librenms_redis', []) | difference(librenms_production_inactive_nodes) }}
     librenms_production_active_lb_nodes: >-
-      {{ groups.get('lb_nodes', []) | difference(librenms_inactive_inventory_nodes) }}
+      {{ groups.get('lb_nodes', []) | difference(librenms_production_inactive_nodes) }}
+    librenms_production_active_nodes: >-
+      {{ groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes) }}
     librenms_production_active_web_nodes: >-
-      {{ groups.get('librenms_web', groups.get('librenms_nodes', [])) | difference(librenms_inactive_inventory_nodes) }}
+      {{ groups.get('librenms_web', groups.get('librenms_nodes', [])) | difference(librenms_production_inactive_nodes) }}
 
 - name: Determine effective HAProxy web health-check host for production probes
   set_fact:
@@ -86,6 +99,24 @@
       - >-
         not (librenms_mode == 'ha')
         or librenms_backup_scheduled_host in librenms_production_active_db_nodes
+      - >-
+        not (librenms_mode == 'ha')
+        or librenms_db_mode == 'galera'
+      - >-
+        not (librenms_mode == 'ha')
+        or librenms_redis_mode == 'sentinel'
+      - >-
+        not (librenms_mode == 'ha')
+        or librenms_rrd_mode in ['glusterfs', 'external']
+      - >-
+        not (librenms_mode == 'ha')
+        or librenms_vip_enabled | bool
+      - >-
+        not (librenms_mode == 'ha')
+        or librenms_vip_ip | length > 0
+      - >-
+        not (librenms_mode == 'ha')
+        or librenms_galera_readiness_agent_enabled | bool
       - librenms_db_bind_address not in ['0.0.0.0', '::', '']
       - not (librenms_mode == 'ha') or (librenms_production_active_db_nodes | length) >= 3
       - >-
@@ -93,6 +124,9 @@
         or (librenms_production_active_redis_nodes | length) >= 3
       - not (librenms_mode == 'ha') or (librenms_production_active_lb_nodes | length) >= 2
       - not (librenms_mode == 'ha') or (librenms_production_active_web_nodes | length) >= 2
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or (librenms_production_inactive_nodes | length) == 0
       - >-
         not (librenms_mode == 'ha')
         or not (librenms_production_readiness_require_status_alert_routing | bool)
@@ -109,6 +143,42 @@
         not (librenms_mode == 'ha')
         or (librenms_production_readiness_max_failover_recovery_seconds | int) > 0
       - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_network_tcp_checks_enabled | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_require_host_firewall | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_haproxy_tls_enabled | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_verify_vip_tls | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_verify_offsite_backup | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_verify_database_restore | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_require_scheduled_daily_backup | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_verify_runtime_web_health | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_require_recent_failover_evidence | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_require_failover_evidence_integrity | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_verify_shared_lock | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_require_status_alert_routing | bool
+      - >-
         not (librenms_mode == 'ha')
         or not (librenms_production_readiness_verify_database_restore | bool)
         or (librenms_production_readiness_max_database_restore_seconds | int) > 0
@@ -118,14 +188,36 @@
       - >-
         not (librenms_production_readiness_evidence_hmac_enabled | bool)
         or librenms_production_readiness_evidence_integrity_enabled | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_write_evidence | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_evidence_integrity_enabled | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_evidence_hmac_enabled | bool
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or (librenms_production_readiness_evidence_retention_days | int) > 0
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or (librenms_production_readiness_evidence_max_age_seconds | int) > 0
+      - >-
+        not ((librenms_mode == 'ha') or (librenms_production_profile | bool))
+        or librenms_production_readiness_evidence_dir is match('^/')
     fail_msg: >-
       Production readiness configuration is incomplete. Use vault-encrypted values
       for all secrets, require an off-cluster DB/config backup target, retain
       the HA daily database lock and scheduled backup, bind MariaDB to a managed
       address, configure certificate-validated HTTPS status alert routing, and
       provide at least two web/LB nodes plus three Galera nodes for HA mode. A
-      declared production profile also requires reviewed management and cluster
-      firewall CIDRs plus TLS at the VIP.
+      strict HA or declared production profile also requires reviewed management
+      and cluster firewall CIDRs plus TLS at the VIP, and all declared nodes must
+      be active. Strict HA and declared production profiles must execute the
+      network, backup, restore, TLS, runtime-health, lock, failover,
+      alert-routing, and authenticated-evidence checks; those checks cannot be
+      disabled by inventory variables.
   no_log: true
   run_once: true
 
@@ -150,7 +242,11 @@
   delegate_to: localhost
   become: false
   run_once: true
-  when: librenms_production_readiness_require_encrypted_vault | bool
+  when:
+    - >-
+      (librenms_mode == 'ha')
+      or (librenms_production_profile | bool)
+      or (librenms_production_readiness_require_encrypted_vault | bool)
 
 - name: Verify external production secret provider access
   command:
@@ -163,7 +259,10 @@
   become: false
   run_once: true
   when:
-    - librenms_production_readiness_require_encrypted_vault | bool
+    - >-
+      (librenms_mode == 'ha')
+      or (librenms_production_profile | bool)
+      or (librenms_production_readiness_require_encrypted_vault | bool)
     - librenms_production_readiness_secret_source == 'external'
 
 - name: Inspect the configured Ansible Vault secret file
@@ -176,7 +275,10 @@
   become: false
   run_once: true
   when:
-    - librenms_production_readiness_require_encrypted_vault | bool
+    - >-
+      (librenms_mode == 'ha')
+      or (librenms_production_profile | bool)
+      or (librenms_production_readiness_require_encrypted_vault | bool)
     - librenms_production_readiness_secret_source == 'ansible_vault'
 
 - name: Read the configured Ansible Vault secret file header
@@ -189,7 +291,10 @@
   become: false
   run_once: true
   when:
-    - librenms_production_readiness_require_encrypted_vault | bool
+    - >-
+      (librenms_mode == 'ha')
+      or (librenms_production_profile | bool)
+      or (librenms_production_readiness_require_encrypted_vault | bool)
     - librenms_production_readiness_secret_source == 'ansible_vault'
     - librenms_production_vault_file.stat.exists | bool
 
@@ -211,7 +316,10 @@
   become: false
   run_once: true
   when:
-    - librenms_production_readiness_require_encrypted_vault | bool
+    - >-
+      (librenms_mode == 'ha')
+      or (librenms_production_profile | bool)
+      or (librenms_production_readiness_require_encrypted_vault | bool)
     - librenms_production_readiness_secret_source == 'ansible_vault'
 
 - name: Check for retained HA failover drill evidence
@@ -307,8 +415,12 @@
   command:
     argv:
       - systemctl
-      - is-failed
+      - show
       - librenms-backup-daily.service
+      - --property=LoadState
+      - --property=ActiveState
+      - --property=Result
+      - --value
   register: librenms_production_daily_backup_service
   changed_when: false
   failed_when: false
@@ -321,10 +433,15 @@
 - name: Require scheduled daily backup health
   assert:
     that:
+      - librenms_production_daily_backup_timer.rc == 0
       - librenms_production_daily_backup_timer.stdout_lines | length >= 2
       - librenms_production_daily_backup_timer.stdout_lines[0] == 'active'
       - librenms_production_daily_backup_timer.stdout_lines[1] | length > 0
-      - librenms_production_daily_backup_service.stdout | trim != 'failed'
+      - librenms_production_daily_backup_service.rc == 0
+      - librenms_production_daily_backup_service.stdout_lines | length >= 3
+      - librenms_production_daily_backup_service.stdout_lines[0] == 'loaded'
+      - librenms_production_daily_backup_service.stdout_lines[1] in ['active', 'inactive']
+      - librenms_production_daily_backup_service.stdout_lines[2] == 'success'
     fail_msg: >-
       The managed daily backup timer is inactive, has no next scheduled run, or
       its last service execution is failed on {{ librenms_backup_scheduled_host }}.
@@ -678,7 +795,7 @@
     - librenms_production_readiness_verify_shared_lock | bool
     - librenms_daily_global_lock_backend == 'shared_file'
 
-- name: Launch shared maintenance lock probes on every web node
+- name: Launch shared maintenance lock probes on every active LibreNMS node
   command:
     argv:
       - /bin/sh
@@ -692,7 +809,7 @@
       - "{{ librenms_production_readiness_shared_lock_probe_hold | int }}"
   async: "{{ librenms_production_readiness_shared_lock_probe_timeout | int }}"
   poll: 0
-  loop: "{{ librenms_production_active_web_nodes }}"
+  loop: "{{ librenms_production_active_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_production_shared_lock_jobs
   changed_when: false
@@ -756,7 +873,7 @@
       LibreNMS scheduler or daily maintenance timer is not active on
       {{ inventory_hostname }}.
   when:
-    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes))
 
 - name: Require active HA database service
   assert:
@@ -765,7 +882,7 @@
     fail_msg: "MariaDB is not active on {{ inventory_hostname }}."
   when:
     - librenms_mode == 'ha'
-    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes))
 
 - name: Query Galera health on every active database node
   command:
@@ -782,7 +899,7 @@
   changed_when: false
   when:
     - librenms_mode == 'ha'
-    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes))
 
 - name: Require every Galera node to be in the primary synced component
   assert:
@@ -794,7 +911,7 @@
       - >-
         librenms_production_galera_status.stdout is search(
         'wsrep_cluster_size[ \\t]+' ~
-        ((groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes) | length) | string)
+        ((groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes) | length) | string)
         )
     fail_msg: >-
       Galera is not fully ready on {{ inventory_hostname }}. Every production
@@ -802,7 +919,7 @@
       expected active cluster size.
   when:
     - librenms_mode == 'ha'
-    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes))
 
 - name: Require active Galera HAProxy readiness agent sockets
   assert:
@@ -815,7 +932,7 @@
   when:
     - librenms_mode == 'ha'
     - librenms_galera_readiness_agent_enabled | bool
-    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes))
 
 - name: Query the local Galera HAProxy readiness agent
   command:
@@ -839,7 +956,7 @@
   when:
     - librenms_mode == 'ha'
     - librenms_galera_readiness_agent_enabled | bool
-    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes))
 
 - name: Require every Galera readiness agent to report an eligible backend
   assert:
@@ -852,7 +969,7 @@
   when:
     - librenms_mode == 'ha'
     - librenms_galera_readiness_agent_enabled | bool
-    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_db', []) | difference(librenms_production_inactive_nodes))
 
 - name: Require HAProxy database backends to use Galera readiness agent checks
   command:
@@ -865,7 +982,7 @@
   when:
     - librenms_mode == 'ha'
     - librenms_galera_readiness_agent_enabled | bool
-    - inventory_hostname in (groups.get('lb_nodes', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('lb_nodes', []) | difference(librenms_production_inactive_nodes))
 
 - name: Prove fresh LibreNMS database connections through the HAProxy VIP
   shell: |-
@@ -886,7 +1003,7 @@
   when:
     - librenms_mode == 'ha'
     - librenms_vip_enabled | bool
-    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes))
 
 - name: Require active HA cache services
   assert:
@@ -898,7 +1015,7 @@
   when:
     - librenms_mode == 'ha'
     - librenms_redis_mode == 'sentinel'
-    - inventory_hostname in (groups.get('librenms_redis', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_redis', []) | difference(librenms_production_inactive_nodes))
 
 - name: Query every Redis Sentinel for its master endpoint
   no_log: true
@@ -1010,9 +1127,11 @@
       - "{{ librenms_install_dir }}/validate.php"
   register: librenms_production_validate
   changed_when: false
-  failed_when: "'[FAIL]' in librenms_production_validate.stdout"
+  failed_when: >-
+    librenms_production_validate.rc != 0
+    or '[FAIL]' in librenms_production_validate.stdout
   when:
-    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes))
 
 - name: Require LibreNMS application validation dependencies
   assert:
@@ -1026,7 +1145,7 @@
       dependencies on {{ inventory_hostname }}. Inspect validate.php output and
       rerun playbooks/site.yml before declaring production readiness.
   when:
-    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes))
+    - inventory_hostname in (groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes))
 
 - name: Query LibreNMS revision on every application node
   command:
@@ -1040,10 +1159,40 @@
       - "{{ librenms_install_dir }}"
       - rev-parse
       - HEAD
-  loop: "{{ groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes) }}"
+  loop: "{{ librenms_production_active_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_production_git_revisions
   changed_when: false
+  run_once: true
+
+- name: Require complete LibreNMS revision results
+  assert:
+    that:
+      - >-
+        (librenms_production_git_revisions.results | length)
+        == (librenms_production_active_nodes | length)
+      - >-
+        (
+          librenms_production_git_revisions.results
+          | map(attribute='rc')
+          | select('equalto', 0)
+          | list
+          | length
+        ) == (librenms_production_active_nodes | length)
+      - >-
+        (
+          librenms_production_git_revisions.results
+          | map(attribute='stdout')
+          | map('trim')
+          | list
+          | first
+          | default('')
+        ) is match('^[0-9a-f]{40}$')
+    fail_msg: >-
+      Production readiness could not establish a complete, valid Git revision
+      result for every active LibreNMS node. Do not certify a partial or
+      mixed application deployment.
+  no_log: true
   run_once: true
 
 - name: Require one LibreNMS revision across every application node
@@ -1059,7 +1208,7 @@
           | length
         ) == 1
     fail_msg: >-
-      LibreNMS application nodes are running different Git revisions. Finish a
+      LibreNMS nodes are running different Git revisions. Finish a
       controlled cluster update and rerun the gate before accepting browser
       traffic from every backend.
   run_once: true
@@ -1076,10 +1225,30 @@
       - "{{ librenms_install_dir }}"
       - status
       - --porcelain
-  loop: "{{ groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes) }}"
+  loop: "{{ librenms_production_active_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_production_git_worktrees
   changed_when: false
+  run_once: true
+
+- name: Require complete LibreNMS working-tree results
+  assert:
+    that:
+      - >-
+        (librenms_production_git_worktrees.results | length)
+        == (librenms_production_active_nodes | length)
+      - >-
+        (
+          librenms_production_git_worktrees.results
+          | map(attribute='rc')
+          | select('equalto', 0)
+          | list
+          | length
+        ) == (librenms_production_active_nodes | length)
+    fail_msg: >-
+      Production readiness could not establish clean working-tree evidence for
+      every active LibreNMS node.
+  no_log: true
   run_once: true
 
 - name: Require clean LibreNMS working trees on every application node
@@ -1098,6 +1267,85 @@
       One or more LibreNMS working trees contain uncommitted changes. Keep
       local application changes in a reviewed deployment branch or revert them
       before enabling unattended updates.
+  run_once: true
+
+- name: Query Ansible automation project revision
+  command:
+    argv:
+      - git
+      - -C
+      - "{{ playbook_dir }}/.."
+      - rev-parse
+      - --verify
+      - HEAD
+  delegate_to: localhost
+  become: false
+  register: librenms_production_readiness_automation_revision_command
+  changed_when: false
+  run_once: true
+
+- name: Build production readiness evidence identity
+  set_fact:
+    librenms_production_readiness_source_revision: >-
+      {{
+        librenms_production_git_revisions.results
+        | map(attribute='stdout')
+        | map('trim')
+        | unique
+        | list
+        | first
+        | default('', true)
+      }}
+    librenms_production_readiness_inventory_fingerprint: >-
+      {{
+        {
+          'identity_version': 2,
+          'mode': librenms_mode | string,
+          'production_profile': librenms_production_profile | bool,
+          'db_mode': librenms_db_mode | string,
+          'redis_mode': librenms_redis_mode | string,
+          'rrd_mode': librenms_rrd_mode | string,
+          'db_bind_address': librenms_db_bind_address | string,
+          'galera_cluster_name': librenms_galera_cluster_name | string,
+          'galera_readiness_agent_enabled': librenms_galera_readiness_agent_enabled | bool,
+          'galera_readiness_agent_port': librenms_galera_readiness_agent_port | int,
+          'vip_enabled': librenms_vip_enabled | bool,
+          'vip': librenms_vip_ip | string,
+          'web_port': librenms_haproxy_web_port | int,
+          'https_port': librenms_haproxy_https_port | int,
+          'tls_enabled': librenms_haproxy_tls_enabled | bool,
+          'web_check_host': librenms_production_haproxy_web_check_host | string,
+          'db_proxy_port': librenms_haproxy_db_port | int,
+          'daily_backup_enabled': librenms_backup_daily_enabled | bool,
+          'offsite_backup_enabled': librenms_backup_offsite_enabled | bool,
+          'scheduled_backup_host': librenms_backup_scheduled_host | string,
+          'status_alerts_enabled': librenms_status_alerts_enabled | default(false) | bool,
+          'database_nodes': librenms_production_active_db_nodes | sort,
+          'redis_nodes': librenms_production_active_redis_nodes | sort,
+          'load_balancer_nodes': librenms_production_active_lb_nodes | sort,
+          'application_nodes': librenms_production_active_nodes | sort,
+          'web_nodes': librenms_production_active_web_nodes | sort,
+          'inactive_nodes': librenms_production_inactive_nodes | sort
+        }
+        | to_json
+        | hash('sha256')
+      }}
+    librenms_production_readiness_automation_revision: >-
+      {{ librenms_production_readiness_automation_revision_command.stdout | trim }}
+  no_log: true
+  run_once: true
+
+- name: Require auditable production readiness identity
+  assert:
+    that:
+      - librenms_production_readiness_source_revision is match('^[0-9a-f]{40}$')
+      - librenms_production_readiness_automation_revision is match('^[0-9a-f]{40}$')
+      - librenms_production_readiness_inventory_fingerprint is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      Production readiness could not build a valid application-revision,
+      automation-revision, and inventory-topology identity for the evidence
+      record.
+  no_log: true
   run_once: true
 
 - name: Verify VIP TLS certificate with its configured SNI hostname
@@ -1184,7 +1432,7 @@
     return_content: true
     status_code: 200
     timeout: 10
-  loop: "{{ groups.get('librenms_nodes', []) | difference(librenms_inactive_inventory_nodes) }}"
+  loop: "{{ groups.get('librenms_nodes', []) | difference(librenms_production_inactive_nodes) }}"
   delegate_to: "{{ item }}"
   register: librenms_production_runtime_web_health
   changed_when: false
@@ -1253,6 +1501,7 @@
         | regex_findall('backup completed at (.+)')
         | last
         | default('')
+        | trim
       }}
   delegate_to: "{{ librenms_backup_scheduled_host }}"
   run_once: true
@@ -1266,6 +1515,8 @@
   assert:
     that:
       - librenms_production_backup_dir | length > 0
+      - librenms_production_backup_dir is match('^/')
+      - librenms_production_backup_dir is not match('(^|/)\.\.(?:/|$)')
     fail_msg: >-
       The scheduled backup completed without reporting its backup directory, so
       its manifest and artifacts cannot be verified.
@@ -1319,6 +1570,29 @@
     - librenms_backup_offsite_enabled | bool
     - librenms_backup_offsite_required | bool
 
+- name: Require safe production backup manifest and artifact filenames
+  assert:
+    that:
+      - librenms_backup_manifest_filename is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - >-
+        not (librenms_production_backup_manifest.database.included | default(false) | bool)
+        or (librenms_production_backup_manifest.database.file | default(''))
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - >-
+        not (librenms_production_backup_manifest.config.included | default(false) | bool)
+        or (librenms_production_backup_manifest.config.file | default(''))
+        is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+    fail_msg: >-
+      Production backup manifest and artifact names must be plain filenames.
+      Refusing a path containing directory traversal or shell-special components.
+  delegate_to: "{{ librenms_backup_scheduled_host }}"
+  run_once: true
+  when:
+    - librenms_mode == 'ha'
+    - librenms_production_readiness_verify_offsite_backup | bool
+    - librenms_backup_offsite_enabled | bool
+    - librenms_backup_offsite_required | bool
+
 - name: Calculate generated database backup SHA-256 checksum
   stat:
     path: >-
@@ -1352,6 +1626,10 @@
 - name: Require generated backup manifest SHA-256 checksums to match
   assert:
     that:
+      - librenms_production_database_backup_stat.stat.isreg | default(false) | bool
+      - not (librenms_production_database_backup_stat.stat.islnk | default(false) | bool)
+      - librenms_production_config_backup_stat.stat.isreg | default(false) | bool
+      - not (librenms_production_config_backup_stat.stat.islnk | default(false) | bool)
       - >-
         (librenms_production_backup_manifest.database.checksum_sha256
         | default('')) is match('^[A-Fa-f0-9]{64}$')
@@ -1554,6 +1832,31 @@
   run_once: true
   when: librenms_production_readiness_write_evidence | bool
 
+- name: Verify controller-side production readiness evidence verifier permissions
+  stat:
+    path: "{{ librenms_production_readiness_evidence_verifier_path }}"
+    follow: false
+  delegate_to: localhost
+  become: true
+  register: librenms_production_readiness_verifier_stat
+  changed_when: false
+  run_once: true
+  when: librenms_production_readiness_write_evidence | bool
+
+- name: Require secure controller-side production readiness evidence verifier
+  assert:
+    that:
+      - librenms_production_readiness_verifier_stat.stat.isreg | default(false)
+      - (librenms_production_readiness_verifier_stat.stat.uid | default(-1) | int) == 0
+      - (librenms_production_readiness_verifier_stat.stat.gid | default(-1) | int) == 0
+      - librenms_production_readiness_verifier_stat.stat.mode | default('') == '0750'
+    fail_msg: >-
+      The controller-side production readiness verifier must be a root-owned
+      regular file with mode 0750 before it is used.
+  delegate_to: localhost
+  run_once: true
+  when: librenms_production_readiness_write_evidence | bool
+
 - name: Find expired production readiness evidence records
   find:
     paths: "{{ librenms_production_readiness_evidence_dir }}"
@@ -1588,13 +1891,21 @@
     content: >-
       {{
         {
+          'evidence_schema_version': 1,
           'completed_at': librenms_production_readiness_completed_at,
           'result': 'passed',
           'mode': librenms_mode,
           'vip': librenms_vip_ip,
+          'source_revision': librenms_production_readiness_source_revision,
+          'automation_revision': librenms_production_readiness_automation_revision,
+          'inventory_fingerprint': librenms_production_readiness_inventory_fingerprint,
           'vip_tls_verified': librenms_production_readiness_verify_vip_tls | bool,
           'network_tcp_matrix_verified':
             librenms_production_readiness_network_tcp_checks_enabled | bool,
+          'host_firewall_verified':
+            librenms_production_readiness_require_host_firewall | bool,
+          'status_alert_routing_verified':
+            librenms_production_readiness_require_status_alert_routing | bool,
           'shared_lock_verified':
             librenms_production_readiness_verify_shared_lock | bool,
           'offsite_backup_verified':
@@ -1621,7 +1932,9 @@
           'database_nodes': librenms_production_active_db_nodes,
           'redis_nodes': librenms_production_active_redis_nodes,
           'load_balancer_nodes': librenms_production_active_lb_nodes,
-          'web_nodes': librenms_production_active_web_nodes
+          'application_nodes': librenms_production_active_nodes,
+          'web_nodes': librenms_production_active_web_nodes,
+          'inactive_nodes': librenms_production_inactive_nodes
         }
         | to_nice_json
       }}
@@ -1684,13 +1997,13 @@
       - python3
       - -c
       - >-
-        import hashlib, hmac, os, pathlib, sys; evidence = pathlib.Path(sys.argv[1]);
-        key = os.environ["LIBRENMS_PRODUCTION_READINESS_EVIDENCE_HMAC_KEY"].encode();
+        import hashlib, hmac, pathlib, sys; evidence = pathlib.Path(sys.argv[1]);
+        key = sys.stdin.read().strip().encode();
         digest = hmac.new(key, evidence.read_bytes(), hashlib.sha256).hexdigest();
         print(f"{digest}  {evidence.name}")
       - "{{ librenms_production_readiness_evidence.dest }}"
-  environment:
-    LIBRENMS_PRODUCTION_READINESS_EVIDENCE_HMAC_KEY: "{{ librenms_app_key }}"
+    stdin: "{{ librenms_app_key }}"
+    stdin_add_newline: false
   delegate_to: localhost
   become: true
   no_log: true
@@ -1736,13 +2049,13 @@
       - python3
       - -c
       - >-
-        import hashlib, hmac, os, pathlib, sys; evidence = pathlib.Path(sys.argv[1]);
-        key = os.environ["LIBRENMS_PRODUCTION_READINESS_EVIDENCE_HMAC_KEY"].encode();
+        import hashlib, hmac, pathlib, sys; evidence = pathlib.Path(sys.argv[1]);
+        key = sys.stdin.read().strip().encode();
         digest = hmac.new(key, evidence.read_bytes(), hashlib.sha256).hexdigest();
         print(f"{digest}  {evidence.name}")
       - "{{ librenms_production_readiness_evidence.dest }}"
-  environment:
-    LIBRENMS_PRODUCTION_READINESS_EVIDENCE_HMAC_KEY: "{{ librenms_app_key }}"
+    stdin: "{{ librenms_app_key }}"
+    stdin_add_newline: false
   delegate_to: localhost
   become: true
   no_log: true
@@ -1773,14 +2086,73 @@
     - librenms_production_readiness_write_evidence | bool
     - librenms_production_readiness_evidence_hmac_enabled | bool
 
+- name: Build production readiness evidence artifact list
+  set_fact:
+    librenms_production_readiness_evidence_artifacts: >-
+      {{
+        [
+          librenms_production_readiness_evidence.dest,
+          librenms_production_readiness_evidence.dest ~ '.sha256'
+        ]
+        + (
+          [librenms_production_readiness_evidence.dest ~ '.hmac']
+          if librenms_production_readiness_evidence_hmac_enabled | bool
+          else []
+        )
+      }}
+  run_once: true
+  when:
+    - librenms_production_readiness_write_evidence | bool
+    - librenms_production_readiness_evidence_integrity_enabled | bool
+
+- name: Inspect production readiness evidence artifact permissions
+  stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ librenms_production_readiness_evidence_artifacts | default([]) }}"
+  delegate_to: localhost
+  become: true
+  register: librenms_production_readiness_artifact_stats
+  changed_when: false
+  run_once: true
+  when:
+    - librenms_production_readiness_write_evidence | bool
+    - librenms_production_readiness_evidence_integrity_enabled | bool
+
+- name: Require secure production readiness evidence artifacts
+  assert:
+    that:
+      - item.stat.isreg | default(false)
+      - (item.stat.uid | default(-1) | int) == 0
+      - (item.stat.gid | default(-1) | int) == 0
+      - item.stat.mode | default('') == '0640'
+    fail_msg: >-
+      Production readiness evidence artifacts must be root-owned regular files
+      with mode 0640: {{ item.item }}
+  loop: "{{ librenms_production_readiness_artifact_stats.results | default([]) }}"
+  delegate_to: localhost
+  run_once: true
+  when:
+    - librenms_production_readiness_write_evidence | bool
+    - librenms_production_readiness_evidence_integrity_enabled | bool
+
 - name: Verify generated production readiness evidence with controller verifier
   command:
     argv:
       - "{{ librenms_production_readiness_evidence_verifier_path }}"
       - --evidence
       - "{{ librenms_production_readiness_evidence.dest }}"
-      - --app-env
-      - "{{ librenms_install_dir }}/.env"
+      - --source-revision
+      - "{{ librenms_production_readiness_source_revision }}"
+      - --automation-revision
+      - "{{ librenms_production_readiness_automation_revision }}"
+      - --inventory-fingerprint
+      - "{{ librenms_production_readiness_inventory_fingerprint }}"
+      - --max-age-seconds
+      - "{{ librenms_production_readiness_evidence_max_age_seconds | int }}"
+      - --app-key-stdin
+    stdin: "{{ librenms_app_key }}"
+    stdin_add_newline: false
   delegate_to: localhost
   become: true
   no_log: true

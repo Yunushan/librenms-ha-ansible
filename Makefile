@@ -1,4 +1,4 @@
-.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass readiness-repair readiness-repair-ask-become-pass rrdcached-unit-repair rrdcached-unit-repair-ask-become-pass repair repair-ask-become-pass repair-check cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover galera-recover-ask-become-pass ha-failover-test firewall backup restore-test validate production-readiness diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
+.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check github-governance-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass readiness-repair readiness-repair-ask-become-pass rrdcached-unit-repair rrdcached-unit-repair-ask-become-pass repair repair-ask-become-pass repair-check cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover galera-recover-ask-become-pass ha-failover-test firewall backup restore-test validate production-readiness production-readiness-ask-become-pass diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-production-readiness-ask-become-pass docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -56,7 +56,10 @@ syntax-check:
 inventory-check:
 	python3 scripts/validate-inventory.py --inventory inventories/ha/hosts.yml --group-vars inventories/ha/group_vars/all.yml
 
-ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails
+github-governance-check:
+	python3 scripts/ci-github-governance-check.py --branch main
+
+ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails
 
 test-controller-collection-bootstrap:
 	bash tests/unit/test-controller-collection-bootstrap.sh
@@ -114,6 +117,9 @@ test-post-reboot-rrdcached-guardrails:
 
 test-fast-repair-guardrails:
 	bash tests/unit/test-fast-repair-guardrails.sh
+
+test-github-governance-guardrails:
+	bash tests/unit/test-github-governance-guardrails.sh
 
 test-docker-ha-galera-config:
 	bash tests/unit/test-docker-ha-galera-config.sh
@@ -231,6 +237,9 @@ validate:
 production-readiness:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/production-readiness.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
+production-readiness-ask-become-pass:
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/production-readiness.yml --ask-become-pass --become-method sudo --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
 diagnostics:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/diagnostics.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
@@ -322,6 +331,9 @@ docker-validate:
 
 docker-production-readiness:
 	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/production-readiness.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+docker-production-readiness-ask-become-pass:
+	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/production-readiness.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 docker-diagnostics:
 	$(DOCKER_ANSIBLE) ansible-playbook -i $(HA_INVENTORY) playbooks/diagnostics.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)

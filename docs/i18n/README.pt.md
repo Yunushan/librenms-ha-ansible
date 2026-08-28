@@ -45,7 +45,7 @@ Este repositorio entrega um unico projeto Ansible capaz de implantar:
 - gerenciamento opcional do agente SNMP local
 - suporte a SNMP **v1**, **v2c** e **v3**
 - fluxos para adicionar e remover nos LibreNMS
-- estrutura pronta para GitHub com licenca MIT, workflow de lint, CONTRIBUTING, SECURITY, inventories de exemplo e gerador de segredos
+- estrutura pronta para GitHub com licenca 0BSD, workflow de lint, CONTRIBUTING, SECURITY, inventories de exemplo e gerador de segredos
 
 ---
 
