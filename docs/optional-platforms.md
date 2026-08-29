@@ -122,6 +122,11 @@ Use `KUBERNETES_KUBECONFIG` or `KUBERNETES_CONTEXT` to select a non-default
 cluster. The chart does not delete PVCs as part of Helm uninstall; review
 retained data separately.
 
+`KUBERNETES_TIMEOUT` controls Helm's deployment wait duration and accepts Helm
+duration values such as `10m`. The Ansible connection timeout is separate and
+uses the integer `KUBERNETES_CONNECTION_TIMEOUT` variable, which defaults to
+30 seconds.
+
 When `production.enabled=true`, the chart fails closed unless the production
 values file also supplies explicit resource requests/limits, restrictive pod
 security settings, topology spread constraints for web and dispatcher pods,
@@ -160,7 +165,8 @@ make k3s \
 ```
 
 Use the equivalent `RKE2_*` variables for RKE2, including
-`RKE2_BOOTSTRAP_HOST`. Run the server bootstrap with the server group, then
+`RKE2_BOOTSTRAP_HOST`. RKE2 status uses its packaged kubectl and
+`/etc/rancher/rke2/rke2.yaml` by default. Run the server bootstrap with the server group, then
 run the agent join separately with `K3S_NODE_ROLE=agent` or
 `RKE2_NODE_ROLE=agent`, a dedicated agent limit, and Vault-supplied endpoint
 and token. Bootstrap and removal are explicitly confirmed and the playbooks

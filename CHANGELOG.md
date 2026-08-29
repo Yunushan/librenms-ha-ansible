@@ -88,6 +88,11 @@
 
 ### Changed
 
+- Fixed the optional Kubernetes Make target to pass an integer Ansible
+  connection timeout separately from Helm's duration, removed redundant
+  hard-coded rollout names so chart name overrides remain supported, and made
+  RKE2 status/removal use the vendor-provided kubectl, kubeconfig, and
+  uninstall paths.
 - Made Galera's pre-disruption drain retry transient per-unit systemd state
   query failures for the configured recovery window before failing closed.
 - Made Gluster-backed RRD mount preparation idempotent when the mount is

@@ -144,8 +144,9 @@
 - name: Show RKE2 cluster status from a server
   ansible.builtin.command:
     argv:
-      - "{{ librenms_rke2_binary_path }}"
-      - kubectl
+      - "{{ librenms_rke2_kubectl_path }}"
+      - --kubeconfig
+      - "{{ librenms_rke2_kubeconfig_path }}"
       - get
       - nodes
       - --output=wide

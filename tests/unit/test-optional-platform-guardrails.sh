@@ -59,6 +59,9 @@ main() {
 
     contains "$MAKEFILE" 'PLATFORM_INVENTORY ?= inventories/platforms/hosts.yml'
     contains "$MAKEFILE" 'CONTAINER_PLATFORM_LIMIT ?='
+    contains "$MAKEFILE" 'KUBERNETES_CONNECTION_TIMEOUT ?= 30'
+    contains "$MAKEFILE" '--timeout $(KUBERNETES_CONNECTION_TIMEOUT)'
+    contains "$MAKEFILE" '-e "librenms_kubernetes_timeout=$(KUBERNETES_TIMEOUT)"'
     contains "$MAKEFILE" 'docker-ha:'
     contains "$MAKEFILE" 'podman-ha:'
     contains "$MAKEFILE" 'kubernetes:'
@@ -89,6 +92,11 @@ main() {
     contains "$ROOT_DIR/roles/k3s_platform/tasks/main.yml" 'Verify k3s agent service status'
     contains "$ROOT_DIR/roles/rke2_platform/tasks/main.yml" 'not librenms_rke2_uninstall.stat.islnk'
     contains "$ROOT_DIR/roles/rke2_platform/tasks/main.yml" 'Verify RKE2 agent service status'
+    contains "$ROOT_DIR/roles/rke2_platform/tasks/main.yml" 'librenms_rke2_kubectl_path'
+    contains "$ROOT_DIR/roles/rke2_platform/tasks/main.yml" '--kubeconfig'
+    contains "$ROOT_DIR/roles/rke2_platform/defaults/main.yml" 'librenms_rke2_uninstall_path: /usr/local/bin/rke2-uninstall.sh'
+    contains "$ROOT_DIR/roles/rke2_platform/defaults/main.yml" 'librenms_rke2_kubectl_path: /var/lib/rancher/rke2/bin/kubectl'
+    contains "$ROOT_DIR/roles/rke2_platform/defaults/main.yml" 'librenms_rke2_kubeconfig_path: /etc/rancher/rke2/rke2.yaml'
     contains "$ROOT_DIR/roles/container_platform/tasks/main.yml" "item.stat.mode | default('') in"
     contains "$ROOT_DIR/examples/docker-ha/librenms/compose.yml" 'LIBRENMS_IMAGE:?Set LIBRENMS_IMAGE'
     contains "$ROOT_DIR/examples/docker-ha/redis-sentinel/compose.yml" 'REDIS_IMAGE:?Set REDIS_IMAGE'
@@ -132,6 +140,13 @@ main() {
     contains "${ROOT_DIR}/examples/kubernetes/values-production.yaml.example" 'existingClaim:'
     contains "${ROOT_DIR}/examples/kubernetes/values-production.yaml.example" 'production:'
     contains "${ROOT_DIR}/examples/kubernetes/values-production.yaml.example" 'networkPolicy:'
+    if grep -Fq -- '--timeout $(KUBERNETES_TIMEOUT)' "$MAKEFILE"; then
+        fail 'Ansible connection timeout must be an integer separate from Helm duration'
+    fi
+    if grep -Fq -- "librenms_kubernetes_release ~ '-librenms-ha-web'" "$ROOT_DIR/roles/kubernetes_platform/tasks/main.yml" ||
+        grep -Fq -- "librenms_kubernetes_release ~ '-librenms-ha-dispatcher'" "$ROOT_DIR/roles/kubernetes_platform/tasks/main.yml"; then
+        fail 'Kubernetes rollout checks must not assume the default Helm resource names'
+    fi
 
     contains "${ROOT_DIR}/roles/k3s_platform/defaults/main.yml" 'librenms_k3s_install_checksum'
     contains "${ROOT_DIR}/roles/rke2_platform/defaults/main.yml" 'librenms_rke2_install_checksum'

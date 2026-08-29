@@ -67,6 +67,7 @@ KUBERNETES_KUBECONFIG ?=
 KUBERNETES_CONTEXT ?=
 KUBERNETES_CONFIRM ?= false
 KUBERNETES_TIMEOUT ?= 10m
+KUBERNETES_CONNECTION_TIMEOUT ?= 30
 K3S_LIMIT ?= k3s_nodes
 K3S_ACTION ?= preflight
 K3S_CONFIRM ?= false
@@ -425,7 +426,7 @@ podman-ha-ask-become-pass:
 kubernetes:
 	@test -n "$(KUBERNETES_VALUES_FILE)" || (echo "Refusing Kubernetes profile: set KUBERNETES_VALUES_FILE" && exit 2)
 	@test "$(KUBERNETES_ACTION)" = "preflight" || test "$(KUBERNETES_ACTION)" = "status" || test "$(KUBERNETES_CONFIRM)" = "true" || (echo "Refusing Kubernetes mutation: set KUBERNETES_CONFIRM=true" && exit 2)
-	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/$(KUBERNETES_PLAYBOOK) --limit "$(KUBERNETES_LIMIT)" --timeout $(KUBERNETES_TIMEOUT) --forks 1 -e "librenms_kubernetes_action=$(KUBERNETES_ACTION)" -e "librenms_kubernetes_platform=$(KUBERNETES_PLATFORM)" -e "librenms_kubernetes_confirm=$(KUBERNETES_CONFIRM)" -e "librenms_kubernetes_values_file=$(KUBERNETES_VALUES_FILE)" -e "librenms_kubernetes_namespace=$(KUBERNETES_NAMESPACE)" -e "librenms_kubernetes_release=$(KUBERNETES_RELEASE)" -e "librenms_kubernetes_kubeconfig=$(KUBERNETES_KUBECONFIG)" -e "librenms_kubernetes_context=$(KUBERNETES_CONTEXT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/$(KUBERNETES_PLAYBOOK) --limit "$(KUBERNETES_LIMIT)" --timeout $(KUBERNETES_CONNECTION_TIMEOUT) --forks 1 -e "librenms_kubernetes_action=$(KUBERNETES_ACTION)" -e "librenms_kubernetes_platform=$(KUBERNETES_PLATFORM)" -e "librenms_kubernetes_confirm=$(KUBERNETES_CONFIRM)" -e "librenms_kubernetes_values_file=$(KUBERNETES_VALUES_FILE)" -e "librenms_kubernetes_namespace=$(KUBERNETES_NAMESPACE)" -e "librenms_kubernetes_release=$(KUBERNETES_RELEASE)" -e "librenms_kubernetes_timeout=$(KUBERNETES_TIMEOUT)" -e "librenms_kubernetes_kubeconfig=$(KUBERNETES_KUBECONFIG)" -e "librenms_kubernetes_context=$(KUBERNETES_CONTEXT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 k3s-app: KUBERNETES_PLATFORM := k3s
 k3s-app: kubernetes

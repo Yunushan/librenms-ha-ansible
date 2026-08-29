@@ -136,38 +136,8 @@
   changed_when: true
   when: librenms_kubernetes_action == 'delete'
 
-- name: Wait for the LibreNMS web deployment
-  ansible.builtin.command:
-    argv: >-
-      {{
-        [librenms_kubernetes_cli_binary, 'rollout', 'status',
-         'deployment/' ~ librenms_kubernetes_release ~ '-librenms-ha-web',
-         '--namespace', librenms_kubernetes_namespace,
-         '--timeout', librenms_kubernetes_timeout]
-        + librenms_kubernetes_kubectl_context_args
-      }}
-  environment: "{{ librenms_kubernetes_environment }}"
-  changed_when: false
-  when:
-    - librenms_kubernetes_action == 'deploy'
-    - librenms_kubernetes_wait | bool
-
-- name: Wait for the LibreNMS dispatcher statefulset
-  ansible.builtin.command:
-    argv: >-
-      {{
-        [librenms_kubernetes_cli_binary, 'rollout', 'status',
-         'statefulset/' ~ librenms_kubernetes_release ~ '-librenms-ha-dispatcher',
-         '--namespace', librenms_kubernetes_namespace,
-         '--timeout', librenms_kubernetes_timeout]
-        + librenms_kubernetes_kubectl_context_args
-      }}
-  environment: "{{ librenms_kubernetes_environment }}"
-  changed_when: false
-  when:
-    - librenms_kubernetes_action == 'deploy'
-    - librenms_kubernetes_wait | bool
-
+# Helm --wait covers every rendered workload and already honors chart naming
+# overrides, so a second rollout lookup would duplicate that naming logic.
 - name: Report optional Kubernetes application result
   ansible.builtin.debug:
     msg:
