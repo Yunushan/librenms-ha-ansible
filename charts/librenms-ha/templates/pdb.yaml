@@ -1,0 +1,27 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "librenms-ha.fullname" . }}-web
+  labels:
+    {{- include "librenms-ha.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "librenms-ha.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "librenms-ha.fullname" . }}-dispatcher
+  labels:
+    {{- include "librenms-ha.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dispatcher
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "librenms-ha.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dispatcher

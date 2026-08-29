@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "librenms-ha.fullname" . }}-web
+  labels:
+    {{- include "librenms-ha.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "librenms-ha.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "librenms-ha.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "librenms-ha.fullname" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: web
+          image: {{ include "librenms-ha.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+              protocol: TCP
+          env:
+            - name: TZ
+              value: {{ .Values.timezone | default "UTC" | quote }}
+            - name: DB_HOST
+              value: {{ required "database.host is required" .Values.database.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.name | quote }}
+            - name: DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret is required" .Values.secrets.existingSecret | quote }}
+                  key: {{ .Values.secrets.databasePasswordKey | quote }}
+            - name: DB_TIMEOUT
+              value: {{ .Values.database.timeout | quote }}
+            - name: REDIS_SENTINEL
+              value: {{ required "redis.sentinel is required" .Values.redis.sentinel | quote }}
+            - name: REDIS_SENTINEL_SERVICE
+              value: {{ .Values.redis.sentinelService | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret is required" .Values.secrets.existingSecret | quote }}
+                  key: {{ .Values.secrets.redisPasswordKey | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: REDIS_DB
+              value: {{ .Values.redis.database | quote }}
+            - name: REDIS_CACHE_DB
+              value: {{ .Values.redis.cacheDatabase | quote }}
+            - name: REAPPLY_YAML_CONFIG
+              value: "0"
+          volumeMounts:
+            - name: librenms-data
+              mountPath: {{ .Values.persistence.mountPath }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.health.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
+            periodSeconds: {{ .Values.health.periodSeconds }}
+            timeoutSeconds: {{ .Values.health.timeoutSeconds }}
+            failureThreshold: {{ .Values.health.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.health.path }}
+              port: http
+            initialDelaySeconds: {{ add .Values.health.initialDelaySeconds 30 }}
+            periodSeconds: {{ .Values.health.periodSeconds }}
+            timeoutSeconds: {{ .Values.health.timeoutSeconds }}
+            failureThreshold: {{ .Values.health.failureThreshold }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.web.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.web.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey | quote }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "librenms-ha.selectorLabels" $ | nindent 14 }}
+              app.kubernetes.io/component: web
+        {{- end }}
+      {{- end }}
+      volumes:
+        - name: librenms-data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "librenms-ha.fullname" .)) .Values.persistence.existingClaim }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

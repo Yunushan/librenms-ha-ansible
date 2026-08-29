@@ -1,0 +1,9 @@
+---
+- name: Manage the optional MicroK8s cluster adapter
+  hosts: microk8s_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: microk8s_platform

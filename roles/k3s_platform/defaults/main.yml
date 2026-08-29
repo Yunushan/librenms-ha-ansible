@@ -1,0 +1,23 @@
+---
+# Optional k3s control-plane adapter. It is deliberately separate from the
+# LibreNMS application chart and the package-based site playbook.
+librenms_k3s_action: preflight
+librenms_k3s_confirm: false
+librenms_k3s_node_role: server
+librenms_k3s_install_url: https://get.k3s.io
+librenms_k3s_install_checksum: ""
+librenms_k3s_install_script_path: /usr/local/src/k3s-install.sh
+librenms_k3s_version: ""
+librenms_k3s_service_name: "{{ 'k3s' if librenms_k3s_node_role == 'server' else 'k3s-agent' }}"
+librenms_k3s_binary_path: /usr/local/bin/k3s
+librenms_k3s_config_path: /etc/rancher/k3s/config.yaml
+librenms_k3s_bootstrap_host: ""
+librenms_k3s_cluster_init: true
+librenms_k3s_server_url: ""
+librenms_k3s_token: ""
+librenms_k3s_tls_san: []
+librenms_k3s_disable_components: []
+librenms_k3s_uninstall_path: >-
+  {{ '/usr/local/bin/k3s-uninstall.sh'
+     if librenms_k3s_node_role == 'server'
+     else '/usr/local/bin/k3s-agent-uninstall.sh' }}

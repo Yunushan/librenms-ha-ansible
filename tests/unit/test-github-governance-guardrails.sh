@@ -38,5 +38,7 @@ require_text "$MAKEFILE" 'test-github-governance-guardrails:'
 require_text "$MAKEFILE" 'test-fast-repair-guardrails test-github-governance-guardrails'
 require_text "$LINT_WORKFLOW" \
     'run: make test-github-governance-guardrails'
+require_text "$LINT_WORKFLOW" 'helm-chart:'
+require_text "$LINT_WORKFLOW" 'run: make test-helm-chart'
 
 printf 'GitHub governance guardrail test passed.\n'

@@ -1,0 +1,8 @@
+---
+- name: Manage the optional Podman LibreNMS HA profile
+  hosts: container_hosts
+  become: "{{ librenms_container_become | bool }}"
+  gather_facts: false
+  roles:
+    - role: container_platform
+      librenms_container_platform: podman

@@ -1,0 +1,159 @@
+---
+- name: Validate optional MicroK8s request
+  ansible.builtin.assert:
+    that:
+      - librenms_microk8s_action in ['preflight', 'bootstrap', 'status', 'remove']
+      - librenms_microk8s_node_role in ['primary', 'control-plane', 'worker']
+      - >-
+        librenms_microk8s_action in ['preflight', 'status']
+        or librenms_microk8s_confirm | bool
+      - >-
+        librenms_microk8s_action != 'bootstrap'
+        or librenms_microk8s_channel | string | trim | length > 0
+      - >-
+        librenms_microk8s_action != 'bootstrap'
+        or librenms_microk8s_node_role != 'primary'
+        or (
+          ansible_play_hosts_all | length == 1
+          and librenms_microk8s_primary_host | string | trim | length > 0
+          and librenms_microk8s_primary_host in ansible_play_hosts_all
+          and ansible_play_hosts_all[0] == librenms_microk8s_primary_host
+        )
+      - >-
+        librenms_microk8s_action != 'bootstrap'
+        or librenms_microk8s_node_role == 'primary'
+        or (
+          librenms_microk8s_join_endpoint | string | trim | length > 0
+          and librenms_microk8s_join_token | string | trim | length > 0
+        )
+    fail_msg: >-
+      MicroK8s is guarded. Primary bootstrap requires exactly one explicitly
+      named first host, an explicit snap channel, and confirmation. Non-primary
+      nodes require an operator-supplied join endpoint and token.
+
+- name: Check the snap command before MicroK8s bootstrap
+  ansible.builtin.command:
+    argv:
+      - snap
+      - version
+  register: librenms_microk8s_snap
+  changed_when: false
+  when: librenms_microk8s_action == 'bootstrap'
+
+- name: Check whether MicroK8s is installed
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_microk8s_binary }}"
+      - version
+  register: librenms_microk8s_version
+  changed_when: false
+  failed_when: false
+
+- name: Install MicroK8s from the selected snap channel
+  ansible.builtin.command:
+    argv:
+      - snap
+      - install
+      - microk8s
+      - --classic
+      - "--channel={{ librenms_microk8s_channel }}"
+  when:
+    - librenms_microk8s_action == 'bootstrap'
+    - librenms_microk8s_version.rc != 0
+  changed_when: true
+
+- name: Wait for the primary MicroK8s node
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_microk8s_binary }}"
+      - status
+      - --wait-ready
+      - -t
+      - "120"
+  changed_when: false
+  when:
+    - librenms_microk8s_action == 'bootstrap'
+    - librenms_microk8s_node_role == 'primary'
+
+- name: Join a MicroK8s control-plane or worker node
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_microk8s_binary, 'join',
+         librenms_microk8s_join_endpoint ~ '/' ~ librenms_microk8s_join_token]
+        + (['--worker'] if librenms_microk8s_node_role == 'worker' else [])
+      }}
+  when:
+    - librenms_microk8s_action == 'bootstrap'
+    - librenms_microk8s_node_role != 'primary'
+  changed_when: true
+  no_log: true
+
+- name: Wait for a joined MicroK8s node
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_microk8s_binary }}"
+      - status
+      - --wait-ready
+      - -t
+      - "120"
+  changed_when: false
+  when:
+    - librenms_microk8s_action == 'bootstrap'
+    - librenms_microk8s_node_role != 'primary'
+
+- name: Enable requested MicroK8s addons on the primary node
+  ansible.builtin.command:
+    argv: "{{ [librenms_microk8s_binary, 'enable'] + librenms_microk8s_addons }}"
+  when:
+    - librenms_microk8s_action == 'bootstrap'
+    - librenms_microk8s_node_role == 'primary'
+    - librenms_microk8s_addons | length > 0
+  changed_when: true
+
+- name: Show MicroK8s cluster status from a control-plane node
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_microk8s_binary }}"
+      - kubectl
+      - get
+      - nodes
+      - --output=wide
+  register: librenms_microk8s_status
+  changed_when: false
+  when:
+    - librenms_microk8s_action == 'status'
+    - librenms_microk8s_node_role != 'worker'
+
+- name: Verify MicroK8s worker readiness
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_microk8s_binary }}"
+      - status
+      - --wait-ready
+      - -t
+      - "30"
+  register: librenms_microk8s_worker_status
+  changed_when: false
+  failed_when: librenms_microk8s_worker_status.rc != 0
+  when:
+    - librenms_microk8s_action == 'status'
+    - librenms_microk8s_node_role == 'worker'
+
+- name: Remove MicroK8s from the node
+  ansible.builtin.command:
+    argv:
+      - snap
+      - remove
+      - microk8s
+  when: librenms_microk8s_action == 'remove'
+  changed_when: true
+
+- name: Report MicroK8s adapter result
+  ansible.builtin.debug:
+    msg:
+      - "MicroK8s action: {{ librenms_microk8s_action }}"
+      - "MicroK8s node role: {{ librenms_microk8s_node_role }}"
+      - "MicroK8s detected: {{ librenms_microk8s_version.rc == 0 }}"
+      - "{{ librenms_microk8s_status.stdout | default('') }}"
+      - "{{ librenms_microk8s_worker_status.stdout | default('') }}"

@@ -1,0 +1,80 @@
+---
+- name: Validate Gardener adapter inputs
+  ansible.builtin.assert:
+    that:
+      - librenms_gardener_action in ['preflight', 'status', 'kubeconfig']
+      - ansible_play_hosts_all | length == 1
+      - >-
+        librenms_gardener_action == 'preflight' or
+        (librenms_gardener_garden | length > 0 and
+         librenms_gardener_project | length > 0 and
+         librenms_gardener_shoot | length > 0)
+      - >-
+        librenms_gardener_action != 'kubeconfig' or
+        (librenms_gardener_kubeconfig_destination | length > 0 and
+         librenms_gardener_confirm | bool)
+    fail_msg: >-
+      Gardener requires one controller host. Status/kubeconfig actions also
+      require garden, project, and shoot; kubeconfig export requires a
+      destination and explicit confirmation.
+
+- name: Check Gardener CLI
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_gardener_binary }}"
+      - version
+  environment: "{{ librenms_gardener_environment }}"
+  register: librenms_gardener_version
+  changed_when: false
+
+- name: Check Gardener kubeconfig destination
+  ansible.builtin.stat:
+    path: "{{ librenms_gardener_kubeconfig_destination }}"
+    follow: false
+  register: librenms_gardener_kubeconfig_stat
+  changed_when: false
+  when: librenms_gardener_action == 'kubeconfig'
+
+- name: Refuse to overwrite an existing Gardener kubeconfig
+  ansible.builtin.assert:
+    that:
+      - not librenms_gardener_kubeconfig_stat.stat.exists
+      - not librenms_gardener_kubeconfig_stat.stat.islnk | default(false)
+    fail_msg: >-
+      Gardener kubeconfig destination already exists. Choose a new path or
+      remove the old file after reviewing it: {{ librenms_gardener_kubeconfig_destination }}
+  when: librenms_gardener_action == 'kubeconfig'
+
+- name: Resolve selected Gardener shoot
+  ansible.builtin.command:
+    argv: "{{ [librenms_gardener_binary] + librenms_gardener_status_args }}"
+  environment: "{{ librenms_gardener_environment }}"
+  register: librenms_gardener_status
+  changed_when: false
+  when: librenms_gardener_action == 'status'
+
+- name: Export Gardener shoot kubeconfig
+  ansible.builtin.command:
+    argv: "{{ [librenms_gardener_binary] + librenms_gardener_kubeconfig_args }}"
+  environment: "{{ librenms_gardener_environment }}"
+  register: librenms_gardener_kubeconfig
+  changed_when: true
+  no_log: true
+  when: librenms_gardener_action == 'kubeconfig'
+
+- name: Write Gardener shoot kubeconfig
+  ansible.builtin.copy:
+    content: "{{ librenms_gardener_kubeconfig.stdout }}"
+    dest: "{{ librenms_gardener_kubeconfig_destination }}"
+    mode: "0600"
+  no_log: true
+  when: librenms_gardener_action == 'kubeconfig'
+
+- name: Report Gardener adapter result
+  ansible.builtin.debug:
+    msg:
+      - "Gardener action: {{ librenms_gardener_action }}"
+      - "Gardener garden: {{ librenms_gardener_garden | default('not selected') }}"
+      - "Gardener project: {{ librenms_gardener_project | default('not selected') }}"
+      - "Gardener shoot: {{ librenms_gardener_shoot | default('not selected') }}"
+      - "Gardener CLI: {{ librenms_gardener_version.stdout | default('available') }}"

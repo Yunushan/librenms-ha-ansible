@@ -1,0 +1,8 @@
+---
+- name: Manage the optional generic Kubernetes LibreNMS profile
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: kubernetes_platform
+      librenms_kubernetes_platform: kubernetes

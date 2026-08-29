@@ -1,0 +1,212 @@
+{{- if and (not .Values.persistence.enabled) (not .Values.persistence.existingClaim) -}}
+{{- fail "persistence.enabled=false requires persistence.existingClaim" -}}
+{{- end -}}
+{{- if and .Values.persistence.enabled (eq (len .Values.persistence.accessModes) 0) -}}
+{{- fail "persistence.accessModes must contain at least one access mode" -}}
+{{- end -}}
+{{- if .Values.production.enabled -}}
+{{- if not .Values.image.requireDigest -}}
+{{- fail "production requires image.requireDigest=true" -}}
+{{- end -}}
+{{- if not (has "ReadWriteMany" .Values.persistence.accessModes) -}}
+{{- fail "production requires persistence.accessModes to include ReadWriteMany" -}}
+{{- end -}}
+{{- if lt (int .Values.web.replicas) 2 -}}
+{{- fail "production web.replicas must be at least 2" -}}
+{{- end -}}
+{{- if lt (int .Values.dispatcher.replicas) 2 -}}
+{{- fail "production dispatcher.replicas must be at least 2" -}}
+{{- end -}}
+{{- if not .Values.persistence.existingClaim -}}
+{{- fail "production requires persistence.existingClaim for reviewed shared storage" -}}
+{{- end -}}
+{{- if not .Values.networkPolicy.enabled -}}
+{{- fail "production requires networkPolicy.enabled=true" -}}
+{{- end -}}
+{{- if eq (len .Values.networkPolicy.ingress) 0 -}}
+{{- fail "production requires explicit networkPolicy.ingress rules" -}}
+{{- end -}}
+{{- if eq (len .Values.networkPolicy.egress) 0 -}}
+{{- fail "production requires explicit networkPolicy.egress rules" -}}
+{{- end -}}
+{{- range .Values.networkPolicy.ingress -}}
+{{- if eq (len .ports) 0 -}}
+{{- fail "production networkPolicy.ingress rules must declare ports" -}}
+{{- end -}}
+{{- if eq (len .from) 0 -}}
+{{- fail "production networkPolicy.ingress rules must restrict their source" -}}
+{{- end -}}
+{{- range .from -}}
+{{- if and (not .namespaceSelector) (not .podSelector) (not .ipBlock) -}}
+{{- fail "production networkPolicy.ingress sources must use a selector or ipBlock" -}}
+{{- end -}}
+{{- end -}}
+{{- range .ports -}}
+{{- if not .port -}}
+{{- fail "production networkPolicy.ingress ports must name a port" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.networkPolicy.egress -}}
+{{- if eq (len .ports) 0 -}}
+{{- fail "production networkPolicy.egress rules must declare ports" -}}
+{{- end -}}
+{{- if eq (len .to) 0 -}}
+{{- fail "production networkPolicy.egress rules must restrict their destination" -}}
+{{- end -}}
+{{- range .to -}}
+{{- if and (not .namespaceSelector) (not .podSelector) (not .ipBlock) -}}
+{{- fail "production networkPolicy.egress destinations must use a selector or ipBlock" -}}
+{{- end -}}
+{{- end -}}
+{{- range .ports -}}
+{{- if not .port -}}
+{{- fail "production networkPolicy.egress ports must name a port" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (not .Values.ingress.enabled) (not .Values.route.enabled) -}}
+{{- fail "production requires TLS ingress or an OKD Route" -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (eq (len .Values.ingress.tls) 0) (not .Values.route.enabled) -}}
+{{- fail "production ingress requires TLS configuration" -}}
+{{- end -}}
+{{- if .Values.ingress.enabled -}}
+{{- if eq (len .Values.ingress.hosts) 0 -}}
+{{- fail "production ingress requires at least one host" -}}
+{{- end -}}
+{{- range .Values.ingress.hosts -}}
+{{- if not .host -}}
+{{- fail "production ingress hosts require host names" -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.ingress.tls -}}
+{{- if not .secretName -}}
+{{- fail "production ingress TLS entries require secretName" -}}
+{{- end -}}
+{{- if eq (len .hosts) 0 -}}
+{{- fail "production ingress TLS entries require hosts" -}}
+{{- end -}}
+{{- range .hosts -}}
+{{- if not . -}}
+{{- fail "production ingress TLS hosts must not be empty" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.route.enabled -}}
+{{- if not .Values.route.host -}}
+{{- fail "production Route requires a host" -}}
+{{- end -}}
+{{- if not .Values.route.tls.termination -}}
+{{- fail "production Route requires TLS termination" -}}
+{{- end -}}
+{{- if not (has .Values.route.tls.termination (list "edge" "reencrypt" "passthrough")) -}}
+{{- fail "production Route TLS termination must be edge, reencrypt, or passthrough" -}}
+{{- end -}}
+{{- end -}}
+{{- if eq (len .Values.web.topologySpreadConstraints) 0 -}}
+{{- fail "production requires web.topologySpreadConstraints" -}}
+{{- end -}}
+{{- if eq (len .Values.dispatcher.topologySpreadConstraints) 0 -}}
+{{- fail "production requires dispatcher.topologySpreadConstraints" -}}
+{{- end -}}
+{{- range .Values.web.topologySpreadConstraints -}}
+{{- if not (hasKey . "maxSkew") -}}
+{{- fail "production web.topologySpreadConstraints require maxSkew" -}}
+{{- end -}}
+{{- if lt (int .maxSkew) 1 -}}
+{{- fail "production web.topologySpreadConstraints maxSkew must be positive" -}}
+{{- end -}}
+{{- if not .topologyKey -}}
+{{- fail "production web.topologySpreadConstraints require topologyKey" -}}
+{{- end -}}
+{{- if not .whenUnsatisfiable -}}
+{{- fail "production web.topologySpreadConstraints require whenUnsatisfiable" -}}
+{{- end -}}
+{{- if not (has .whenUnsatisfiable (list "DoNotSchedule" "ScheduleAnyway")) -}}
+{{- fail "production web.topologySpreadConstraints have an invalid whenUnsatisfiable" -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.dispatcher.topologySpreadConstraints -}}
+{{- if not (hasKey . "maxSkew") -}}
+{{- fail "production dispatcher.topologySpreadConstraints require maxSkew" -}}
+{{- end -}}
+{{- if lt (int .maxSkew) 1 -}}
+{{- fail "production dispatcher.topologySpreadConstraints maxSkew must be positive" -}}
+{{- end -}}
+{{- if not .topologyKey -}}
+{{- fail "production dispatcher.topologySpreadConstraints require topologyKey" -}}
+{{- end -}}
+{{- if not .whenUnsatisfiable -}}
+{{- fail "production dispatcher.topologySpreadConstraints require whenUnsatisfiable" -}}
+{{- end -}}
+{{- if not (has .whenUnsatisfiable (list "DoNotSchedule" "ScheduleAnyway")) -}}
+{{- fail "production dispatcher.topologySpreadConstraints have an invalid whenUnsatisfiable" -}}
+{{- end -}}
+{{- end -}}
+{{- if not (hasKey .Values.web.resources "requests") -}}
+{{- fail "production requires web.resources.requests" -}}
+{{- end -}}
+{{- if not (hasKey .Values.web.resources "limits") -}}
+{{- fail "production requires web.resources.limits" -}}
+{{- end -}}
+{{- if eq (len .Values.web.resources.requests) 0 -}}
+{{- fail "production web.resources.requests must not be empty" -}}
+{{- end -}}
+{{- if eq (len .Values.web.resources.limits) 0 -}}
+{{- fail "production web.resources.limits must not be empty" -}}
+{{- end -}}
+{{- range (list "cpu" "memory") -}}
+{{- if not (hasKey $.Values.web.resources.requests .) -}}
+{{- fail (printf "production web.resources.requests requires %s" .) -}}
+{{- end -}}
+{{- if not (index $.Values.web.resources.requests .) -}}
+{{- fail (printf "production web.resources.requests.%s must not be empty" .) -}}
+{{- end -}}
+{{- if not (hasKey $.Values.web.resources.limits .) -}}
+{{- fail (printf "production web.resources.limits requires %s" .) -}}
+{{- end -}}
+{{- if not (index $.Values.web.resources.limits .) -}}
+{{- fail (printf "production web.resources.limits.%s must not be empty" .) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (hasKey .Values.dispatcher.resources "requests") -}}
+{{- fail "production requires dispatcher.resources.requests" -}}
+{{- end -}}
+{{- if not (hasKey .Values.dispatcher.resources "limits") -}}
+{{- fail "production requires dispatcher.resources.limits" -}}
+{{- end -}}
+{{- if eq (len .Values.dispatcher.resources.requests) 0 -}}
+{{- fail "production dispatcher.resources.requests must not be empty" -}}
+{{- end -}}
+{{- if eq (len .Values.dispatcher.resources.limits) 0 -}}
+{{- fail "production dispatcher.resources.limits must not be empty" -}}
+{{- end -}}
+{{- range (list "cpu" "memory") -}}
+{{- if not (hasKey $.Values.dispatcher.resources.requests .) -}}
+{{- fail (printf "production dispatcher.resources.requests requires %s" .) -}}
+{{- end -}}
+{{- if not (index $.Values.dispatcher.resources.requests .) -}}
+{{- fail (printf "production dispatcher.resources.requests.%s must not be empty" .) -}}
+{{- end -}}
+{{- if not (hasKey $.Values.dispatcher.resources.limits .) -}}
+{{- fail (printf "production dispatcher.resources.limits requires %s" .) -}}
+{{- end -}}
+{{- if not (index $.Values.dispatcher.resources.limits .) -}}
+{{- fail (printf "production dispatcher.resources.limits.%s must not be empty" .) -}}
+{{- end -}}
+{{- end -}}
+{{- if ne (.Values.podSecurityContext.runAsNonRoot | toString) "true" -}}
+{{- fail "production requires podSecurityContext.runAsNonRoot=true" -}}
+{{- end -}}
+{{- if ne (.Values.podSecurityContext.seccompProfile.type | default "") "RuntimeDefault" -}}
+{{- fail "production requires podSecurityContext.seccompProfile.type=RuntimeDefault" -}}
+{{- end -}}
+{{- if ne (.Values.containerSecurityContext.allowPrivilegeEscalation | toString) "false" -}}
+{{- fail "production requires containerSecurityContext.allowPrivilegeEscalation=false" -}}
+{{- end -}}
+{{- if not (has "ALL" .Values.containerSecurityContext.capabilities.drop) -}}
+{{- fail "production requires dropping all container capabilities" -}}
+{{- end -}}
+{{- end -}}

@@ -45,11 +45,16 @@ def iter_yaml_files(root: Path, exclude_dirs: set[str]) -> list[Path]:
     for current_root, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(name for name in dirnames if name not in exclude_dirs)
         current_path = Path(current_root)
-        yaml_files.extend(
-            current_path / filename
-            for filename in filenames
-            if Path(filename).suffix in {".yml", ".yaml"}
-        )
+        for filename in filenames:
+            if Path(filename).suffix not in {".yml", ".yaml"}:
+                continue
+            path = current_path / filename
+            relative_parts = path.relative_to(root).parts
+            if "charts" in relative_parts and "templates" in relative_parts:
+                # Helm templates are YAML after Go-template rendering, not
+                # standalone YAML documents that PyYAML can parse.
+                continue
+            yaml_files.append(path)
 
     return sorted(yaml_files)
 

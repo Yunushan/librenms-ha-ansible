@@ -1,7 +1,7 @@
 ---
 services:
   redis:
-    image: ${REDIS_IMAGE:-redis:7}
+    image: ${REDIS_IMAGE:?Set REDIS_IMAGE to an approved immutable image digest in .env}
     container_name: redis-server
     network_mode: host
     restart: unless-stopped
@@ -20,7 +20,7 @@ services:
       - ./data/redis:/data
 
   sentinel:
-    image: ${REDIS_IMAGE:-redis:7}
+    image: ${REDIS_IMAGE:?Set REDIS_IMAGE to an approved immutable image digest in .env}
     container_name: redis-sentinel
     network_mode: host
     restart: unless-stopped

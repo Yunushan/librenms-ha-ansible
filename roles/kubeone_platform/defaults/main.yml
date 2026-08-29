@@ -1,0 +1,9 @@
+---
+# KubeOne remains an explicit provider adapter. It never changes the
+# existing LibreNMS HA inventory or installs the application chart.
+librenms_kubeone_action: preflight
+librenms_kubeone_confirm: false
+librenms_kubeone_binary: kubeone
+librenms_kubeone_manifest: ""
+librenms_kubeone_extra_args: []
+librenms_kubeone_environment: {}

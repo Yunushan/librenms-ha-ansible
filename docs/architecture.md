@@ -2,13 +2,16 @@
 
 ## Design goals
 
-This repository supports five practical patterns:
+This repository supports six practical patterns:
 
 1. **Standalone**
 2. **Clustered app nodes with external shared services**
 3. **Full HA**
 4. **Experimental Dockerized HA**
 5. **Optional AWX controller** for GUI-driven playbook operations
+6. **Optional container and Kubernetes platform profiles** for operators who
+   want isolated Docker, Podman, Kubernetes, or provider-managed cluster
+   lifecycles
 
 ## Full HA reference topology
 
@@ -61,6 +64,7 @@ This repository supports five practical patterns:
 - destructive brick removal
 - topology changes on best-effort distros without lab verification
 - full Dockerized HA lifecycle beyond the provided example bundle
+- provider-managed Kubernetes lifecycle beyond the explicit adapter commands
 
 ## Full HA expectations
 

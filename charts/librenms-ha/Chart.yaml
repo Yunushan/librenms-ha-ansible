@@ -1,0 +1,7 @@
+---
+apiVersion: v2
+name: librenms-ha
+description: Optional LibreNMS web and dispatcher profile for Kubernetes-compatible platforms
+type: application
+version: 0.1.0
+appVersion: managed

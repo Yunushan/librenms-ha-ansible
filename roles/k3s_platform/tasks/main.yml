@@ -1,0 +1,225 @@
+---
+- name: Validate optional k3s request
+  ansible.builtin.assert:
+    that:
+      - librenms_k3s_action in ['preflight', 'bootstrap', 'status', 'remove']
+      - librenms_k3s_node_role in ['server', 'agent']
+      - >-
+        librenms_k3s_action in ['preflight', 'status']
+        or librenms_k3s_confirm | bool
+      - >-
+        librenms_k3s_action != 'bootstrap'
+        or librenms_k3s_install_checksum is match('^sha256:[A-Fa-f0-9]{64}$')
+      - >-
+        librenms_k3s_action != 'bootstrap'
+        or librenms_k3s_version | string | trim | length > 0
+      - >-
+        librenms_k3s_action != 'bootstrap'
+        or librenms_k3s_node_role != 'server'
+        or (
+          librenms_k3s_bootstrap_host | string | trim | length > 0
+          and librenms_k3s_bootstrap_host in ansible_play_hosts_all
+          and ansible_play_hosts_all[0] == librenms_k3s_bootstrap_host
+        )
+      - >-
+        librenms_k3s_action != 'bootstrap'
+        or librenms_k3s_node_role != 'server'
+        or inventory_hostname == librenms_k3s_bootstrap_host
+        or (
+          librenms_k3s_server_url | string | trim | length > 0
+          and librenms_k3s_token | string | trim | length > 0
+        )
+      - >-
+        librenms_k3s_action != 'bootstrap'
+        or librenms_k3s_node_role != 'server'
+        or librenms_k3s_token | string | trim | length > 0
+      - >-
+        librenms_k3s_action != 'bootstrap'
+        or librenms_k3s_node_role != 'agent'
+        or (
+          librenms_k3s_server_url | string | trim | length > 0
+          and librenms_k3s_token | string | trim | length > 0
+        )
+    fail_msg: >-
+      k3s is guarded. Bootstrap requires a SHA-256 checksum for the reviewed
+      installer. Server bootstrap requires one explicitly named first host;
+      all other servers and agent nodes require a server URL and token.
+      Bootstrap or removal requires librenms_k3s_confirm=true.
+
+- name: Check whether k3s is installed
+  ansible.builtin.stat:
+    path: "{{ librenms_k3s_binary_path }}"
+    follow: false
+  register: librenms_k3s_binary
+
+- name: Check the k3s installer destination
+  ansible.builtin.stat:
+    path: "{{ librenms_k3s_install_script_path }}"
+    follow: false
+  register: librenms_k3s_install_script
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Refuse a symlinked k3s installer destination
+  ansible.builtin.assert:
+    that:
+      - not librenms_k3s_install_script.stat.islnk | default(false)
+    fail_msg: >-
+      k3s installer destination must not be a symlink:
+      {{ librenms_k3s_install_script_path }}
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Check the k3s installer URL
+  ansible.builtin.assert:
+    that:
+      - librenms_k3s_install_url is match('^https://')
+    fail_msg: "k3s installer URL must use HTTPS: {{ librenms_k3s_install_url }}"
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Download the reviewed k3s installer
+  ansible.builtin.get_url:
+    url: "{{ librenms_k3s_install_url }}"
+    dest: "{{ librenms_k3s_install_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+    checksum: "{{ librenms_k3s_install_checksum }}"
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Create the k3s configuration directory
+  ansible.builtin.file:
+    path: "{{ librenms_k3s_config_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Check the k3s configuration destination
+  ansible.builtin.stat:
+    path: "{{ librenms_k3s_config_path }}"
+    follow: false
+  register: librenms_k3s_config
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Refuse a symlinked k3s configuration destination
+  ansible.builtin.assert:
+    that:
+      - not librenms_k3s_config.stat.islnk | default(false)
+    fail_msg: >-
+      k3s configuration destination must not be a symlink:
+      {{ librenms_k3s_config_path }}
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Deploy k3s configuration
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ librenms_k3s_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Install k3s from the checked installer
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_k3s_install_script_path }}"
+  environment:
+    INSTALL_K3S_VERSION: "{{ librenms_k3s_version }}"
+    INSTALL_K3S_EXEC: "{{ librenms_k3s_node_role }}"
+    K3S_URL: >-
+      {{ librenms_k3s_server_url
+         if librenms_k3s_node_role == 'agent'
+         or inventory_hostname != librenms_k3s_bootstrap_host else '' }}
+    K3S_TOKEN: "{{ librenms_k3s_token }}"
+  when:
+    - librenms_k3s_action == 'bootstrap'
+    - not librenms_k3s_binary.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Enable and start k3s
+  ansible.builtin.systemd_service:
+    name: "{{ librenms_k3s_service_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: librenms_k3s_action == 'bootstrap'
+
+- name: Show k3s cluster status from a server
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_k3s_binary_path }}"
+      - kubectl
+      - get
+      - nodes
+      - --output=wide
+  register: librenms_k3s_status
+  changed_when: false
+  when:
+    - librenms_k3s_action == 'status'
+    - librenms_k3s_node_role == 'server'
+
+- name: Gather k3s agent service facts
+  ansible.builtin.service_facts:
+  register: librenms_k3s_agent_service_facts
+  when:
+    - librenms_k3s_action == 'status'
+    - librenms_k3s_node_role == 'agent'
+
+- name: Verify k3s agent service status
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          librenms_k3s_agent_service_facts.ansible_facts.services
+          | default({})
+        ).get(
+          librenms_k3s_service_name ~ '.service', {}
+        ).get('state', '') == 'running'
+    fail_msg: >-
+      k3s agent service {{ librenms_k3s_service_name }} is not active on
+      {{ inventory_hostname }}.
+  when:
+    - librenms_k3s_action == 'status'
+    - librenms_k3s_node_role == 'agent'
+
+- name: Check k3s uninstall script
+  ansible.builtin.stat:
+    path: "{{ librenms_k3s_uninstall_path }}"
+    follow: false
+  register: librenms_k3s_uninstall
+  when: librenms_k3s_action == 'remove'
+
+- name: Require the k3s uninstall script
+  ansible.builtin.assert:
+    that:
+      - librenms_k3s_uninstall.stat.isreg | default(false)
+      - not librenms_k3s_uninstall.stat.islnk | default(false)
+    fail_msg: "k3s uninstall script is missing: {{ librenms_k3s_uninstall_path }}"
+  when: librenms_k3s_action == 'remove'
+
+- name: Remove k3s from the node
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_k3s_uninstall_path }}"
+  when: librenms_k3s_action == 'remove'
+  changed_when: true
+
+- name: Report k3s adapter result
+  ansible.builtin.debug:
+    msg:
+      - "k3s action: {{ librenms_k3s_action }}"
+      - "k3s node role: {{ librenms_k3s_node_role }}"
+      - "k3s binary present: {{ librenms_k3s_binary.stat.exists | default(false) }}"
+      - "{{ librenms_k3s_status.stdout | default('') }}"
+      - >-
+        k3s agent service state:
+        {{
+          (
+            librenms_k3s_agent_service_facts.ansible_facts.services
+            | default({})
+          ).get(
+            librenms_k3s_service_name ~ '.service', {}
+          ).get('state', 'missing')
+        }}

@@ -1,0 +1,114 @@
+---
+nameOverride: ""
+fullnameOverride: ""
+timezone: UTC
+
+image:
+  repository: librenms/librenms
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+  requireDigest: true
+  pullSecrets: []
+
+production:
+  enabled: false
+
+web:
+  replicas: 3
+  port: 8000
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  topologySpreadConstraints: []
+
+dispatcher:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  topologySpreadConstraints: []
+
+database:
+  host: ""
+  port: 3306
+  name: librenms
+  user: librenms
+  timeout: 60
+
+redis:
+  sentinel: ""
+  sentinelService: mymaster
+  port: 6379
+  database: 0
+  cacheDatabase: 1
+
+secrets:
+  existingSecret: ""
+  databasePasswordKey: db-password
+  redisPasswordKey: redis-password
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteMany
+  size: 50Gi
+  mountPath: /data
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: librenms.example.invalid
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+route:
+  enabled: false
+  host: librenms.example.invalid
+  tls:
+    termination: edge
+
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+terminationGracePeriodSeconds: 30
+
+health:
+  path: /
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6

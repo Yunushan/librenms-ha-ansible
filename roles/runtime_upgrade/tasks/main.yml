@@ -799,6 +799,7 @@
   when: librenms_runtime_upgrade_php_selected | bool
 
 - name: Restart the selected PHP-FPM service with bounded diagnostics
+  when: librenms_runtime_upgrade_php_selected | bool
   block:
     - name: Reset failed selected PHP-FPM service state
       ansible.builtin.command:
@@ -866,8 +867,6 @@
 
           recent journal:
           {{ librenms_runtime_upgrade_php_journal.stdout | default('') }}
-  when: librenms_runtime_upgrade_php_selected | bool
-
 - name: Wait for the selected LibreNMS PHP-FPM socket
   ansible.builtin.wait_for:
     path: "{{ librenms_php_fpm_socket }}"
@@ -876,6 +875,7 @@
   when: librenms_runtime_upgrade_php_selected | bool
 
 - name: Validate Nginx configuration after package refresh
+  when: librenms_runtime_upgrade_nginx_selected | bool
   block:
     - name: Run Nginx configuration test
       ansible.builtin.command:
@@ -918,8 +918,6 @@
           systemctl status:
           {{ librenms_runtime_upgrade_nginx_status.stdout | default('') }}
           {{ librenms_runtime_upgrade_nginx_status.stderr | default('') }}
-  when: librenms_runtime_upgrade_nginx_selected | bool
-
 - name: Detect Nginx runtime version after package refresh
   ansible.builtin.command:
     argv:

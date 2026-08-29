@@ -190,6 +190,10 @@ supported.
 | Distributed LibreNMS app/poller nodes with external DB/Redis/storage | Primary | Good fit when database, Redis, or storage are managed outside this repo. |
 | Full three-node HA with HAProxy, Keepalived, Galera, Redis/Valkey Sentinel, and shared RRD storage | Primary on primary distros | The main target. Ubuntu/Debian may use GlusterFS; RHEL-family 8/9/10 require externally managed NFS/NFSv4 storage. Requires regular drills and backups. |
 | Dockerized HA example | Lab/example | Useful for learning and CI-style validation. Disposable HAProxy web-backend, three-node Galera continuity, and Redis Sentinel election tests run in CI; this is not a complete production container platform. |
+| Podman Compose HA example | Lab/example | Uses the Docker Compose service definitions through Podman's Compose provider. Requires the same operator-owned storage, image, secret, backup, and failover validation as the Docker example. |
+| Kubernetes LibreNMS Helm profile | Optional/lab until certified | Deploys web and dispatcher workloads against operator-managed MariaDB/Galera, Redis/Sentinel, Secret, and RWX storage. Provider-specific cluster lifecycle is intentionally separate. |
+| k3s, RKE2, or MicroK8s adapter | Optional lifecycle adapter | Installs or joins the selected distribution only when explicitly requested. The LibreNMS chart is a separate operation and no cluster migration is automatic. |
+| OKD, Kubespray, KubeOne, or Gardener adapter | Optional lifecycle/access adapter | Uses `oc`, native Kubespray/KubeOne tooling, or `gardenctl` from an operator-managed environment. These profiles do not replace provider operators or certify the underlying cluster. |
 | AWX controller | Optional management plane | Supported as a separate controller-side service. It has its own backup and upgrade lifecycle. |
 
 ## Production Readiness Gates

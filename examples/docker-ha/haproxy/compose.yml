@@ -1,7 +1,7 @@
 ---
 services:
   haproxy:
-    image: ${HAPROXY_IMAGE:-haproxy:lts}
+    image: ${HAPROXY_IMAGE:?Set HAPROXY_IMAGE to an approved immutable image digest in .env}
     container_name: librenms-haproxy
     network_mode: host
     restart: unless-stopped

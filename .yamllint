@@ -3,6 +3,7 @@ extends: default
 ignore: |
   .ansible/
   lib/
+  charts/librenms-ha/templates/
 
 rules:
   line-length:

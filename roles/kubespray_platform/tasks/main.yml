@@ -1,0 +1,147 @@
+---
+- name: Validate optional Kubespray request
+  ansible.builtin.assert:
+    that:
+      - librenms_kubespray_action in ['preflight', 'plan', 'apply', 'reset']
+      - ansible_play_hosts_all | length == 1
+      - librenms_kubespray_directory | string | trim | length > 0
+      - librenms_kubespray_inventory | string | trim | length > 0
+      - >-
+        librenms_kubespray_action in ['preflight', 'plan']
+        or librenms_kubespray_confirm | bool
+    fail_msg: >-
+      Kubespray is operator-managed and guarded. Provide the checked-out
+      Kubespray directory and inventory, run preflight or plan first, and set
+      librenms_kubespray_confirm=true before apply or reset.
+
+- name: Check the Kubespray command
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_kubespray_binary }}"
+      - --version
+  register: librenms_kubespray_version
+  changed_when: false
+
+- name: Check the Kubespray directory
+  ansible.builtin.stat:
+    path: "{{ librenms_kubespray_directory }}"
+    follow: false
+  register: librenms_kubespray_directory_stat
+
+- name: Require the Kubespray directory
+  ansible.builtin.assert:
+    that:
+      - librenms_kubespray_directory_stat.stat.isdir | default(false)
+      - not librenms_kubespray_directory_stat.stat.islnk | default(false)
+    fail_msg: "Kubespray directory is missing: {{ librenms_kubespray_directory }}"
+
+- name: Check the Kubespray inventory
+  ansible.builtin.stat:
+    path: "{{ librenms_kubespray_inventory }}"
+    follow: false
+  register: librenms_kubespray_inventory_stat
+
+- name: Require the Kubespray inventory
+  ansible.builtin.assert:
+    that:
+      - librenms_kubespray_inventory_stat.stat.exists | default(false)
+      - >-
+        (librenms_kubespray_inventory_stat.stat.isreg | default(false)) or
+        (librenms_kubespray_inventory_stat.stat.isdir | default(false))
+      - not librenms_kubespray_inventory_stat.stat.islnk | default(false)
+    fail_msg: "Kubespray inventory is missing: {{ librenms_kubespray_inventory }}"
+
+- name: Check the Kubespray cluster playbook
+  ansible.builtin.stat:
+    path: "{{ librenms_kubespray_directory }}/{{ librenms_kubespray_cluster_playbook }}"
+    follow: false
+  register: librenms_kubespray_cluster_stat
+
+- name: Require the Kubespray cluster playbook
+  ansible.builtin.assert:
+    that:
+      - librenms_kubespray_cluster_stat.stat.isreg | default(false)
+      - not librenms_kubespray_cluster_stat.stat.islnk | default(false)
+    fail_msg: >-
+      Kubespray cluster playbook is missing:
+      {{ librenms_kubespray_directory }}/{{ librenms_kubespray_cluster_playbook }}
+
+- name: Run Kubespray syntax preflight
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubespray_binary, '-i', librenms_kubespray_inventory,
+         librenms_kubespray_cluster_playbook, '--syntax-check']
+        + librenms_kubespray_extra_args
+      }}
+    chdir: "{{ librenms_kubespray_directory }}"
+  environment: "{{ librenms_kubespray_environment }}"
+  register: librenms_kubespray_preflight
+  changed_when: false
+  when: librenms_kubespray_action == 'preflight'
+
+- name: Run Kubespray check plan
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubespray_binary, '-i', librenms_kubespray_inventory,
+         librenms_kubespray_cluster_playbook, '--check', '--diff']
+        + librenms_kubespray_extra_args
+      }}
+    chdir: "{{ librenms_kubespray_directory }}"
+  environment: "{{ librenms_kubespray_environment }}"
+  register: librenms_kubespray_plan
+  changed_when: false
+  when: librenms_kubespray_action == 'plan'
+
+- name: Apply the Kubespray cluster playbook
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubespray_binary, '-i', librenms_kubespray_inventory,
+         librenms_kubespray_cluster_playbook]
+        + librenms_kubespray_extra_args
+      }}
+    chdir: "{{ librenms_kubespray_directory }}"
+  environment: "{{ librenms_kubespray_environment }}"
+  register: librenms_kubespray_apply
+  changed_when: true
+  when: librenms_kubespray_action == 'apply'
+
+- name: Check the Kubespray reset playbook
+  ansible.builtin.stat:
+    path: "{{ librenms_kubespray_directory }}/{{ librenms_kubespray_reset_playbook }}"
+    follow: false
+  register: librenms_kubespray_reset_stat
+  when: librenms_kubespray_action == 'reset'
+
+- name: Require the Kubespray reset playbook
+  ansible.builtin.assert:
+    that:
+      - librenms_kubespray_reset_stat.stat.isreg | default(false)
+      - not librenms_kubespray_reset_stat.stat.islnk | default(false)
+    fail_msg: >-
+      Kubespray reset playbook is missing:
+      {{ librenms_kubespray_directory }}/{{ librenms_kubespray_reset_playbook }}
+  when: librenms_kubespray_action == 'reset'
+
+- name: Reset the Kubespray cluster
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubespray_binary, '-i', librenms_kubespray_inventory,
+         librenms_kubespray_reset_playbook]
+        + librenms_kubespray_extra_args
+      }}
+    chdir: "{{ librenms_kubespray_directory }}"
+  environment: "{{ librenms_kubespray_environment }}"
+  register: librenms_kubespray_reset
+  changed_when: true
+  when: librenms_kubespray_action == 'reset'
+
+- name: Report Kubespray adapter result
+  ansible.builtin.debug:
+    msg:
+      - "Kubespray action: {{ librenms_kubespray_action }}"
+      - "Kubespray directory: {{ librenms_kubespray_directory }}"
+      - "{{ librenms_kubespray_version.stdout | default('') | trim }}"

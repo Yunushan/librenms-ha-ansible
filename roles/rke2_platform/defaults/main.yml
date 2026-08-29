@@ -1,0 +1,21 @@
+---
+# Optional RKE2 control-plane adapter. It is deliberately separate from the
+# LibreNMS application chart and the package-based site playbook.
+librenms_rke2_action: preflight
+librenms_rke2_confirm: false
+librenms_rke2_node_role: server
+librenms_rke2_install_url: https://get.rke2.io
+librenms_rke2_install_checksum: ""
+librenms_rke2_install_script_path: /usr/local/src/rke2-install.sh
+librenms_rke2_version: ""
+librenms_rke2_service_name: "{{ 'rke2-server' if librenms_rke2_node_role == 'server' else 'rke2-agent' }}"
+librenms_rke2_binary_path: /usr/local/bin/rke2
+librenms_rke2_kubectl_path: /var/lib/rancher/rke2/bin/kubectl
+librenms_rke2_kubeconfig_path: /etc/rancher/rke2/rke2.yaml
+librenms_rke2_config_path: /etc/rancher/rke2/config.yaml
+librenms_rke2_bootstrap_host: ""
+librenms_rke2_server_url: ""
+librenms_rke2_token: ""
+librenms_rke2_tls_san: []
+librenms_rke2_write_kubeconfig_mode: "0640"
+librenms_rke2_uninstall_path: /usr/local/bin/rke2-uninstall.sh

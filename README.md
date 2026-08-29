@@ -72,6 +72,8 @@ This repository gives you one Ansible project that can deploy:
    - GlusterFS-backed RRD storage
 4. **Experimental Dockerized HA bundle** for operators who want containerized LibreNMS, Galera, Redis Sentinel, and HAProxy examples
 5. **Optional AWX controller** for GUI-based playbook execution, scheduling, RBAC, and run history
+6. **Optional isolated platform profiles** for Docker, Podman, Kubernetes,
+   k3s, RKE2, MicroK8s, OKD, Kubespray, KubeOne, and Gardener
 
 ---
 
@@ -88,6 +90,8 @@ This repository gives you one Ansible project that can deploy:
 - automatic self-monitoring for LibreNMS cluster nodes, with a one-variable opt out
 - optional experimental Dockerized HA example bundle for operators who prefer containerized service layers
 - optional AWX controller deployment for teams that want GUI-driven operations
+- optional, separately invoked container and Kubernetes platform workflows;
+  see [docs/optional-platforms.md](docs/optional-platforms.md)
 - workflows for **adding** and **removing** LibreNMS nodes
 - GitHub-ready repo structure with:
   - 0BSD license

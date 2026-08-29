@@ -1,0 +1,212 @@
+---
+- name: Validate optional container platform request
+  ansible.builtin.assert:
+    that:
+      - librenms_container_platform in ['docker', 'podman']
+      - librenms_container_action in ['preflight', 'deploy', 'restart', 'stop', 'status']
+      - librenms_container_manifests | length > 0
+      - ansible_play_hosts_all | length == 1
+      - >-
+        librenms_container_action in ['preflight', 'status']
+        or librenms_container_confirm | bool
+    fail_msg: >-
+      Container deployment is opt-in and guarded. Select docker or podman, use
+      preflight/status for read-only checks, and set
+      librenms_container_confirm=true before deploy, restart, or stop.
+
+- name: Check the selected container runtime
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_container_runtime_binary }}"
+      - --version
+  register: librenms_container_runtime_version
+  changed_when: false
+
+- name: Check the selected Compose provider
+  ansible.builtin.command:
+    argv: "{{ librenms_container_compose_command + ['version'] }}"
+  register: librenms_container_compose_version
+  changed_when: false
+
+- name: Check container Compose manifest directories
+  ansible.builtin.stat:
+    path: "{{ item.directory }}"
+    follow: false
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_manifest_directories
+
+- name: Require container Compose manifest directories
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir | default(false)
+      - not item.stat.islnk | default(false)
+    fail_msg: "Container manifest directory is missing: {{ item.item.directory }}"
+  loop: "{{ librenms_container_manifest_directories.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Check each container Compose manifest
+  ansible.builtin.stat:
+    path: "{{ item.directory }}/{{ item.compose_file }}"
+    follow: false
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_compose_files
+
+- name: Require each container Compose manifest
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - not item.stat.islnk | default(false)
+    fail_msg: "Container Compose file is missing: {{ item.item.directory }}/{{ item.item.compose_file }}"
+  loop: "{{ librenms_container_compose_files.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Check each container environment file
+  ansible.builtin.stat:
+    path: "{{ item.directory }}/{{ item.env_file }}"
+    follow: false
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_env_files
+
+- name: Require each container environment file
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - not item.stat.islnk | default(false)
+      - item.stat.mode | default('') in ['0400', '0440', '0600', '0640']
+    fail_msg: "Container environment file is missing: {{ item.item.directory }}/{{ item.item.env_file }}"
+  loop: "{{ librenms_container_env_files.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Require expected services for each container project
+  ansible.builtin.assert:
+    that:
+      - item.services | default([]) | length > 0
+    fail_msg: "Container project has no expected running services: {{ item.name }}"
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Validate each container Compose project without changing it
+  ansible.builtin.command:
+    argv: >-
+      {{
+        librenms_container_compose_command
+        + ['--project-name', librenms_container_project_name ~ '-' ~ item.name]
+        + ['--env-file', item.env_file]
+        + ['-f', item.compose_file, 'config', '--quiet']
+      }}
+    chdir: "{{ item.directory }}"
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+
+- name: Show container platform status
+  ansible.builtin.command:
+    argv: >-
+      {{
+        librenms_container_compose_command
+        + ['--project-name', librenms_container_project_name ~ '-' ~ item.name]
+        + ['--env-file', item.env_file]
+        + ['-f', item.compose_file, 'ps']
+      }}
+    chdir: "{{ item.directory }}"
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_status
+  changed_when: false
+  when: librenms_container_action == 'status'
+
+- name: Deploy container Compose projects
+  ansible.builtin.command:
+    argv: >-
+      {{
+        librenms_container_compose_command
+        + ['--project-name', librenms_container_project_name ~ '-' ~ item.name]
+        + ['--env-file', item.env_file]
+        + ['-f', item.compose_file, 'up', '-d', '--remove-orphans']
+      }}
+    chdir: "{{ item.directory }}"
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_deploy
+  changed_when: true
+  when: librenms_container_action == 'deploy'
+
+- name: Restart container Compose projects
+  ansible.builtin.command:
+    argv: >-
+      {{
+        librenms_container_compose_command
+        + ['--project-name', librenms_container_project_name ~ '-' ~ item.name]
+        + ['--env-file', item.env_file]
+        + ['-f', item.compose_file, 'up', '-d', '--force-recreate', '--remove-orphans']
+      }}
+    chdir: "{{ item.directory }}"
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_restart
+  changed_when: true
+  when: librenms_container_action == 'restart'
+
+- name: Verify container services remain running after lifecycle action
+  ansible.builtin.command:
+    argv: >-
+      {{
+        librenms_container_compose_command
+        + ['--project-name', librenms_container_project_name ~ '-' ~ item.name]
+        + ['--env-file', item.env_file]
+        + ['-f', item.compose_file, 'ps', '--status', 'running', '--services']
+      }}
+    chdir: "{{ item.directory }}"
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_running_services
+  changed_when: false
+  failed_when: >-
+    librenms_container_running_services.rc != 0 or
+    (
+      item.services |
+      difference(librenms_container_running_services.stdout_lines | default([])) |
+      length > 0
+    )
+  when: librenms_container_action in ['deploy', 'restart']
+
+- name: Stop container Compose projects
+  ansible.builtin.command:
+    argv: >-
+      {{
+        librenms_container_compose_command
+        + ['--project-name', librenms_container_project_name ~ '-' ~ item.name]
+        + ['--env-file', item.env_file]
+        + ['-f', item.compose_file, 'down', '--remove-orphans']
+      }}
+    chdir: "{{ item.directory }}"
+  loop: "{{ librenms_container_manifests }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: librenms_container_stop
+  changed_when: true
+  when: librenms_container_action == 'stop'
+
+- name: Report optional container platform result
+  ansible.builtin.debug:
+    msg:
+      - "Container platform: {{ librenms_container_platform }}"
+      - "Action: {{ librenms_container_action }}"
+      - "Runtime: {{ librenms_container_runtime_version.stdout | default('') | trim }}"
+      - "Compose provider: {{ librenms_container_compose_version.stdout | default('') | trim }}"
+      - "Projects checked: {{ librenms_container_manifests | map(attribute='name') | join(', ') }}"

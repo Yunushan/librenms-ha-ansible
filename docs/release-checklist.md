@@ -37,6 +37,7 @@ python scripts/ci-python-smoke.py
 yamllint .
 python scripts/ci-ansible-syntax-check.py
 ansible-lint
+bash tests/unit/test-helm-chart.sh
 ```
 
 ## Inventory Examples
@@ -46,6 +47,12 @@ ansible-lint
 - [ ] New variables have commented examples in `inventories/ha/group_vars/all.yml`
   when operators are expected to tune them.
 - [ ] Example values do not imply unsupported production defaults.
+- [ ] Optional k3s/RKE2 bootstrap names exactly one first server and joins all
+  other servers through the reviewed endpoint/token path.
+- [ ] Optional MicroK8s primary bootstrap targets exactly one host.
+- [ ] A Kubernetes production values file passes the chart production profile
+  gate and has reviewed NetworkPolicy, storage, resource, security, and TLS
+  settings for the target cluster.
 - [ ] `maintenance_nodes`, `new_nodes`, and `decommission_nodes` examples remain
   safe to copy.
 
@@ -87,6 +94,7 @@ python scripts/ci-check-markdown-links.py
 - [ ] `CHANGELOG.md` includes added, changed, and operator notes.
 - [ ] Major upgrade or migration steps are written as commands, not prose-only
   advice.
+- [ ] Every new operator-visible safety contract is recorded in `CHANGELOG.md`.
 - [ ] Any required manual step is called out before the operator reaches the
   risky command.
 - [ ] Known limitations are documented instead of hidden in code comments.
@@ -98,6 +106,7 @@ Before tagging or merging, run:
 ```bash
 python scripts/ci-python-smoke.py
 python scripts/ci-check-markdown-links.py
+bash tests/unit/test-helm-chart.sh
 git diff --check
 ```
 
@@ -116,7 +125,7 @@ ruleset before declaring a release production-ready:
 - Require pull requests; do not permit direct production changes to `main`.
 - Require a green `lint` workflow, including `ansible-lint`,
   `python-314-runtime`, every `platform-packages (...)` matrix job,
-  `controller-image`, `haproxy-web-failover`, `galera-failover`,
+  `controller-image`, `helm-chart`, `haproxy-web-failover`, `galera-failover`,
   `docker-ha-galera-config`, and `redis-sentinel-failover`.
 - Require a green `dependency-review` workflow for pull requests.
 - Require at least one approving review from a maintainer other than the

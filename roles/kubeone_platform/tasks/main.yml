@@ -1,0 +1,86 @@
+---
+- name: Validate KubeOne adapter inputs
+  ansible.builtin.assert:
+    that:
+      - librenms_kubeone_action in ['preflight', 'plan', 'apply', 'reset']
+      - librenms_kubeone_manifest | length > 0
+      - ansible_play_hosts_all | length == 1
+      - >-
+        librenms_kubeone_action in ['preflight', 'plan'] or
+        librenms_kubeone_confirm | bool
+    fail_msg: >-
+      KubeOne requires one controller host, a manifest, and explicit
+      confirmation for apply/reset operations.
+
+- name: Check KubeOne manifest
+  ansible.builtin.stat:
+    path: "{{ librenms_kubeone_manifest }}"
+    follow: false
+  register: librenms_kubeone_manifest_stat
+  changed_when: false
+
+- name: Require KubeOne manifest
+  ansible.builtin.assert:
+    that:
+      - librenms_kubeone_manifest_stat.stat.exists
+      - librenms_kubeone_manifest_stat.stat.isreg
+      - not librenms_kubeone_manifest_stat.stat.islnk | default(false)
+    fail_msg: "KubeOne manifest is missing or is not a regular file: {{ librenms_kubeone_manifest }}"
+
+- name: Check KubeOne CLI
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_kubeone_binary }}"
+      - version
+  environment: "{{ librenms_kubeone_environment }}"
+  register: librenms_kubeone_version
+  changed_when: false
+
+- name: Run KubeOne status preflight
+  ansible.builtin.command:
+    argv: >-
+      {{ [librenms_kubeone_binary, 'status', '--manifest',
+          librenms_kubeone_manifest] +
+         librenms_kubeone_extra_args }}
+  environment: "{{ librenms_kubeone_environment }}"
+  register: librenms_kubeone_preflight
+  changed_when: false
+  when: librenms_kubeone_action == 'preflight'
+
+- name: Run KubeOne verbose status plan
+  ansible.builtin.command:
+    argv: >-
+      {{ [librenms_kubeone_binary, 'status', '--manifest',
+          librenms_kubeone_manifest, '--verbose'] +
+         librenms_kubeone_extra_args }}
+  environment: "{{ librenms_kubeone_environment }}"
+  register: librenms_kubeone_plan
+  changed_when: false
+  when: librenms_kubeone_action == 'plan'
+
+- name: Apply KubeOne manifest
+  ansible.builtin.command:
+    argv: >-
+      {{ [librenms_kubeone_binary, 'apply', '--manifest',
+          librenms_kubeone_manifest] + librenms_kubeone_extra_args }}
+  environment: "{{ librenms_kubeone_environment }}"
+  register: librenms_kubeone_apply
+  changed_when: true
+  when: librenms_kubeone_action == 'apply'
+
+- name: Reset KubeOne cluster
+  ansible.builtin.command:
+    argv: >-
+      {{ [librenms_kubeone_binary, 'reset', '--manifest',
+          librenms_kubeone_manifest] + librenms_kubeone_extra_args }}
+  environment: "{{ librenms_kubeone_environment }}"
+  register: librenms_kubeone_reset
+  changed_when: true
+  when: librenms_kubeone_action == 'reset'
+
+- name: Report KubeOne adapter result
+  ansible.builtin.debug:
+    msg:
+      - "KubeOne action: {{ librenms_kubeone_action }}"
+      - "KubeOne manifest: {{ librenms_kubeone_manifest }}"
+      - "KubeOne CLI: {{ librenms_kubeone_version.stdout | default('available') }}"

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "librenms-ha.fullname" . }}-dispatcher
+  labels:
+    {{- include "librenms-ha.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "librenms-ha.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: dispatcher
+  ports:
+    - name: dispatcher
+      port: 8000
+      targetPort: dispatcher
+      protocol: TCP

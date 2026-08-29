@@ -1,0 +1,7 @@
+---
+- name: Manage the optional Kubespray cluster adapter
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: kubespray_platform

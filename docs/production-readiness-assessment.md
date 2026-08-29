@@ -27,7 +27,8 @@ playbook verifies root ownership and restrictive modes before publishing them.
 The 100 / 100 standard requires:
 
 1. Green `lint` checks, including every supported-platform matrix job, the
-   Python runtime job, the controller-image job, and all HA integration jobs.
+   Python runtime job, the controller-image and Helm chart jobs, and all HA
+   integration jobs.
 2. A green pull-request `dependency-review` check with no accepted moderate or
    higher dependency vulnerability.
 3. Branch protection or an equivalent ruleset that requires those checks,
@@ -73,6 +74,9 @@ Run the source checks first:
 ```bash
 python3 -m pip install --require-hashes --requirement requirements-ci.txt
 make ci
+# The controller image's `make ci` includes this gate; run it directly when
+# checking a workstation without the full controller image.
+bash tests/unit/test-helm-chart.sh
 ```
 
 Then execute the live certification on the Ansible controller:

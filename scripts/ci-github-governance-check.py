@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_CHECKS = {
     "ansible-lint",
     "controller-image",
+    "helm-chart",
     "python-314-runtime",
     "platform-packages (ubuntu-22.04)",
     "platform-packages (ubuntu-24.04)",

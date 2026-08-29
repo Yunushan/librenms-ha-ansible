@@ -1,0 +1,124 @@
+---
+# Copy this file outside the repository, replace every example value, and
+# pass it as KUBERNETES_VALUES_FILE. The referenced Secret must be created by
+# the platform's secret manager before the Helm release is installed.
+timezone: Europe/Istanbul
+
+production:
+  enabled: true
+
+image:
+  repository: registry.example.invalid/librenms/librenms
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  requireDigest: true
+
+web:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+
+dispatcher:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+
+database:
+  host: mariadb-galera.database.svc.cluster.local
+  port: 3306
+  name: librenms
+  user: librenms
+  timeout: 60
+
+redis:
+  sentinel: redis-sentinel-0.redis.database.svc.cluster.local:26379,redis-sentinel-1.redis.database.svc.cluster.local:26379,redis-sentinel-2.redis.database.svc.cluster.local:26379
+  sentinelService: mymaster
+  port: 6379
+  database: 0
+  cacheDatabase: 1
+
+secrets:
+  existingSecret: librenms-secrets
+  databasePasswordKey: db-password
+  redisPasswordKey: redis-password
+
+persistence:
+  enabled: true
+  existingClaim: librenms-data
+  accessModes:
+    - ReadWriteMany
+  size: 50Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: librenms.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: librenms-tls
+      hosts:
+        - librenms.example.com
+
+route:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 3306
+        - protocol: TCP
+          port: 6379
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: database
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL

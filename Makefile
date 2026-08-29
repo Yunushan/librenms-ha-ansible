@@ -48,6 +48,73 @@ RRDCACHED_UNIT_REPAIR_TIMEOUT ?= 120
 RRDCACHED_UNIT_REPAIR_FORKS ?= 1
 DOCKER_ANSIBLE ?= docker compose run --rm -v $(SSH_DIR):/root/.ssh:ro ansible
 
+# Optional container and Kubernetes profiles use a separate inventory. They
+# never become part of the package-based HA site workflow.
+PLATFORM_INVENTORY ?= inventories/platforms/hosts.yml
+CONTAINER_PLATFORM_LIMIT ?=
+CONTAINER_PLATFORM_ACTION ?= preflight
+CONTAINER_PLATFORM_CONFIRM ?= false
+CONTAINER_PLATFORM_BECOME ?= false
+CONTAINER_PLATFORM_EXAMPLES_ROOT ?= /opt/librenms-ha-ansible/examples/docker-ha
+KUBERNETES_PLAYBOOK ?= kubernetes.yml
+KUBERNETES_LIMIT ?= localhost
+KUBERNETES_PLATFORM ?= kubernetes
+KUBERNETES_ACTION ?= preflight
+KUBERNETES_VALUES_FILE ?=
+KUBERNETES_NAMESPACE ?= librenms
+KUBERNETES_RELEASE ?= librenms
+KUBERNETES_KUBECONFIG ?=
+KUBERNETES_CONTEXT ?=
+KUBERNETES_CONFIRM ?= false
+KUBERNETES_TIMEOUT ?= 10m
+KUBERNETES_CONNECTION_TIMEOUT ?= 30
+K3S_LIMIT ?= k3s_nodes
+K3S_ACTION ?= preflight
+K3S_CONFIRM ?= false
+K3S_NODE_ROLE ?= server
+K3S_VERSION ?=
+K3S_INSTALL_URL ?= https://get.k3s.io
+K3S_INSTALL_CHECKSUM ?=
+K3S_BOOTSTRAP_HOST ?=
+K3S_SERVER_URL ?=
+K3S_TIMEOUT ?= 120
+RKE2_LIMIT ?= rke2_nodes
+RKE2_ACTION ?= preflight
+RKE2_CONFIRM ?= false
+RKE2_NODE_ROLE ?= server
+RKE2_VERSION ?=
+RKE2_INSTALL_URL ?= https://get.rke2.io
+RKE2_INSTALL_CHECKSUM ?=
+RKE2_BOOTSTRAP_HOST ?=
+RKE2_SERVER_URL ?=
+RKE2_TIMEOUT ?= 120
+MICROK8S_LIMIT ?= microk8s_nodes
+MICROK8S_ACTION ?= preflight
+MICROK8S_CONFIRM ?= false
+MICROK8S_NODE_ROLE ?= primary
+MICROK8S_PRIMARY_HOST ?=
+MICROK8S_CHANNEL ?=
+MICROK8S_JOIN_ENDPOINT ?=
+MICROK8S_TIMEOUT ?= 120
+KUBESPRAY_ACTION ?= preflight
+KUBESPRAY_DIRECTORY ?=
+KUBESPRAY_INVENTORY ?=
+KUBESPRAY_CONFIRM ?= false
+KUBESPRAY_TIMEOUT ?= 120
+KUBEONE_ACTION ?= preflight
+KUBEONE_MANIFEST ?=
+KUBEONE_CONFIRM ?= false
+KUBEONE_TIMEOUT ?= 120
+GARDENER_ACTION ?= preflight
+GARDENER_GARDEN ?=
+GARDENER_PROJECT ?=
+GARDENER_SHOOT ?=
+GARDENER_KUBECONFIG_DESTINATION ?=
+GARDENER_CONFIRM ?= false
+GARDENER_TIMEOUT ?= 120
+
+.PHONY: docker-ha docker-ha-ask-become-pass podman-ha podman-ha-ask-become-pass kubernetes k3s-app rke2-app microk8s-app okd-app kubespray-app kubeone-app gardener-app k3s k3s-ask-become-pass rke2 rke2-ask-become-pass microk8s microk8s-ask-become-pass kubespray kubeone gardener test-optional-platform-guardrails test-helm-chart
+
 controller-bootstrap:
 	bash scripts/bootstrap-controller.sh
 
@@ -76,7 +143,7 @@ inventory-check:
 github-governance-check:
 	python3 scripts/ci-github-governance-check.py --branch main
 
-ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails
+ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails
 
 test-controller-collection-bootstrap:
 	bash tests/unit/test-controller-collection-bootstrap.sh
@@ -143,6 +210,12 @@ test-github-governance-guardrails:
 
 test-docker-ha-galera-config:
 	bash tests/unit/test-docker-ha-galera-config.sh
+
+test-optional-platform-guardrails:
+	bash tests/unit/test-optional-platform-guardrails.sh
+
+test-helm-chart:
+	bash tests/unit/test-helm-chart.sh
 
 integration-platform-runtime:
 	docker compose build ansible
@@ -325,6 +398,109 @@ awx-controller:
 
 awx-bootstrap:
 	$(ANSIBLE_PLAYBOOK) -i $(AWX_INVENTORY) playbooks/awx-bootstrap.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+# Optional container profiles. The target is intentionally separate from
+# site/standalone so a container experiment cannot touch the HA VM inventory.
+docker-ha:
+	@test -n "$(CONTAINER_PLATFORM_LIMIT)" || (echo "Refusing Docker profile: set CONTAINER_PLATFORM_LIMIT" && exit 2)
+	@test "$(CONTAINER_PLATFORM_ACTION)" = "preflight" || test "$(CONTAINER_PLATFORM_ACTION)" = "status" || test "$(CONTAINER_PLATFORM_CONFIRM)" = "true" || (echo "Refusing Docker profile mutation: set CONTAINER_PLATFORM_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/docker.yml --limit "$(CONTAINER_PLATFORM_LIMIT)" --forks 1 -e "librenms_container_action=$(CONTAINER_PLATFORM_ACTION)" -e "librenms_container_confirm=$(CONTAINER_PLATFORM_CONFIRM)" -e "librenms_container_become=$(CONTAINER_PLATFORM_BECOME)" -e "librenms_container_examples_root=$(CONTAINER_PLATFORM_EXAMPLES_ROOT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+docker-ha-ask-become-pass:
+	@test -n "$(CONTAINER_PLATFORM_LIMIT)" || (echo "Refusing Docker profile: set CONTAINER_PLATFORM_LIMIT" && exit 2)
+	@test "$(CONTAINER_PLATFORM_ACTION)" = "preflight" || test "$(CONTAINER_PLATFORM_ACTION)" = "status" || test "$(CONTAINER_PLATFORM_CONFIRM)" = "true" || (echo "Refusing Docker profile mutation: set CONTAINER_PLATFORM_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/docker.yml --ask-become-pass --become-method sudo --limit "$(CONTAINER_PLATFORM_LIMIT)" --forks 1 -e "librenms_container_action=$(CONTAINER_PLATFORM_ACTION)" -e "librenms_container_confirm=$(CONTAINER_PLATFORM_CONFIRM)" -e librenms_container_become=true -e "librenms_container_examples_root=$(CONTAINER_PLATFORM_EXAMPLES_ROOT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+podman-ha:
+	@test -n "$(CONTAINER_PLATFORM_LIMIT)" || (echo "Refusing Podman profile: set CONTAINER_PLATFORM_LIMIT" && exit 2)
+	@test "$(CONTAINER_PLATFORM_ACTION)" = "preflight" || test "$(CONTAINER_PLATFORM_ACTION)" = "status" || test "$(CONTAINER_PLATFORM_CONFIRM)" = "true" || (echo "Refusing Podman profile mutation: set CONTAINER_PLATFORM_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/podman.yml --limit "$(CONTAINER_PLATFORM_LIMIT)" --forks 1 -e "librenms_container_action=$(CONTAINER_PLATFORM_ACTION)" -e "librenms_container_confirm=$(CONTAINER_PLATFORM_CONFIRM)" -e "librenms_container_become=$(CONTAINER_PLATFORM_BECOME)" -e "librenms_container_examples_root=$(CONTAINER_PLATFORM_EXAMPLES_ROOT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+podman-ha-ask-become-pass:
+	@test -n "$(CONTAINER_PLATFORM_LIMIT)" || (echo "Refusing Podman profile: set CONTAINER_PLATFORM_LIMIT" && exit 2)
+	@test "$(CONTAINER_PLATFORM_ACTION)" = "preflight" || test "$(CONTAINER_PLATFORM_ACTION)" = "status" || test "$(CONTAINER_PLATFORM_CONFIRM)" = "true" || (echo "Refusing Podman profile mutation: set CONTAINER_PLATFORM_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/podman.yml --ask-become-pass --become-method sudo --limit "$(CONTAINER_PLATFORM_LIMIT)" --forks 1 -e "librenms_container_action=$(CONTAINER_PLATFORM_ACTION)" -e "librenms_container_confirm=$(CONTAINER_PLATFORM_CONFIRM)" -e librenms_container_become=true -e "librenms_container_examples_root=$(CONTAINER_PLATFORM_EXAMPLES_ROOT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+# Optional Kubernetes application profile. Kubeconfig and values files are
+# local to the controller; the chart never joins the package-based site role.
+kubernetes:
+	@test -n "$(KUBERNETES_VALUES_FILE)" || (echo "Refusing Kubernetes profile: set KUBERNETES_VALUES_FILE" && exit 2)
+	@test "$(KUBERNETES_ACTION)" = "preflight" || test "$(KUBERNETES_ACTION)" = "status" || test "$(KUBERNETES_CONFIRM)" = "true" || (echo "Refusing Kubernetes mutation: set KUBERNETES_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/$(KUBERNETES_PLAYBOOK) --limit "$(KUBERNETES_LIMIT)" --timeout $(KUBERNETES_CONNECTION_TIMEOUT) --forks 1 -e "librenms_kubernetes_action=$(KUBERNETES_ACTION)" -e "librenms_kubernetes_platform=$(KUBERNETES_PLATFORM)" -e "librenms_kubernetes_confirm=$(KUBERNETES_CONFIRM)" -e "librenms_kubernetes_values_file=$(KUBERNETES_VALUES_FILE)" -e "librenms_kubernetes_namespace=$(KUBERNETES_NAMESPACE)" -e "librenms_kubernetes_release=$(KUBERNETES_RELEASE)" -e "librenms_kubernetes_timeout=$(KUBERNETES_TIMEOUT)" -e "librenms_kubernetes_kubeconfig=$(KUBERNETES_KUBECONFIG)" -e "librenms_kubernetes_context=$(KUBERNETES_CONTEXT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+k3s-app: KUBERNETES_PLATFORM := k3s
+k3s-app: kubernetes
+
+rke2-app: KUBERNETES_PLATFORM := rke2
+rke2-app: kubernetes
+
+microk8s-app: KUBERNETES_PLATFORM := microk8s
+microk8s-app: kubernetes
+
+okd-app: KUBERNETES_PLATFORM := okd
+okd-app: KUBERNETES_PLAYBOOK := okd.yml
+okd-app: kubernetes
+
+kubespray-app: KUBERNETES_PLATFORM := kubespray
+kubespray-app: kubernetes
+
+kubeone-app: KUBERNETES_PLATFORM := kubeone
+kubeone-app: kubernetes
+
+gardener-app: KUBERNETES_PLATFORM := gardener
+gardener-app: kubernetes
+
+# k3s and RKE2 install only a reviewed, checksum-pinned installer. Tokens are
+# deliberately not Make variables; supply them through an Ansible Vault file.
+k3s:
+	@test -n "$(K3S_LIMIT)" || (echo "Refusing k3s action: set K3S_LIMIT" && exit 2)
+	@test "$(K3S_ACTION)" = "preflight" || test "$(K3S_ACTION)" = "status" || test "$(K3S_CONFIRM)" = "true" || (echo "Refusing k3s mutation: set K3S_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/k3s.yml --limit "$(K3S_LIMIT)" --timeout $(K3S_TIMEOUT) --forks 1 -e "librenms_k3s_action=$(K3S_ACTION)" -e "librenms_k3s_confirm=$(K3S_CONFIRM)" -e "librenms_k3s_node_role=$(K3S_NODE_ROLE)" -e "librenms_k3s_version=$(K3S_VERSION)" -e "librenms_k3s_install_url=$(K3S_INSTALL_URL)" -e "librenms_k3s_install_checksum=$(K3S_INSTALL_CHECKSUM)" -e "librenms_k3s_bootstrap_host=$(K3S_BOOTSTRAP_HOST)" -e "librenms_k3s_server_url=$(K3S_SERVER_URL)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+k3s-ask-become-pass:
+	@test -n "$(K3S_LIMIT)" || (echo "Refusing k3s action: set K3S_LIMIT" && exit 2)
+	@test "$(K3S_ACTION)" = "preflight" || test "$(K3S_ACTION)" = "status" || test "$(K3S_CONFIRM)" = "true" || (echo "Refusing k3s mutation: set K3S_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/k3s.yml --ask-become-pass --become-method sudo --limit "$(K3S_LIMIT)" --timeout $(K3S_TIMEOUT) --forks 1 -e "librenms_k3s_action=$(K3S_ACTION)" -e "librenms_k3s_confirm=$(K3S_CONFIRM)" -e "librenms_k3s_node_role=$(K3S_NODE_ROLE)" -e "librenms_k3s_version=$(K3S_VERSION)" -e "librenms_k3s_install_url=$(K3S_INSTALL_URL)" -e "librenms_k3s_install_checksum=$(K3S_INSTALL_CHECKSUM)" -e "librenms_k3s_bootstrap_host=$(K3S_BOOTSTRAP_HOST)" -e "librenms_k3s_server_url=$(K3S_SERVER_URL)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+rke2:
+	@test -n "$(RKE2_LIMIT)" || (echo "Refusing RKE2 action: set RKE2_LIMIT" && exit 2)
+	@test "$(RKE2_ACTION)" = "preflight" || test "$(RKE2_ACTION)" = "status" || test "$(RKE2_CONFIRM)" = "true" || (echo "Refusing RKE2 mutation: set RKE2_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/rke2.yml --limit "$(RKE2_LIMIT)" --timeout $(RKE2_TIMEOUT) --forks 1 -e "librenms_rke2_action=$(RKE2_ACTION)" -e "librenms_rke2_confirm=$(RKE2_CONFIRM)" -e "librenms_rke2_node_role=$(RKE2_NODE_ROLE)" -e "librenms_rke2_version=$(RKE2_VERSION)" -e "librenms_rke2_install_url=$(RKE2_INSTALL_URL)" -e "librenms_rke2_install_checksum=$(RKE2_INSTALL_CHECKSUM)" -e "librenms_rke2_bootstrap_host=$(RKE2_BOOTSTRAP_HOST)" -e "librenms_rke2_server_url=$(RKE2_SERVER_URL)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+rke2-ask-become-pass:
+	@test -n "$(RKE2_LIMIT)" || (echo "Refusing RKE2 action: set RKE2_LIMIT" && exit 2)
+	@test "$(RKE2_ACTION)" = "preflight" || test "$(RKE2_ACTION)" = "status" || test "$(RKE2_CONFIRM)" = "true" || (echo "Refusing RKE2 mutation: set RKE2_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/rke2.yml --ask-become-pass --become-method sudo --limit "$(RKE2_LIMIT)" --timeout $(RKE2_TIMEOUT) --forks 1 -e "librenms_rke2_action=$(RKE2_ACTION)" -e "librenms_rke2_confirm=$(RKE2_CONFIRM)" -e "librenms_rke2_node_role=$(RKE2_NODE_ROLE)" -e "librenms_rke2_version=$(RKE2_VERSION)" -e "librenms_rke2_install_url=$(RKE2_INSTALL_URL)" -e "librenms_rke2_install_checksum=$(RKE2_INSTALL_CHECKSUM)" -e "librenms_rke2_bootstrap_host=$(RKE2_BOOTSTRAP_HOST)" -e "librenms_rke2_server_url=$(RKE2_SERVER_URL)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+microk8s:
+	@test -n "$(MICROK8S_LIMIT)" || (echo "Refusing MicroK8s action: set MICROK8S_LIMIT" && exit 2)
+	@test "$(MICROK8S_ACTION)" = "preflight" || test "$(MICROK8S_ACTION)" = "status" || test "$(MICROK8S_CONFIRM)" = "true" || (echo "Refusing MicroK8s mutation: set MICROK8S_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/microk8s.yml --limit "$(MICROK8S_LIMIT)" --timeout $(MICROK8S_TIMEOUT) --forks 1 -e "librenms_microk8s_action=$(MICROK8S_ACTION)" -e "librenms_microk8s_confirm=$(MICROK8S_CONFIRM)" -e "librenms_microk8s_node_role=$(MICROK8S_NODE_ROLE)" -e "librenms_microk8s_primary_host=$(MICROK8S_PRIMARY_HOST)" -e "librenms_microk8s_channel=$(MICROK8S_CHANNEL)" -e "librenms_microk8s_join_endpoint=$(MICROK8S_JOIN_ENDPOINT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+microk8s-ask-become-pass:
+	@test -n "$(MICROK8S_LIMIT)" || (echo "Refusing MicroK8s action: set MICROK8S_LIMIT" && exit 2)
+	@test "$(MICROK8S_ACTION)" = "preflight" || test "$(MICROK8S_ACTION)" = "status" || test "$(MICROK8S_CONFIRM)" = "true" || (echo "Refusing MicroK8s mutation: set MICROK8S_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/microk8s.yml --ask-become-pass --become-method sudo --limit "$(MICROK8S_LIMIT)" --timeout $(MICROK8S_TIMEOUT) --forks 1 -e "librenms_microk8s_action=$(MICROK8S_ACTION)" -e "librenms_microk8s_confirm=$(MICROK8S_CONFIRM)" -e "librenms_microk8s_node_role=$(MICROK8S_NODE_ROLE)" -e "librenms_microk8s_primary_host=$(MICROK8S_PRIMARY_HOST)" -e "librenms_microk8s_channel=$(MICROK8S_CHANNEL)" -e "librenms_microk8s_join_endpoint=$(MICROK8S_JOIN_ENDPOINT)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+kubespray:
+	@test -n "$(KUBESPRAY_DIRECTORY)" || (echo "Refusing Kubespray action: set KUBESPRAY_DIRECTORY" && exit 2)
+	@test -n "$(KUBESPRAY_INVENTORY)" || (echo "Refusing Kubespray action: set KUBESPRAY_INVENTORY" && exit 2)
+	@test "$(KUBESPRAY_ACTION)" = "preflight" || test "$(KUBESPRAY_ACTION)" = "plan" || test "$(KUBESPRAY_CONFIRM)" = "true" || (echo "Refusing Kubespray mutation: set KUBESPRAY_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/kubespray.yml --limit localhost --timeout $(KUBESPRAY_TIMEOUT) --forks 1 -e "librenms_kubespray_action=$(KUBESPRAY_ACTION)" -e "librenms_kubespray_confirm=$(KUBESPRAY_CONFIRM)" -e "librenms_kubespray_directory=$(KUBESPRAY_DIRECTORY)" -e "librenms_kubespray_inventory=$(KUBESPRAY_INVENTORY)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+kubeone:
+	@test -n "$(KUBEONE_MANIFEST)" || (echo "Refusing KubeOne action: set KUBEONE_MANIFEST" && exit 2)
+	@test "$(KUBEONE_ACTION)" = "preflight" || test "$(KUBEONE_ACTION)" = "plan" || test "$(KUBEONE_CONFIRM)" = "true" || (echo "Refusing KubeOne mutation: set KUBEONE_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/kubeone.yml --limit localhost --timeout $(KUBEONE_TIMEOUT) --forks 1 -e "librenms_kubeone_action=$(KUBEONE_ACTION)" -e "librenms_kubeone_confirm=$(KUBEONE_CONFIRM)" -e "librenms_kubeone_manifest=$(KUBEONE_MANIFEST)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+gardener:
+	@test "$(GARDENER_ACTION)" = "preflight" || test "$(GARDENER_ACTION)" = "status" || test "$(GARDENER_ACTION)" = "kubeconfig" || (echo "Refusing Gardener action: use preflight, status, or kubeconfig" && exit 2)
+	@test "$(GARDENER_ACTION)" = "preflight" || test -n "$(GARDENER_GARDEN)" || (echo "Refusing Gardener action: set GARDENER_GARDEN" && exit 2)
+	@test "$(GARDENER_ACTION)" = "preflight" || test -n "$(GARDENER_PROJECT)" || (echo "Refusing Gardener action: set GARDENER_PROJECT" && exit 2)
+	@test "$(GARDENER_ACTION)" = "preflight" || test -n "$(GARDENER_SHOOT)" || (echo "Refusing Gardener action: set GARDENER_SHOOT" && exit 2)
+	@test "$(GARDENER_ACTION)" != "kubeconfig" || test -n "$(GARDENER_KUBECONFIG_DESTINATION)" || (echo "Refusing Gardener kubeconfig export: set GARDENER_KUBECONFIG_DESTINATION" && exit 2)
+	@test "$(GARDENER_ACTION)" != "kubeconfig" || test "$(GARDENER_CONFIRM)" = "true" || (echo "Refusing Gardener kubeconfig export: set GARDENER_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(PLATFORM_INVENTORY) playbooks/gardener.yml --limit localhost --timeout $(GARDENER_TIMEOUT) --forks 1 -e "librenms_gardener_action=$(GARDENER_ACTION)" -e "librenms_gardener_confirm=$(GARDENER_CONFIRM)" -e "librenms_gardener_garden=$(GARDENER_GARDEN)" -e "librenms_gardener_project=$(GARDENER_PROJECT)" -e "librenms_gardener_shoot=$(GARDENER_SHOOT)" -e "librenms_gardener_kubeconfig_destination=$(GARDENER_KUBECONFIG_DESTINATION)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 docker-build:
 	docker compose build ansible

@@ -1,0 +1,9 @@
+---
+- name: Manage the optional k3s cluster adapter
+  hosts: k3s_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: k3s_platform
