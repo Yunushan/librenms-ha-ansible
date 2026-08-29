@@ -65,6 +65,9 @@ librenms_supported_distribution_min_versions:
     "22": "22.04"
     "24": "24.04"
     "26": "26.04"
+  Debian:
+    "12": "12.0"
+    "13": "13.0"
   RedHat:
     "8": "8.10"
     "9": "9.4"
@@ -81,6 +84,46 @@ librenms_supported_distribution_min_versions:
     "8": "8.10"
     "9": "9.4"
     "10": "10.0"
+
+# Major release upgrades are deliberately a separate, operator-confirmed
+# workflow. The normal site playbook never invokes a vendor upgrade command or
+# reboots a node.
+librenms_os_upgrade_action: preflight
+librenms_os_upgrade_target_distribution: ""
+librenms_os_upgrade_target_major: ""
+librenms_os_upgrade_confirm: false
+librenms_os_upgrade_execute_command: false
+librenms_os_upgrade_command: ""
+librenms_os_upgrade_reboot: false
+librenms_os_upgrade_supported_transitions:
+  Ubuntu:
+    "22":
+      - "24"
+    "24":
+      - "26"
+  Debian:
+    "12":
+      - "13"
+  RedHat:
+    "8":
+      - "9"
+    "9":
+      - "10"
+  "Red Hat Enterprise Linux":
+    "8":
+      - "9"
+    "9":
+      - "10"
+  Rocky:
+    "8":
+      - "9"
+    "9":
+      - "10"
+  AlmaLinux:
+    "8":
+      - "9"
+    "9":
+      - "10"
 librenms_managed_python_root: /opt/librenms-ha-ansible/python
 librenms_managed_python_binary: "{{ librenms_managed_python_root }}/bin/python"
 librenms_runtime_python_executable: "{{ librenms_managed_python_binary }}"
@@ -424,6 +467,21 @@ librenms_bash_completion_dir: /etc/bash_completion.d
 librenms_logrotate_path: /etc/logrotate.d/librenms
 librenms_nginx_server_aliases: []
 
+# Keep distribution packages as the default. The official Nginx repository is
+# opt-in and requires an operator-pinned signing-key fingerprint before it can
+# be enabled. Package versions are optional exact package-manager versions.
+librenms_nginx_repository_mode: distro
+librenms_nginx_channel: distro
+librenms_nginx_package_version: ""
+librenms_nginx_package_state: present
+librenms_nginx_expected_series: ""
+librenms_nginx_official_repository_key_url: https://nginx.org/keys/nginx_signing.key
+librenms_nginx_official_repository_key_fingerprint: ""
+librenms_nginx_official_repository_keyring: /etc/apt/keyrings/nginx.asc
+librenms_nginx_official_repository_source_file: /etc/apt/sources.list.d/nginx.sources
+librenms_nginx_official_repository_key_path: /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx
+librenms_nginx_official_repository_file: /etc/yum.repos.d/nginx.repo
+
 librenms_initial_admin_username: ""
 librenms_initial_admin_password: ""
 librenms_initial_admin_email: ""
@@ -445,6 +503,9 @@ librenms_db_bootstrap_host: "{{ (groups.get('librenms_db', [inventory_hostname])
 # remain explicit because changing this value is not an in-place upgrade switch.
 librenms_mariadb_repository_mode: distro
 librenms_mariadb_upstream_series: ""
+librenms_mariadb_selection_mode: distro
+librenms_mariadb_selected_series: ""
+librenms_mariadb_lts_series: "11.8"
 librenms_mariadb_upstream_supported_series:
   - "11.4"
   - "11.8"
@@ -1082,6 +1143,17 @@ librenms_ubuntu_php_version: "8.3"
 # Empty preserves the distro-native stream on Ubuntu 24.04/26.04. Supported
 # explicit streams are the versions listed in librenms_supported_php_versions.
 librenms_ubuntu_php_version_override: ""
+# PHP selection is distro-native by default. `specific` selects the requested
+# stream, while `latest` updates the configured PHP package set within the
+# enabled repository policy.
+librenms_php_selection_mode: distro
+librenms_php_version: ""
+librenms_debian_php_repository_enabled: false
+librenms_debian_php_repository_uri: https://packages.sury.org/php/
+librenms_debian_php_repository_key_url: https://packages.sury.org/php/apt.gpg
+librenms_debian_php_repository_key_fingerprint: ""
+librenms_debian_php_repository_keyring: /etc/apt/keyrings/sury-php.asc
+librenms_debian_php_repository_source_file: /etc/apt/sources.list.d/sury-php.sources
 librenms_redhat_enable_epel: true
 librenms_redhat_enable_remi: false
 # RHEL-family 8/9 can opt into PHP 8.4 or 8.5 through a reviewed Remi release
@@ -1092,6 +1164,21 @@ librenms_redhat_mariadb_stream: "10.11"
 # The supported RHEL-family database contract is the vendor 10.11 stream.
 # Newer vendor streams need a separate Galera upgrade and rollback validation.
 librenms_redhat_mariadb_expected_series: "10.11"
+librenms_redhat_mariadb_supported_streams:
+  - "10.11"
+  - "11.8"
+# Native EL module/package availability is not identical across EL majors.
+# Keep the safe default explicit so selecting a newer stream cannot silently
+# turn into an unsupported RHEL 8 transaction.
+librenms_redhat_mariadb_supported_streams_by_major:
+  "8":
+    - "10.11"
+  "9":
+    - "10.11"
+    - "11.8"
+  "10":
+    - "10.11"
+    - "11.8"
 librenms_redhat_enable_builder_repository: true
 # Prefer the distribution's subscription-manager CLI for exact RHEL. The
 # Ansible RHSM module remains the fallback for environments that expose the

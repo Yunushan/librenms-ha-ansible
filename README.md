@@ -41,6 +41,11 @@ CIDRs and HAProxy TLS. The readiness gate then fails closed when either control
 is missing; the exact inventory example and verification sequence are in
 [docs/operations.md](docs/operations.md#declare-the-production-profile).
 
+For guarded OS release preflight and explicit Nginx or MariaDB version
+selection, see [docs/upgrades.md](docs/upgrades.md). The workflows are
+one-node-at-a-time and do not turn normal `site.yml` convergence into an
+unattended OS or Galera major upgrade.
+
 ---
 
 ## Why This Exists
@@ -429,11 +434,12 @@ make diagnostics PLAYBOOK_FLAGS=--ask-become-pass
 
 ## Major OS Upgrades on Existing Nodes
 
-Major distro upgrades are intentionally not automated by this playbook. The
-playbook can re-converge packages, config files, services, timers, HAProxy,
-Keepalived, MariaDB/Galera, Redis/Sentinel, GlusterFS, and LibreNMS after a node
-comes back, but the actual OS release upgrade must be handled with the vendor's
-upgrade tooling and a maintenance plan.
+Use the guarded, one-node-at-a-time workflow in
+[docs/upgrades.md](docs/upgrades.md#operating-system-releases). It validates
+supported adjacent releases and can run an explicitly supplied vendor command,
+but the vendor's release tool, console access, reboot, backup, and rollback
+process remain operator-controlled. Normal `site.yml` convergence still only
+reconciles a node after it returns.
 
 For production HA clusters, upgrade one node at a time. Do not upgrade all
 nodes together unless you have accepted a full outage and have verified backups.

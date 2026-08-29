@@ -1,38 +1,138 @@
 ---
+- name: Resolve the RedHat repository component scope
+  ansible.builtin.set_fact:
+    librenms_redhat_repo_components_effective: >-
+      {{ librenms_redhat_repo_components | default(['php', 'mariadb'], true) }}
+
+- name: Resolve RHEL-family runtime selectors
+  ansible.builtin.set_fact:
+    librenms_redhat_php_stream_effective: >-
+      {{
+        librenms_php_version | string | trim
+        if librenms_php_selection_mode == 'specific'
+        else librenms_redhat_php_stream | string
+      }}
+    librenms_redhat_mariadb_stream_effective: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_redhat_mariadb_stream | string
+      }}
+    librenms_redhat_mariadb_expected_series_effective: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_redhat_mariadb_expected_series | string | trim
+      }}
+
 - name: Validate the supported RHEL-family MariaDB stream
   ansible.builtin.assert:
     that:
-      - librenms_redhat_mariadb_stream | string == '10.11'
-      - librenms_redhat_mariadb_expected_series | string == '10.11'
+      - librenms_redhat_mariadb_stream_effective in librenms_redhat_mariadb_supported_streams
+      - >-
+        librenms_redhat_mariadb_stream_effective in
+        librenms_redhat_mariadb_supported_streams_by_major.get(
+          ansible_facts.distribution_major_version | string, []
+        )
+      - >-
+        librenms_redhat_mariadb_expected_series_effective
+        == librenms_redhat_mariadb_stream_effective
     fail_msg: >-
-      This production RHEL-family profile is pinned to MariaDB 10.11, including
-      the vendor Galera package set. RHEL 9/10 may expose newer MariaDB streams,
-      but this role does not silently select or certify them. Use a separate
-      version-specific Galera upgrade and rollback workflow before changing
-      librenms_redhat_mariadb_stream.
+      This production RHEL-family profile supports only the explicitly declared
+      MariaDB streams {{ librenms_redhat_mariadb_supported_streams | join(', ') }}.
+      The selected stream is {{ librenms_redhat_mariadb_stream_effective }} and
+      the expected installed series is
+      {{ librenms_redhat_mariadb_expected_series_effective }}. Newer streams
+      require a separately validated Galera provider, upgrade, and rollback
+      workflow before they can be used on RHEL-family hosts.
   when:
     - >-
       ansible_facts.distribution in [
         'RedHat', 'Red Hat Enterprise Linux', 'Rocky', 'AlmaLinux', 'CentOS'
       ]
     - librenms_db_mode in ['local', 'galera']
+    - "'mariadb' in librenms_redhat_repo_components_effective"
+
+- name: Read installed MariaDB series before changing the EL module stream
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --version
+  register: librenms_redhat_mariadb_version_before_stream_change
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_facts.distribution in [
+        'RedHat', 'Red Hat Enterprise Linux', 'Rocky', 'AlmaLinux', 'CentOS'
+      ]
+    - librenms_db_mode in ['local', 'galera']
+    - "'mariadb' in librenms_redhat_repo_components_effective"
+
+- name: Determine installed EL MariaDB series before changing the module stream
+  ansible.builtin.set_fact:
+    librenms_redhat_mariadb_installed_series_before_stream_change: >-
+      {{
+        librenms_redhat_mariadb_version_before_stream_change.stdout
+        | default('')
+        | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
+        | first
+        | default('')
+      }}
+  when:
+    - ansible_facts.distribution in [
+        'RedHat', 'Red Hat Enterprise Linux', 'Rocky', 'AlmaLinux', 'CentOS'
+      ]
+    - librenms_db_mode in ['local', 'galera']
+    - "'mariadb' in librenms_redhat_repo_components_effective"
+
+- name: Refuse an installed EL MariaDB major stream change during convergence
+  ansible.builtin.assert:
+    that:
+      - >-
+        librenms_redhat_mariadb_installed_series_before_stream_change | length == 0
+        or librenms_redhat_mariadb_installed_series_before_stream_change
+        == librenms_redhat_mariadb_expected_series_effective
+    fail_msg: >-
+      Refusing to change the installed EL MariaDB series from
+      {{ librenms_redhat_mariadb_installed_series_before_stream_change }} to
+      {{ librenms_redhat_mariadb_expected_series_effective }} during ordinary
+      convergence. Complete the dedicated MariaDB upgrade preflight, backup,
+      node-by-node Galera plan, and rollback review first.
+  when:
+    - ansible_facts.distribution in [
+        'RedHat', 'Red Hat Enterprise Linux', 'Rocky', 'AlmaLinux', 'CentOS'
+      ]
+    - librenms_db_mode in ['local', 'galera']
+    - "'mariadb' in librenms_redhat_repo_components_effective"
+    - >-
+      librenms_redhat_mariadb_installed_series_before_stream_change | default('')
+      | length > 0
+    - >-
+      librenms_redhat_mariadb_installed_series_before_stream_change
+      != librenms_redhat_mariadb_expected_series_effective
 
 - name: Validate the supported RHEL-family PHP stream
   ansible.builtin.assert:
     that:
-      - librenms_redhat_php_stream | string in librenms_supported_php_versions
+      - librenms_redhat_php_stream_effective in librenms_supported_php_versions
       - >-
         (ansible_facts.distribution_major_version | int) >= 10
-        or librenms_redhat_php_stream | string in ['8.2', '8.3']
+        or librenms_redhat_php_stream_effective in ['8.2', '8.3']
         or (
           librenms_redhat_enable_remi | bool
           and (ansible_facts.distribution_major_version | int) < 10
         )
     fail_msg: >-
-      PHP {{ librenms_redhat_php_stream }} is not available from the selected
+      PHP {{ librenms_redhat_php_stream_effective }} is not available from the selected
       RHEL-family repositories. PHP 8.4 and 8.5 require the explicitly enabled
       Remi repository and a reviewed release RPM on EL8/9; EL10 uses its native
       PHP packages and validates the installed runtime instead.
+  when:
+    - "'php' in librenms_redhat_repo_components_effective"
 
 - name: Install DNF repository management tooling
   ansible.builtin.package:
@@ -248,7 +348,9 @@
       HTTPS release RPM in librenms_redhat_remi_release_url. RHEL-family 10
       uses its native PHP packages and does not use this compatibility path;
       select a native PHP stream there instead.
-  when: librenms_redhat_enable_remi | bool
+  when:
+    - librenms_redhat_enable_remi | bool
+    - "'php' in librenms_redhat_repo_components_effective"
 
 - name: Install optional signed Remi repository package
   ansible.builtin.command:
@@ -262,7 +364,9 @@
     'Nothing to do' not in
     ((librenms_redhat_remi_install.stdout | default('')) ~
     (librenms_redhat_remi_install.stderr | default('')))
-  when: librenms_redhat_enable_remi | bool
+  when:
+    - librenms_redhat_enable_remi | bool
+    - "'php' in librenms_redhat_repo_components_effective"
 
 - name: Reset PHP module before selecting the supported stream
   ansible.builtin.command:
@@ -276,6 +380,7 @@
   when:
     - ansible_facts.distribution != 'Fedora'
     - (ansible_facts.distribution_major_version | int) < 10
+    - "'php' in librenms_redhat_repo_components_effective"
 
 - name: Enable supported PHP module stream
   ansible.builtin.command:
@@ -286,14 +391,15 @@
       - enable
       - >-
         php:{{
-          ('remi-' ~ librenms_redhat_php_stream)
+          ('remi-' ~ librenms_redhat_php_stream_effective)
           if librenms_redhat_enable_remi | bool
-          else librenms_redhat_php_stream
+          else librenms_redhat_php_stream_effective
         }}
   changed_when: false
   when:
     - ansible_facts.distribution != 'Fedora'
     - (ansible_facts.distribution_major_version | int) < 10
+    - "'php' in librenms_redhat_repo_components_effective"
 
 - name: Reset MariaDB module before selecting the supported stream
   ansible.builtin.command:
@@ -307,6 +413,7 @@
   when:
     - ansible_facts.distribution != 'Fedora'
     - (ansible_facts.distribution_major_version | int) < 10
+    - "'mariadb' in librenms_redhat_repo_components_effective"
 
 - name: Enable supported MariaDB module stream
   ansible.builtin.command:
@@ -315,8 +422,9 @@
       - -y
       - module
       - enable
-      - "mariadb:{{ librenms_redhat_mariadb_stream }}"
+      - "mariadb:{{ librenms_redhat_mariadb_stream_effective }}"
   changed_when: false
   when:
     - ansible_facts.distribution != 'Fedora'
     - (ansible_facts.distribution_major_version | int) < 10
+    - "'mariadb' in librenms_redhat_repo_components_effective"

@@ -1,0 +1,5 @@
+---
+# OS release tooling is operator-controlled, but it must still run only against
+# a node that has been drained by the repository maintenance workflow.
+librenms_os_upgrade_require_maintenance: true
+librenms_os_upgrade_maintenance_marker_path: /var/lib/librenms-ha-ansible/maintenance

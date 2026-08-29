@@ -20,6 +20,10 @@ for symptom-driven triage before rerunning broader convergence playbooks.
 When you only need to choose the right command, use
 [command-map.md](command-map.md).
 
+For OS release preflight and explicit Nginx or MariaDB version selection, use
+[upgrades.md](upgrades.md). Those workflows require one host at a time and do
+not perform an implicit Galera major-version upgrade during `site.yml`.
+
 For ticket-friendly step lists, use
 [operator-checklists.md](operator-checklists.md) alongside this runbook.
 
@@ -790,9 +794,10 @@ devices instead of running SQL by hand.
 
 ### Rolling major OS upgrades
 
-Major OS release upgrades are not automated by this repo. For Ubuntu, Debian,
-and other distros, use the vendor-supported upgrade path on one node at a time,
-then use Ansible to re-converge the node and prove the cluster is healthy.
+Use the guarded workflow in [upgrades.md](upgrades.md#operating-system-releases)
+for the supported adjacent-release preflight. The repository does not embed a
+distro-specific unattended upgrade: the vendor tool and reboot remain under
+operator control, and Ansible re-converges the node afterward.
 
 For each node:
 

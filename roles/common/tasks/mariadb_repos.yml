@@ -1,0 +1,65 @@
+---
+- name: Ensure MariaDB upstream repository state directory exists
+  ansible.builtin.file:
+    path: "{{ librenms_mariadb_upstream_state_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+
+- name: Read configured MariaDB upstream series
+  ansible.builtin.slurp:
+    src: "{{ librenms_mariadb_upstream_state_path }}"
+  register: librenms_mariadb_upstream_state
+  failed_when: false
+  changed_when: false
+  when:
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+
+- name: Determine whether MariaDB upstream repository needs configuration
+  ansible.builtin.set_fact:
+    librenms_mariadb_upstream_repository_needs_update: >-
+      {{
+        (librenms_mariadb_upstream_state.content | default('') | b64decode | trim)
+        != librenms_mariadb_upstream_series_effective
+      }}
+  when:
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+
+- name: Download MariaDB upstream repository setup script
+  ansible.builtin.get_url:
+    url: "{{ librenms_mariadb_upstream_repo_setup_url }}"
+    dest: "{{ librenms_mariadb_upstream_repo_setup_path }}"
+    checksum: "{{ librenms_mariadb_upstream_repo_setup_checksum }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+    - librenms_mariadb_upstream_repository_needs_update | bool
+
+- name: Configure MariaDB upstream repository
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_mariadb_upstream_repo_setup_path }}"
+      - "--mariadb-server-version=mariadb-{{ librenms_mariadb_upstream_series_effective }}"
+      - --skip-maxscale
+      - --skip-tools
+  register: librenms_mariadb_upstream_repository_configure
+  changed_when: true
+  when:
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+    - librenms_mariadb_upstream_repository_needs_update | bool
+
+- name: Record configured MariaDB upstream series
+  ansible.builtin.copy:
+    content: "{{ librenms_mariadb_upstream_series_effective }}\n"
+    dest: "{{ librenms_mariadb_upstream_state_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+    - librenms_mariadb_upstream_repository_needs_update | bool

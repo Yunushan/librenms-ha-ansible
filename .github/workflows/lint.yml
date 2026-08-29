@@ -120,6 +120,9 @@ jobs:
       - name: Test MariaDB series guardrails
         run: make test-mariadb-series-guardrails
 
+      - name: Test upgrade selector guardrails
+        run: make test-upgrade-selector-guardrails
+
       - name: Test runtime support guardrails
         run: make test-runtime-support-guardrails
 

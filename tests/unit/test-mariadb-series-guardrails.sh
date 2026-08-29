@@ -4,6 +4,7 @@ set -euo pipefail
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly DEFAULTS_FILE="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
 readonly TASKS_FILE="${ROOT_DIR}/roles/mariadb/tasks/main.yml"
+readonly REPO_TASKS_FILE="${ROOT_DIR}/roles/common/tasks/mariadb_repos.yml"
 readonly GALERA_TEMPLATE="${ROOT_DIR}/roles/galera/templates/galera.cnf.j2"
 readonly GALERA_TASKS_FILE="${ROOT_DIR}/roles/galera/tasks/main.yml"
 readonly MAINTENANCE_DEFAULTS_FILE="${ROOT_DIR}/roles/maintenance/defaults/main.yml"
@@ -48,8 +49,8 @@ main() {
     contains "${TASKS_FILE}" 'librenms_mariadb_12_3_galera_min_provider_version'
     contains "${DEFAULTS_FILE}" 'librenms_ubuntu_mariadb_expected_series:'
     contains "${TASKS_FILE}" 'Enforce the supported Ubuntu distro MariaDB server series'
-    contains "${TASKS_FILE}" '--mariadb-server-version=mariadb-{{ librenms_mariadb_upstream_series }}'
-    contains "${TASKS_FILE}" 'checksum: "{{ librenms_mariadb_upstream_repo_setup_checksum }}"'
+    contains "${REPO_TASKS_FILE}" '--mariadb-server-version=mariadb-{{ librenms_mariadb_upstream_series_effective }}'
+    contains "${REPO_TASKS_FILE}" 'checksum: "{{ librenms_mariadb_upstream_repo_setup_checksum }}"'
     does_not_contain "${TASKS_FILE}" 'librenms_mariadb_allow_experimental_series'
     contains "${README_FILE}" 'Community repository support is available for explicit `11.4`, `11.8`, and'
     contains "${OPERATIONS_FILE}" 'Rolling Galera upgrades must visit 11.4, then 11.8, then 12.3'

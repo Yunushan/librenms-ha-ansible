@@ -168,6 +168,21 @@
     - ansible_facts.distribution == 'Ubuntu'
     - librenms_ubuntu_php_versioned | bool
 
+- name: Validate the selected PHP stream is active
+  ansible.builtin.assert:
+    that:
+      - >-
+        (librenms_runtime_php_version_command.stdout | trim)
+        == (librenms_php_version | string | trim)
+    fail_msg: >-
+      PHP {{ librenms_php_version | string | trim }} was selected, but the
+      active CLI runtime is
+      {{ librenms_runtime_php_version_command.stdout | trim | default('unknown') }}.
+      Refusing to continue with a mismatched PHP-FPM stream.
+  when:
+    - librenms_manage_php_fpm | bool
+    - librenms_php_selection_mode == 'specific'
+
 - name: Detect nginx runtime version on managed web nodes
   ansible.builtin.command:
     argv:
@@ -202,3 +217,16 @@
       Detected: {{ librenms_runtime_nginx_series | default('unknown') }}.
       Supported series: {{ librenms_supported_nginx_series | join(', ') }}.
   when: librenms_manage_nginx | bool
+
+- name: Validate the selected Nginx series is active
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_nginx_series == (librenms_nginx_expected_series | string | trim)
+    fail_msg: >-
+      Nginx series {{ librenms_nginx_expected_series }} was selected, but the
+      active runtime on {{ inventory_hostname }} is
+      {{ librenms_runtime_nginx_series | default('unknown') }}. Refusing to
+      continue with an unexpected Nginx series.
+  when:
+    - librenms_manage_nginx | bool
+    - librenms_nginx_expected_series | default('') | string | trim | length > 0

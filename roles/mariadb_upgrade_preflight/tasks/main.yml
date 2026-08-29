@@ -1,0 +1,129 @@
+---
+- name: Resolve MariaDB preflight repository mode
+  ansible.builtin.set_fact:
+    librenms_mariadb_preflight_repository_mode_effective: >-
+      {{
+        'upstream'
+        if ansible_facts.os_family == 'Debian'
+        and librenms_mariadb_selection_mode in ['specific', 'lts']
+        else librenms_mariadb_repository_mode
+      }}
+
+- name: Resolve MariaDB preflight target series
+  ansible.builtin.set_fact:
+    librenms_mariadb_preflight_target_series: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_mariadb_upstream_series | string | trim
+        if librenms_mariadb_preflight_repository_mode_effective == 'upstream'
+        else librenms_redhat_mariadb_expected_series | string | trim
+        if ansible_facts.os_family == 'RedHat'
+        else librenms_ubuntu_mariadb_expected_series.get(
+          ansible_facts.distribution_major_version | string, ''
+        )
+        if ansible_facts.distribution == 'Ubuntu'
+        else ''
+      }}
+    librenms_mariadb_preflight_target_kind: >-
+      {{
+        'specific series'
+        if librenms_mariadb_selection_mode == 'specific'
+        else 'configured LTS series'
+        if librenms_mariadb_selection_mode == 'lts'
+        else 'latest package in the configured repository/stream'
+        if librenms_mariadb_selection_mode == 'latest'
+        else 'distribution default'
+      }}
+
+- name: Validate MariaDB preflight selector
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family in ['Debian', 'RedHat']
+      - librenms_db_mode in ['local', 'galera']
+      - librenms_mariadb_selection_mode in ['distro', 'specific', 'lts', 'latest']
+      - >-
+        ansible_facts.os_family != 'Debian'
+        or librenms_mariadb_selection_mode not in ['specific', 'lts']
+        or librenms_mariadb_preflight_target_series in
+        librenms_mariadb_upstream_supported_series
+      - >-
+        ansible_facts.os_family != 'Debian'
+        or librenms_mariadb_preflight_repository_mode_effective != 'upstream'
+        or librenms_mariadb_preflight_target_series in
+        librenms_mariadb_upstream_supported_series
+      - >-
+        ansible_facts.os_family != 'RedHat'
+        or librenms_mariadb_preflight_target_series in
+        librenms_redhat_mariadb_supported_streams
+      - >-
+        ansible_facts.os_family != 'RedHat'
+        or librenms_mariadb_preflight_target_series in
+        librenms_redhat_mariadb_supported_streams_by_major.get(
+          ansible_facts.distribution_major_version | string, []
+        )
+      - >-
+        ansible_facts.os_family != 'Debian'
+        or librenms_mariadb_preflight_repository_mode_effective != 'upstream'
+        or librenms_mariadb_upstream_repo_setup_checksum is
+        match('^sha256:[A-Fa-f0-9]{64}$')
+    fail_msg: >-
+      MariaDB preflight selector is invalid. Check the selected mode and
+      series, the EL-major stream map, and the immutable checksum required for
+      Debian-family upstream repository setup.
+
+- name: Require a single database host for MariaDB preflight
+  ansible.builtin.assert:
+    that:
+      - ansible_play_hosts_all | length == 1
+    fail_msg: >-
+      MariaDB upgrade preflight must target exactly one database host with
+      --limit. The selected host set contains {{ ansible_play_hosts_all | length }}
+      hosts. Galera upgrades are performed one member at a time.
+
+- name: Read the installed MariaDB server series
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --version
+  register: librenms_mariadb_preflight_version_probe
+  changed_when: false
+  failed_when: false
+
+- name: Determine the installed MariaDB series
+  ansible.builtin.set_fact:
+    librenms_mariadb_preflight_installed_series: >-
+      {{
+        librenms_mariadb_preflight_version_probe.stdout
+        | default('')
+        | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
+        | first
+        | default('unknown')
+      }}
+
+- name: Report MariaDB upgrade preflight evidence
+  ansible.builtin.debug:
+    msg:
+      - "Host: {{ inventory_hostname }} ({{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }})"
+      - "Installed MariaDB series: {{ librenms_mariadb_preflight_installed_series }}"
+      - "Requested mode: {{ librenms_mariadb_selection_mode }} ({{ librenms_mariadb_preflight_target_kind }})"
+      - "Requested MariaDB series: {{ librenms_mariadb_preflight_target_series | default('distribution-managed') }}"
+      - "Repository mode: {{ librenms_mariadb_preflight_repository_mode_effective }}"
+      - >-
+        Major-series change required:
+        {{
+          (
+            librenms_mariadb_preflight_target_series | length > 0
+            and librenms_mariadb_preflight_installed_series !=
+            librenms_mariadb_preflight_target_series
+          ) | string
+        }}
+      - >-
+        This is read-only. It does not stop MariaDB, alter Galera state, change
+        packages, run mariadb-upgrade, or modify /var/lib/mysql.
+      - >-
+        For Galera, use the version-specific rolling runbook, backup, and
+        rollback plan before changing the inventory selector. Never upgrade
+        more than one member at a time.

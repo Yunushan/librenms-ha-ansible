@@ -9,8 +9,9 @@ Use this page as the first stop for operator and maintainer documentation.
 3. [Repository Production-Readiness Assessment](production-readiness-assessment.md) - source-level score, evidence, and the remaining live certification work.
 4. [LibreNMS HA Operations Runbook](operations.md) - first deployment, convergence, validation, backups, maintenance, full restart, failover drills, and OS upgrades.
 5. [LibreNMS HA Command Map](command-map.md) - which playbook or Make target to run for common tasks and symptoms.
-6. [LibreNMS HA Operator Checklists](operator-checklists.md) - copyable checklists for maintenance, hard power-off testing, restart validation, and incident triage.
-7. [Failure Scenario Runbook](failure-scenarios.md) - targeted troubleshooting for VIP, Galera, Redis Sentinel, GlusterFS, LibreNMS dispatcher, and validation failures.
+6. [Upgrade Workflows](upgrades.md) - guarded OS release, Nginx, PHP, MariaDB, and package-only runtime upgrade procedures.
+7. [LibreNMS HA Operator Checklists](operator-checklists.md) - copyable checklists for maintenance, hard power-off testing, restart validation, and incident triage.
+8. [Failure Scenario Runbook](failure-scenarios.md) - targeted troubleshooting for VIP, Galera, Redis Sentinel, GlusterFS, LibreNMS dispatcher, and validation failures.
 
 ## Task Map
 
@@ -19,6 +20,7 @@ Use this page as the first stop for operator and maintainer documentation.
 | Understand the HA design | [Architecture and Operating Model](architecture.md) |
 | Check whether a distro is production-ready | [Support Matrix and Production Readiness](support-matrix.md) |
 | Deploy or rerun the cluster safely | [LibreNMS HA Operations Runbook](operations.md) |
+| Plan an OS, Nginx, PHP, or MariaDB upgrade | [Upgrade Workflows](upgrades.md) |
 | Choose the correct command | [LibreNMS HA Command Map](command-map.md) |
 | Shut down one node intentionally | [LibreNMS HA Operator Checklists](operator-checklists.md) |
 | Recover from failed validation | [Failure Scenario Runbook](failure-scenarios.md) |
@@ -30,6 +32,7 @@ Use this page as the first stop for operator and maintainer documentation.
 ## Operator Runbooks
 
 - [LibreNMS HA Operations Runbook](operations.md)
+- [Upgrade Workflows](upgrades.md)
 - [LibreNMS HA Command Map](command-map.md)
 - [LibreNMS HA Operator Checklists](operator-checklists.md)
 - [Failure Scenario Runbook](failure-scenarios.md)

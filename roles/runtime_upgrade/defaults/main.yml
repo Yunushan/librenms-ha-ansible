@@ -1,0 +1,12 @@
+---
+# This role is deliberately limited to package refreshes on one already
+# deployed node. OS release changes and MariaDB major-series changes use their
+# dedicated guarded workflows.
+librenms_runtime_upgrade_action: execute
+librenms_runtime_upgrade_components: ""
+librenms_runtime_upgrade_confirm: false
+librenms_runtime_upgrade_mariadb_confirm: false
+librenms_runtime_upgrade_require_maintenance: true
+librenms_runtime_upgrade_maintenance_marker_path: /var/lib/librenms-ha-ansible/maintenance
+librenms_runtime_upgrade_service_timeout: 60
+librenms_runtime_upgrade_post_package_delay: 2

@@ -1,4 +1,4 @@
-.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check github-governance-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass readiness-repair readiness-repair-ask-become-pass rrdcached-unit-repair rrdcached-unit-repair-ask-become-pass repair repair-ask-become-pass repair-check cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover galera-recover-ask-become-pass ha-failover-test firewall backup restore-test validate production-readiness production-readiness-ask-become-pass diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-production-readiness-ask-become-pass docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
+.PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check github-governance-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass readiness-repair readiness-repair-ask-become-pass rrdcached-unit-repair rrdcached-unit-repair-ask-become-pass repair repair-ask-become-pass repair-check cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover galera-recover-ask-become-pass ha-failover-test firewall backup restore-test validate production-readiness production-readiness-ask-become-pass diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap os-upgrade-preflight os-upgrade-node os-upgrade-execute mariadb-upgrade-preflight runtime-upgrade runtime-upgrade-ask-become-pass test-upgrade-selector-guardrails docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-production-readiness-ask-become-pass docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -25,6 +25,23 @@ FAST_REPAIR_MANAGER_PROBE_TIMEOUT ?= 10
 READINESS_REPAIR_LIMIT ?= librenms_db
 READINESS_REPAIR_TIMEOUT ?= 30
 READINESS_REPAIR_FORKS ?= 1
+OS_UPGRADE_LIMIT ?=
+OS_UPGRADE_TARGET_DISTRIBUTION ?=
+OS_UPGRADE_TARGET_MAJOR ?=
+OS_UPGRADE_CONFIRM ?= false
+OS_UPGRADE_EXECUTE ?= false
+OS_UPGRADE_COMMAND ?=
+OS_UPGRADE_TIMEOUT ?= 120
+OS_UPGRADE_FORKS ?= 1
+MARIADB_UPGRADE_LIMIT ?=
+MARIADB_UPGRADE_TIMEOUT ?= 120
+MARIADB_UPGRADE_FORKS ?= 1
+RUNTIME_UPGRADE_LIMIT ?=
+RUNTIME_UPGRADE_COMPONENTS ?= nginx,php
+RUNTIME_UPGRADE_CONFIRM ?= false
+RUNTIME_UPGRADE_MARIADB_CONFIRM ?= false
+RUNTIME_UPGRADE_TIMEOUT ?= 120
+RUNTIME_UPGRADE_FORKS ?= 1
 RRDCACHED_UNIT_REPAIR_CONFIRM ?= false
 RRDCACHED_UNIT_REPAIR_LIMIT ?= librenms_nodes
 RRDCACHED_UNIT_REPAIR_TIMEOUT ?= 120
@@ -59,7 +76,7 @@ inventory-check:
 github-governance-check:
 	python3 scripts/ci-github-governance-check.py --branch main
 
-ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails
+ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails
 
 test-controller-collection-bootstrap:
 	bash tests/unit/test-controller-collection-bootstrap.sh
@@ -72,6 +89,9 @@ test-galera-bootstrap-guardrails:
 
 test-mariadb-series-guardrails:
 	bash tests/unit/test-mariadb-series-guardrails.sh
+
+test-upgrade-selector-guardrails:
+	bash tests/unit/test-upgrade-selector-guardrails.sh
 
 test-runtime-support-guardrails:
 	bash tests/unit/test-runtime-support-guardrails.sh
@@ -156,6 +176,37 @@ site:
 
 site-ask-become-pass:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/site.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+os-upgrade-preflight:
+	@test -n "$(OS_UPGRADE_LIMIT)" || (echo "Refusing OS upgrade preflight: set OS_UPGRADE_LIMIT to exactly one host" && exit 2)
+	@test -n "$(OS_UPGRADE_TARGET_DISTRIBUTION)" || (echo "Refusing OS upgrade preflight: set OS_UPGRADE_TARGET_DISTRIBUTION" && exit 2)
+	@test -n "$(OS_UPGRADE_TARGET_MAJOR)" || (echo "Refusing OS upgrade preflight: set OS_UPGRADE_TARGET_MAJOR" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/os-upgrade-preflight.yml --limit "$(OS_UPGRADE_LIMIT)" --timeout $(OS_UPGRADE_TIMEOUT) --forks $(OS_UPGRADE_FORKS) -e "librenms_os_upgrade_target_distribution=$(OS_UPGRADE_TARGET_DISTRIBUTION)" -e "librenms_os_upgrade_target_major=$(OS_UPGRADE_TARGET_MAJOR)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+os-upgrade-node:
+	@test -n "$(OS_UPGRADE_LIMIT)" || (echo "Refusing OS upgrade execution: set OS_UPGRADE_LIMIT to exactly one host" && exit 2)
+	@test "$(OS_UPGRADE_CONFIRM)" = "true" || (echo "Refusing OS upgrade execution: set OS_UPGRADE_CONFIRM=true after reviewing docs/upgrades.md" && exit 2)
+	@test "$(OS_UPGRADE_EXECUTE)" = "true" || (echo "Refusing OS upgrade execution: set OS_UPGRADE_EXECUTE=true after reviewing the vendor command" && exit 2)
+	@test -n "$(OS_UPGRADE_TARGET_DISTRIBUTION)" || (echo "Refusing OS upgrade execution: set OS_UPGRADE_TARGET_DISTRIBUTION" && exit 2)
+	@test -n "$(OS_UPGRADE_TARGET_MAJOR)" || (echo "Refusing OS upgrade execution: set OS_UPGRADE_TARGET_MAJOR" && exit 2)
+	@test -n "$(OS_UPGRADE_COMMAND)" || (echo "Refusing OS upgrade execution: set OS_UPGRADE_COMMAND to the reviewed vendor command" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/os-upgrade-node.yml --limit "$(OS_UPGRADE_LIMIT)" --timeout $(OS_UPGRADE_TIMEOUT) --forks $(OS_UPGRADE_FORKS) -e librenms_os_upgrade_action=execute -e librenms_os_upgrade_confirm=true -e librenms_os_upgrade_execute_command=true -e librenms_os_upgrade_reboot=false -e "librenms_os_upgrade_target_distribution=$(OS_UPGRADE_TARGET_DISTRIBUTION)" -e "librenms_os_upgrade_target_major=$(OS_UPGRADE_TARGET_MAJOR)" -e "librenms_os_upgrade_command=$(OS_UPGRADE_COMMAND)" $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+os-upgrade-execute: os-upgrade-node
+
+mariadb-upgrade-preflight:
+	@test -n "$(MARIADB_UPGRADE_LIMIT)" || (echo "Refusing MariaDB upgrade preflight: set MARIADB_UPGRADE_LIMIT to exactly one DB host" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/mariadb-upgrade-preflight.yml --limit "$(MARIADB_UPGRADE_LIMIT)" --timeout $(MARIADB_UPGRADE_TIMEOUT) --forks $(MARIADB_UPGRADE_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+runtime-upgrade:
+	@test -n "$(RUNTIME_UPGRADE_LIMIT)" || (echo "Refusing runtime upgrade: set RUNTIME_UPGRADE_LIMIT to exactly one host" && exit 2)
+	@test "$(RUNTIME_UPGRADE_CONFIRM)" = "true" || (echo "Refusing runtime upgrade: set RUNTIME_UPGRADE_CONFIRM=true after reviewing docs/upgrades.md" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/runtime-upgrade.yml --limit "$(RUNTIME_UPGRADE_LIMIT)" --timeout $(RUNTIME_UPGRADE_TIMEOUT) --forks $(RUNTIME_UPGRADE_FORKS) -e librenms_runtime_upgrade_action=execute -e librenms_runtime_upgrade_confirm=true -e "librenms_runtime_upgrade_components=$(RUNTIME_UPGRADE_COMPONENTS)" -e librenms_runtime_upgrade_mariadb_confirm=$(RUNTIME_UPGRADE_MARIADB_CONFIRM) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+runtime-upgrade-ask-become-pass:
+	@test -n "$(RUNTIME_UPGRADE_LIMIT)" || (echo "Refusing runtime upgrade: set RUNTIME_UPGRADE_LIMIT to exactly one host" && exit 2)
+	@test "$(RUNTIME_UPGRADE_CONFIRM)" = "true" || (echo "Refusing runtime upgrade: set RUNTIME_UPGRADE_CONFIRM=true after reviewing docs/upgrades.md" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/runtime-upgrade.yml --ask-become-pass --become-method sudo --limit "$(RUNTIME_UPGRADE_LIMIT)" --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) -e librenms_runtime_upgrade_action=execute -e librenms_runtime_upgrade_confirm=true -e "librenms_runtime_upgrade_components=$(RUNTIME_UPGRADE_COMPONENTS)" -e librenms_runtime_upgrade_mariadb_confirm=$(RUNTIME_UPGRADE_MARIADB_CONFIRM) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 # Refresh only the socket-activated Galera readiness agent and clear stale
 # probe workers. This does not touch MariaDB data or run site convergence.

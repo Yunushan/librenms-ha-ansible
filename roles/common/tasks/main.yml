@@ -56,6 +56,96 @@
       }}
   when: librenms_production_profile | bool
 
+- name: Validate explicit Nginx repository and version selectors
+  ansible.builtin.assert:
+    that:
+      - librenms_nginx_repository_mode in ['distro', 'official']
+      - librenms_nginx_channel in ['distro', 'stable', 'mainline']
+      - >-
+        (
+          librenms_nginx_repository_mode == 'distro'
+          and librenms_nginx_channel == 'distro'
+        ) or (
+          librenms_nginx_repository_mode == 'official'
+          and librenms_nginx_channel in ['stable', 'mainline']
+        )
+      - >-
+        librenms_nginx_repository_mode != 'official'
+        or librenms_enable_extra_repos | bool
+      - >-
+        librenms_nginx_repository_mode != 'official'
+        or (librenms_nginx_official_repository_key_fingerprint | string | trim)
+        is match('^[A-Fa-f0-9]{40}$')
+      - >-
+        librenms_nginx_expected_series | default('') | trim | length == 0
+        or librenms_nginx_expected_series in librenms_supported_nginx_series
+      - librenms_nginx_package_state in ['present', 'latest']
+      - >-
+        (librenms_nginx_package_version | string | trim | length == 0)
+        or librenms_nginx_package_state == 'present'
+    fail_msg: >-
+      Nginx selector configuration is invalid. Use repository mode distro or
+      official with channel distro or stable/mainline respectively, and an
+      exact 40-character signing-key fingerprint for the official repository.
+      Package state must be present or latest; an exact package version is
+      applied with state present.
+  when: librenms_manage_nginx | bool
+
+- name: Validate explicit PHP selector policy
+  ansible.builtin.assert:
+    that:
+      - librenms_php_selection_mode in ['distro', 'specific', 'latest']
+      - >-
+        librenms_php_selection_mode != 'specific'
+        or (librenms_php_version | string | trim) in librenms_supported_php_versions
+      - >-
+        librenms_php_selection_mode != 'specific'
+        or (librenms_php_version | string | trim | length) > 0
+  fail_msg: >-
+      PHP selection must be distro, latest, or specific. Specific selection
+      requires librenms_php_version to be one of the supported PHP streams:
+      {{ librenms_supported_php_versions | join(', ') }}.
+  when: librenms_manage_php_fpm | bool
+
+- name: Reject exact PHP selection on the native EL10 path
+  ansible.builtin.assert:
+    that:
+      - not (
+          ansible_facts.os_family == 'RedHat'
+          and (ansible_facts.distribution_major_version | int) >= 10
+          and librenms_php_selection_mode == 'specific'
+        )
+    fail_msg: >-
+      Exact PHP stream selection is not implemented for EL10 in this role.
+      EL10 uses its native PHP package stream; use PHP selection mode distro or
+      latest, or provide and review a separate EL10 package contract first.
+  when: librenms_manage_php_fpm | bool
+
+- name: Validate explicit Debian PHP repository policy
+  ansible.builtin.assert:
+    that:
+      - librenms_enable_extra_repos | bool
+      - librenms_debian_php_repository_enabled | bool
+      - >-
+        (librenms_debian_php_repository_key_fingerprint | string | trim)
+        is match('^[A-Fa-f0-9]{40}$')
+    fail_msg: >-
+      Debian specific/latest PHP selection requires the explicitly enabled
+      signed PHP repository and its pinned 40-character signing-key fingerprint.
+      Review the repository key before setting
+      librenms_debian_php_repository_enabled=true.
+  when:
+    - ansible_facts.distribution == 'Debian'
+    - librenms_manage_php_fpm | bool
+    - librenms_php_selection_mode in ['specific', 'latest']
+
+- name: Configure Debian PHP repository for explicit PHP selection
+  ansible.builtin.include_tasks: debian_repos.yml
+  when:
+    - ansible_facts.distribution == 'Debian'
+    - librenms_manage_php_fpm | bool
+    - librenms_php_selection_mode in ['specific', 'latest']
+
 - name: Fail early when RHEL-family storage mode is unsupported
   ansible.builtin.assert:
     that:
@@ -159,216 +249,15 @@
     fail_msg: "Galera mode requires an explicit DB host, VIP, or lb_nodes frontend."
   when: librenms_db_mode == 'galera'
 
-- name: Check whether Ubuntu deb822 sources already include universe
-  shell: |
-    if [ ! -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-      exit 1
-    fi
-    awk '
-      /^Suites:/ {
-        suite = ($0 ~ /(^|[[:space:]]){{ ansible_facts.distribution_release }}([[:space:]]|$)/)
-      }
-      /^Components:/ && suite && $0 ~ /(^|[[:space:]])universe([[:space:]]|$)/ {
-        found = 1
-      }
-      END { exit found ? 0 : 1 }
-    ' /etc/apt/sources.list.d/ubuntu.sources
-  args:
-    executable: /bin/bash
-  register: librenms_ubuntu_sources_universe
-  changed_when: false
-  failed_when: false
+- name: Configure Ubuntu repositories for universe and PHP
+  ansible.builtin.include_tasks: ubuntu_repos.yml
   when:
     - ansible_facts.os_family == 'Debian'
     - ansible_facts.distribution == 'Ubuntu'
-    - librenms_enable_extra_repos | bool
 
-- name: Validate explicit Ubuntu PHP stream selection
-  ansible.builtin.assert:
-    that:
-      - librenms_ubuntu_php_version_override | default('') | trim in librenms_supported_php_versions
-      - ansible_facts.distribution == 'Ubuntu'
-      - (ansible_facts.distribution_major_version | int) in [22, 24, 26]
-      - librenms_enable_extra_repos | bool
-      - librenms_ubuntu_php_repository_enabled | bool
-    fail_msg: >-
-      librenms_ubuntu_php_version_override must be a supported PHP version on
-      Ubuntu 22.04, 24.04, or 26.04, and the verified PHP repository must remain
-      enabled. Selected value: {{ librenms_ubuntu_php_version_override | default('') }}.
-  when:
-    - librenms_ubuntu_php_version_override | default('') | trim | length > 0
-
-- name: Determine whether the Ubuntu PHP repository is required
-  ansible.builtin.set_fact:
-    librenms_ubuntu_php_repository_required: >-
-      {{
-        ansible_facts.distribution == 'Ubuntu'
-        and (
-          (ansible_facts.distribution_major_version | int) == 22
-          or (librenms_ubuntu_php_version_override | default('') | trim | length > 0)
-        )
-      }}
-
-- name: Check for legacy Ubuntu universe source file
-  stat:
-    path: /etc/apt/sources.list.d/archive_ubuntu_com_ubuntu.list
-  register: librenms_ubuntu_legacy_universe_source
-  when:
-    - ansible_facts.os_family == 'Debian'
-    - ansible_facts.distribution == 'Ubuntu'
-    - librenms_enable_extra_repos | bool
-
-- name: Remove duplicate Ubuntu universe source when deb822 already provides it
-  lineinfile:
-    path: /etc/apt/sources.list.d/archive_ubuntu_com_ubuntu.list
-    regexp: "^deb\\s+https?://archive\\.ubuntu\\.com/ubuntu\\s+{{ ansible_facts.distribution_release }}\\s+universe\\s*$"
-    state: absent
-  when:
-    - ansible_facts.os_family == 'Debian'
-    - ansible_facts.distribution == 'Ubuntu'
-    - librenms_enable_extra_repos | bool
-    - (librenms_ubuntu_sources_universe.rc | default(1)) == 0
-    - librenms_ubuntu_legacy_universe_source.stat.exists | default(false)
-
-- name: Install deb822 repository management dependency
-  apt:
-    name: python3-debian
-    state: present
-    update_cache: false
-  when:
-    - ansible_facts.os_family == 'Debian'
-    - ansible_facts.distribution == 'Ubuntu'
-    - librenms_enable_extra_repos | bool
-    - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
-
-- name: Configure Ubuntu universe repository
-  deb822_repository:
-    name: librenms-ubuntu-universe
-    types:
-      - deb
-    uris: http://archive.ubuntu.com/ubuntu
-    suites: "{{ ansible_facts.distribution_release }}"
-    components:
-      - universe
-    state: present
-  when:
-    - ansible_facts.os_family == 'Debian'
-    - ansible_facts.distribution == 'Ubuntu'
-    - librenms_enable_extra_repos | bool
-    - (librenms_ubuntu_sources_universe.rc | default(1)) != 0
-
-- name: Install Ubuntu 22 PHP repository prerequisites and explicit PHP stream support
-  apt:
-    name:
-      - ca-certificates
-      - curl
-      - gnupg
-    state: present
-    update_cache: false
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-
-- name: Ensure the Ubuntu PHP APT keyring directory exists
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-
-- name: Remove the legacy Ondrej PHP trusted key import
-  ansible.builtin.file:
-    path: /etc/apt/trusted.gpg.d/ondrej-ubuntu-php.gpg
-    state: absent
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-
-- name: Find legacy Ondrej PHP source files
-  ansible.builtin.find:
-    paths: /etc/apt/sources.list.d
-    patterns: '*ondrej*php*'
-    file_type: file
-  register: librenms_ubuntu_php_legacy_sources
-  changed_when: false
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-
-- name: Remove legacy Ondrej PHP source files
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: absent
-  loop: "{{ librenms_ubuntu_php_legacy_sources.files | default([]) }}"
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-    - item.path != librenms_ubuntu_php_repository_source_file
-
-- name: Install the verified Ondrej PHP signing key
-  ansible.builtin.get_url:
-    url: "{{ librenms_ubuntu_php_repository_key_url }}"
-    dest: "{{ librenms_ubuntu_php_repository_keyring }}"
-    owner: root
-    group: root
-    mode: '0644'
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-
-- name: Read the Ondrej PHP signing-key fingerprint
-  ansible.builtin.shell: |
-    set -o pipefail
-    gpg --batch --show-keys --with-colons "{{ librenms_ubuntu_php_repository_keyring }}" |
-      awk -F: '$1 == "fpr" { print toupper($10); exit }'
-  args:
-    executable: /bin/bash
-  register: librenms_ubuntu_php_key_fingerprint
-  changed_when: false
-  check_mode: false
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-
-- name: Validate the Ondrej PHP signing-key fingerprint
-  ansible.builtin.assert:
-    that:
-      - librenms_ubuntu_php_key_fingerprint.stdout | trim == librenms_ubuntu_php_repository_key_fingerprint
-    fail_msg: >-
-      The downloaded Ondrej PHP signing key fingerprint does not match the pinned
-      fingerprint. Refusing to configure the PHP repository.
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
-
-- name: Configure the supported PHP stream for Ubuntu 22 or an explicit Ubuntu override
-  ansible.builtin.copy:
-    dest: "{{ librenms_ubuntu_php_repository_source_file }}"
-    owner: root
-    group: root
-    mode: '0644'
-    content: |
-      Types: deb
-      URIs: {{ librenms_ubuntu_php_repository_uri }}
-      Suites: {{ ansible_facts.distribution_release }}
-      Components: main
-      Signed-By: {{ librenms_ubuntu_php_repository_keyring }}
-  when:
-    - librenms_ubuntu_php_repository_required | bool
-    - librenms_enable_extra_repos | bool
-    - librenms_ubuntu_php_repository_enabled | bool
+- name: Configure Nginx package repository policy
+  ansible.builtin.include_tasks: nginx_repos.yml
+  when: librenms_manage_nginx | bool
 
 - name: Refresh apt cache
   apt:
@@ -410,6 +299,135 @@
     and (ansible_facts.distribution_major_version | int) == 8
     and (librenms_rhel8_package_cli_fallback | default(true) | bool)
 
+- name: Update selected Debian PHP packages within the configured repository policy
+  ansible.builtin.apt:
+    name: "{{ librenms_php_package_names }}"
+    state: latest
+    update_cache: false
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_manage_php_fpm | bool
+    - librenms_php_selection_mode == 'latest'
+
+- name: Update selected RedHat PHP packages within the configured stream
+  ansible.builtin.package:
+    name: "{{ librenms_php_package_names }}"
+    state: latest
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_manage_php_fpm | bool
+    - librenms_php_selection_mode == 'latest'
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Update selected RedHat PHP packages through native DNF on EL 8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'upgrade'] + librenms_php_package_names }}
+  register: librenms_rhel8_php_package_update
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_php_package_update.stdout | default('')) ~
+    (librenms_rhel8_php_package_update.stderr | default('')))
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_manage_php_fpm | bool
+    - librenms_php_selection_mode == 'latest'
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Install the exact Debian Nginx package version when requested
+  ansible.builtin.apt:
+    name: "{{ librenms_nginx_package_name }}={{ librenms_nginx_package_version }}"
+    state: present
+    update_cache: false
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_manage_nginx | bool
+    - librenms_nginx_package_version | string | trim | length > 0
+
+- name: Install the exact RedHat Nginx package version when requested
+  ansible.builtin.package:
+    name: "{{ librenms_nginx_package_name }}-{{ librenms_nginx_package_version }}"
+    state: present
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_manage_nginx | bool
+    - librenms_nginx_package_version | string | trim | length > 0
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Install the exact RedHat Nginx package version through native DNF on EL 8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - "{{ librenms_nginx_package_name }}-{{ librenms_nginx_package_version }}"
+  register: librenms_rhel8_nginx_version_install
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_nginx_version_install.stdout | default('')) ~
+    (librenms_rhel8_nginx_version_install.stderr | default('')))
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_manage_nginx | bool
+    - librenms_nginx_package_version | string | trim | length > 0
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Update Debian Nginx package within the configured repository policy
+  ansible.builtin.apt:
+    name: "{{ librenms_nginx_package_name }}"
+    state: latest
+    update_cache: false
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_manage_nginx | bool
+    - librenms_nginx_package_version | string | trim | length == 0
+    - librenms_nginx_package_state == 'latest'
+
+- name: Update RedHat Nginx package within the configured repository policy
+  ansible.builtin.package:
+    name: "{{ librenms_nginx_package_name }}"
+    state: latest
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_manage_nginx | bool
+    - librenms_nginx_package_version | string | trim | length == 0
+    - librenms_nginx_package_state == 'latest'
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Update RedHat Nginx package through native DNF on EL 8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - upgrade
+      - "{{ librenms_nginx_package_name }}"
+  register: librenms_rhel8_nginx_package_update
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_nginx_package_update.stdout | default('')) ~
+    (librenms_rhel8_nginx_package_update.stderr | default('')))
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_manage_nginx | bool
+    - librenms_nginx_package_version | string | trim | length == 0
+    - librenms_nginx_package_state == 'latest'
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
 - name: Inspect selected Ubuntu PHP CLI alternative
   ansible.builtin.command:
     argv:
@@ -420,8 +438,10 @@
   changed_when: false
   failed_when: false
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - librenms_ubuntu_php_versioned | bool
+    - ansible_facts.os_family == 'Debian'
+    - >-
+      librenms_ubuntu_php_versioned | bool
+      or librenms_php_versioned | bool
 
 - name: Select the configured Ubuntu PHP CLI stream
   ansible.builtin.command:
@@ -433,8 +453,10 @@
   register: librenms_ubuntu_php_alternative
   changed_when: true
   when:
-    - ansible_facts.distribution == 'Ubuntu'
-    - librenms_ubuntu_php_versioned | bool
+    - ansible_facts.os_family == 'Debian'
+    - >-
+      librenms_ubuntu_php_versioned | bool
+      or librenms_php_versioned | bool
     - >-
       ('Value: /usr/bin/php' ~ librenms_ubuntu_php_version_effective)
       not in (librenms_ubuntu_php_alternative_query.stdout | default(''))

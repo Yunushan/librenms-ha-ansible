@@ -134,7 +134,8 @@ when shared HA storage is not required.
 New major distro releases should still start as lab-only until the full checklist
 passes. For example, an Ubuntu 24.04 to 26.04 upgrade should be tested one node
 at a time with the major-upgrade workflow before being treated as production
-ready.
+ready. The guarded commands and their limits are documented in
+[upgrades.md](upgrades.md).
 
 ## Application Runtime Versions
 

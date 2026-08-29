@@ -13,6 +13,7 @@ FIREWALLD_FILE="$ROOT_DIR/roles/host_firewall/tasks/firewalld.yml"
 FIREWALLD_RULE_FILE="$ROOT_DIR/roles/host_firewall/tasks/firewalld_rich_rule.yml"
 LIBRENMS_APP_FILE="$ROOT_DIR/roles/librenms_app/tasks/main.yml"
 COMMON_TASKS_FILE="$ROOT_DIR/roles/common/tasks/main.yml"
+UBUNTU_REPOS_FILE="$ROOT_DIR/roles/common/tasks/ubuntu_repos.yml"
 POST_REBOOT_FILE="$ROOT_DIR/roles/post_reboot/tasks/main.yml"
 HA_STATUS_FILE="$ROOT_DIR/roles/ha_status/tasks/main.yml"
 RUNTIME_WAIT_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-ha-runtime-wait.sh.j2"
@@ -138,15 +139,15 @@ require_text "$REDHAT_REPOS_FILE" 'Enable supported PHP module stream'
 require_text "$REDHAT_REPOS_FILE" 'Enable supported MariaDB module stream'
 require_text "$COMMON_TASKS_FILE" 'Fail early when RHEL-family storage mode is unsupported'
 require_text "$COMMON_TASKS_FILE" 'Require shared NFS RRD storage for RHEL-family HA'
-require_text "$COMMON_TASKS_FILE" 'Configure the supported PHP stream for Ubuntu 22 or an explicit Ubuntu override'
-require_text "$COMMON_TASKS_FILE" 'Install Ubuntu 22 PHP repository prerequisites and explicit PHP stream support'
-require_text "$COMMON_TASKS_FILE" 'librenms_ubuntu_php_repository_required'
+require_text "$UBUNTU_REPOS_FILE" 'Configure the supported PHP stream for Ubuntu 22 or an explicit override'
+require_text "$UBUNTU_REPOS_FILE" 'Install Ubuntu PHP repository prerequisites'
+require_text "$UBUNTU_REPOS_FILE" 'librenms_ubuntu_php_repository_required'
 require_text "$COMMON_TASKS_FILE" 'Select the configured Ubuntu PHP CLI stream'
 require_text "$RUNTIME_SUPPORT_FILE" 'Validate the selected Ubuntu PHP stream is active'
-require_text "$COMMON_TASKS_FILE" 'librenms_ubuntu_php_repository_keyring'
-require_text "$COMMON_TASKS_FILE" 'gpg --batch --show-keys'
-require_text "$COMMON_TASKS_FILE" 'Signed-By:'
-if grep -Fq 'add-apt-repository' "$COMMON_TASKS_FILE"; then
+require_text "$UBUNTU_REPOS_FILE" 'librenms_ubuntu_php_repository_keyring'
+require_text "$UBUNTU_REPOS_FILE" 'gpg --batch --show-keys'
+require_text "$UBUNTU_REPOS_FILE" 'Signed-By:'
+if grep -Fq 'add-apt-repository' "$COMMON_TASKS_FILE" "$UBUNTU_REPOS_FILE"; then
     printf 'Ubuntu repository setup must not use the fragile add-apt-repository shortcut.\n' >&2
     exit 1
 fi

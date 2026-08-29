@@ -1,26 +1,75 @@
 ---
+- name: Resolve MariaDB version selector
+  ansible.builtin.set_fact:
+    librenms_mariadb_repository_mode_effective: >-
+      {{
+        'upstream'
+        if ansible_facts.os_family == 'Debian'
+        and librenms_mariadb_selection_mode in ['specific', 'lts']
+        else librenms_mariadb_repository_mode
+      }}
+    librenms_mariadb_upstream_series_effective: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_mariadb_upstream_series | string | trim
+      }}
+    librenms_redhat_mariadb_expected_series_effective: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_redhat_mariadb_expected_series | string | trim
+      }}
+  when: librenms_db_mode in ['local', 'galera']
+
+- name: Require supplemental repositories for explicit EL MariaDB stream selection
+  ansible.builtin.assert:
+    that:
+      - librenms_enable_extra_repos | bool
+    fail_msg: >-
+      RHEL-family MariaDB specific/LTS selection requires
+      librenms_enable_extra_repos=true so the selected vendor module stream is
+      configured and verified. Refusing to fall back silently to the distro
+      default stream.
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_selection_mode in ['specific', 'lts']
+
 - name: Validate MariaDB repository selection
   assert:
     that:
+      - librenms_mariadb_selection_mode in ['distro', 'specific', 'lts', 'latest']
       - librenms_mariadb_repository_mode in ['distro', 'upstream']
-      - librenms_mariadb_repository_mode != 'upstream' or ansible_facts.os_family == 'Debian'
-      - librenms_mariadb_repository_mode != 'upstream' or librenms_mariadb_upstream_series in librenms_mariadb_upstream_supported_series
       - >-
-        librenms_mariadb_repository_mode != 'upstream'
+        ansible_facts.os_family == 'RedHat'
+        or librenms_mariadb_selection_mode not in ['specific', 'lts']
+        or librenms_mariadb_upstream_series_effective in librenms_mariadb_upstream_supported_series
+      - >-
+        librenms_mariadb_repository_mode_effective != 'upstream'
+        or ansible_facts.os_family == 'Debian'
+      - >-
+        librenms_mariadb_repository_mode_effective != 'upstream'
+        or librenms_mariadb_upstream_series_effective in librenms_mariadb_upstream_supported_series
+      - >-
+        librenms_mariadb_repository_mode_effective != 'upstream'
         or librenms_mariadb_upstream_repo_setup_checksum is match('^sha256:[A-Fa-f0-9]{64}$')
       - >-
         librenms_db_mode != 'galera'
-        or librenms_mariadb_upstream_series | default('') | length == 0
-        or librenms_mariadb_upstream_series in librenms_mariadb_upstream_galera_supported_series
+        or librenms_mariadb_repository_mode_effective != 'upstream'
+        or librenms_mariadb_upstream_series_effective in librenms_mariadb_upstream_galera_supported_series
     fail_msg: >-
-      MariaDB upstream repository mode is supported only on Debian-family hosts.
-      MariaDB Community Server 11.4, 11.8, and 12.3 are supported selections
-      for local and Galera installs on Debian-family hosts. Galera deployments
-      also require a compatible galera-4 package. MariaDB 12.3 server
-      repositories do not include that package, so configure the separately
-      published Galera repository before selecting 12.3. Set an immutable
-      sha256 checksum for
-      librenms_mariadb_upstream_repo_setup_checksum before enabling upstream mode.
+      MariaDB selection is invalid. Debian-family specific/LTS selections use
+      the upstream repository and require a supported 11.4, 11.8, or 12.3
+      series plus an immutable sha256 checksum for
+      librenms_mariadb_upstream_repo_setup_checksum. RHEL-family selections
+      use the supported vendor stream map for the current EL major. Galera
+      12.3 also requires a compatible galera-4 package from its separately
+      validated source.
   when: librenms_db_mode in ['local', 'galera']
 
 - name: Check installed MariaDB server series
@@ -33,7 +82,7 @@
   failed_when: false
   when:
     - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_repository_mode_effective == 'upstream'
 
 - name: Determine installed MariaDB server series
   set_fact:
@@ -47,92 +96,29 @@
       }}
   when:
     - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_repository_mode_effective == 'upstream'
 
 - name: Refuse MariaDB major-series changes during normal convergence
   assert:
     that:
-      - librenms_mariadb_installed_series == librenms_mariadb_upstream_series
+      - librenms_mariadb_installed_series == librenms_mariadb_upstream_series_effective
     fail_msg: >-
       Refusing to switch an installed MariaDB {{ librenms_mariadb_installed_series }}
-      server to {{ librenms_mariadb_upstream_series }} during site.yml convergence.
+      server to {{ librenms_mariadb_upstream_series_effective }} during site.yml convergence.
       A Galera major upgrade needs an explicit maintenance, off-cluster backup,
       node-by-node upgrade, and rollback workflow. Configure the target series
       only for a fresh install, or use the dedicated upgrade runbook.
   when:
     - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
+    - librenms_mariadb_repository_mode_effective == 'upstream'
     - librenms_mariadb_installed_series | default('') | length > 0
-    - librenms_mariadb_installed_series != librenms_mariadb_upstream_series
-
-- name: Ensure MariaDB upstream repository state directory exists
-  file:
-    path: "{{ librenms_mariadb_upstream_state_path | dirname }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-  when:
-    - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
-
-- name: Read configured MariaDB upstream series
-  slurp:
-    src: "{{ librenms_mariadb_upstream_state_path }}"
-  register: librenms_mariadb_upstream_state
-  failed_when: false
-  changed_when: false
-  when:
-    - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
-
-- name: Determine whether MariaDB upstream repository needs configuration
-  set_fact:
-    librenms_mariadb_upstream_repository_needs_update: >-
-      {{
-        (librenms_mariadb_upstream_state.content | default('') | b64decode | trim)
-        != librenms_mariadb_upstream_series
-      }}
-  when:
-    - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
-
-- name: Download MariaDB upstream repository setup script
-  get_url:
-    url: "{{ librenms_mariadb_upstream_repo_setup_url }}"
-    dest: "{{ librenms_mariadb_upstream_repo_setup_path }}"
-    checksum: "{{ librenms_mariadb_upstream_repo_setup_checksum }}"
-    owner: root
-    group: root
-    mode: "0755"
-  when:
-    - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
-    - librenms_mariadb_upstream_repository_needs_update | bool
+    - librenms_mariadb_installed_series != librenms_mariadb_upstream_series_effective
 
 - name: Configure MariaDB upstream repository
-  command:
-    argv:
-      - "{{ librenms_mariadb_upstream_repo_setup_path }}"
-      - "--mariadb-server-version=mariadb-{{ librenms_mariadb_upstream_series }}"
-      - --skip-maxscale
-      - --skip-tools
+  ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/mariadb_repos.yml"
   when:
     - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
-    - librenms_mariadb_upstream_repository_needs_update | bool
-
-- name: Record configured MariaDB upstream series
-  copy:
-    content: "{{ librenms_mariadb_upstream_series }}\n"
-    dest: "{{ librenms_mariadb_upstream_state_path }}"
-    owner: root
-    group: root
-    mode: "0644"
-  when:
-    - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'upstream'
-    - librenms_mariadb_upstream_repository_needs_update | bool
+    - librenms_mariadb_repository_mode_effective == 'upstream'
 
 - name: Install MariaDB packages
   package:
@@ -162,6 +148,46 @@
     - ansible_facts.distribution_major_version | int == 8
     - librenms_rhel8_package_cli_fallback | default(true) | bool
 
+- name: Update MariaDB packages within the configured Debian repository policy
+  ansible.builtin.apt:
+    name: "{{ librenms_db_packages }}"
+    state: latest
+    update_cache: false
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_selection_mode == 'latest'
+
+- name: Update MariaDB packages within the configured RedHat stream
+  ansible.builtin.package:
+    name: "{{ librenms_db_packages }}"
+    state: latest
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_selection_mode == 'latest'
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and (librenms_rhel8_package_cli_fallback | default(true) | bool)
+      )
+
+- name: Update MariaDB packages through native DNF on EL 8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'upgrade'] + librenms_db_packages }}
+  register: librenms_rhel8_mariadb_package_update
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_mariadb_package_update.stdout | default('')) ~
+    (librenms_rhel8_mariadb_package_update.stderr | default('')))
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_db_mode in ['local', 'galera']
+    - librenms_mariadb_selection_mode == 'latest'
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
 - name: Read installed Galera provider package version for MariaDB 12.3
   ansible.builtin.command:
     argv:
@@ -175,8 +201,8 @@
   when:
     - ansible_facts.os_family == 'Debian'
     - librenms_db_mode == 'galera'
-    - librenms_mariadb_repository_mode == 'upstream'
-    - librenms_mariadb_upstream_series == '12.3'
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+    - librenms_mariadb_upstream_series_effective == '12.3'
 
 - name: Check MariaDB 12.3 Galera provider package version
   ansible.builtin.command:
@@ -192,8 +218,8 @@
   when:
     - ansible_facts.os_family == 'Debian'
     - librenms_db_mode == 'galera'
-    - librenms_mariadb_repository_mode == 'upstream'
-    - librenms_mariadb_upstream_series == '12.3'
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+    - librenms_mariadb_upstream_series_effective == '12.3'
 
 - name: Enforce MariaDB 12.3 Galera provider package contract
   ansible.builtin.assert:
@@ -210,8 +236,8 @@
   when:
     - ansible_facts.os_family == 'Debian'
     - librenms_db_mode == 'galera'
-    - librenms_mariadb_repository_mode == 'upstream'
-    - librenms_mariadb_upstream_series == '12.3'
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+    - librenms_mariadb_upstream_series_effective == '12.3'
 
 - name: Detect installed RHEL-family MariaDB server series
   ansible.builtin.command:
@@ -235,10 +261,10 @@
           | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
           | first
           | default('')
-        ) == (librenms_redhat_mariadb_expected_series | string)
+        ) == (librenms_redhat_mariadb_expected_series_effective | string)
     fail_msg: >-
       RHEL-family MariaDB stream is outside this role's production contract.
-      Expected {{ librenms_redhat_mariadb_expected_series }}, found:
+      Expected {{ librenms_redhat_mariadb_expected_series_effective }}, found:
       {{ librenms_redhat_mariadb_version_probe.stdout | default('unavailable') }}.
       Select the vendor 10.11 stream or use a separately validated Galera
       upgrade/rollback workflow for a newer stream.
@@ -257,7 +283,7 @@
   when:
     - ansible_facts.distribution == 'Ubuntu'
     - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'distro'
+    - librenms_mariadb_repository_mode_effective == 'distro'
     - ansible_facts.distribution_major_version in librenms_ubuntu_mariadb_expected_series
 
 - name: Enforce the supported Ubuntu distro MariaDB server series
@@ -281,7 +307,7 @@
   when:
     - ansible_facts.distribution == 'Ubuntu'
     - librenms_db_mode in ['local', 'galera']
-    - librenms_mariadb_repository_mode == 'distro'
+    - librenms_mariadb_repository_mode_effective == 'distro'
     - ansible_facts.distribution_major_version in librenms_ubuntu_mariadb_expected_series
 
 - name: Deploy MariaDB tuning config

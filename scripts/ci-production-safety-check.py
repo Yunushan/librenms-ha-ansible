@@ -243,7 +243,7 @@ def main() -> int:
         "MariaDB repository setup must require a checksum",
     )
     failures += require(
-        "roles/mariadb/tasks/main.yml",
+        "roles/common/tasks/mariadb_repos.yml",
         "checksum: \"{{ librenms_mariadb_upstream_repo_setup_checksum }}\"",
         "MariaDB repository download must verify its checksum",
     )
@@ -816,10 +816,14 @@ def main() -> int:
         "The AWX failover-drill schedule must explicitly confirm disruption",
     )
 
-    if "--skip-verify" in read("roles/mariadb/tasks/main.yml"):
+    if "--skip-verify" in (
+        read("roles/mariadb/tasks/main.yml")
+        + read("roles/common/tasks/mariadb_repos.yml")
+    ):
         failures.append("MariaDB repository setup must not bypass verification")
 
     common_tasks = read("roles/common/tasks/main.yml")
+    ubuntu_repository_tasks = read("roles/common/tasks/ubuntu_repos.yml")
     default_values = read("roles/librenms_defaults/defaults/main.yml")
     if "apt_repository:" in common_tasks:
         if (
@@ -831,7 +835,7 @@ def main() -> int:
                 "Ubuntu PHP repository management must use the verified deb822 source and explicit repository-required guard"
             )
 
-    if "deb822_repository:" not in common_tasks:
+    if "deb822_repository:" not in (common_tasks + ubuntu_repository_tasks):
         failures.append("Ubuntu repository management must declare deb822_repository")
 
     role_files = (ROOT / "roles").rglob("*.yml")

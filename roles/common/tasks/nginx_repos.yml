@@ -1,0 +1,212 @@
+---
+- name: Resolve official Nginx repository paths
+  ansible.builtin.set_fact:
+    librenms_nginx_official_channel_path: >-
+      {{ 'mainline/' if librenms_nginx_channel == 'mainline' else '' }}
+    librenms_nginx_official_debian_distribution: >-
+      {{ 'ubuntu' if ansible_facts.distribution == 'Ubuntu' else 'debian' }}
+    librenms_nginx_official_rpm_distribution: >-
+      {{
+        'rhel'
+        if ansible_facts.distribution in ['RedHat', 'Red Hat Enterprise Linux']
+        else 'centos'
+      }}
+    librenms_nginx_official_rpm_baseurl: >-
+      https://nginx.org/packages/{{ librenms_nginx_official_channel_path
+      }}{{ librenms_nginx_official_rpm_distribution }}/$releasever/$basearch/
+
+- name: Remove project-managed Nginx repository files in distro mode on Debian
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ librenms_nginx_official_repository_source_file }}"
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_repository_mode == 'distro'
+
+- name: Remove project-managed Nginx repository files in distro mode on RedHat
+  ansible.builtin.file:
+    path: "{{ librenms_nginx_official_repository_file }}"
+    state: absent
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_repository_mode == 'distro'
+
+- name: Install Debian Nginx repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: false
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Ensure the Nginx APT keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Install the official Nginx APT signing key
+  ansible.builtin.get_url:
+    url: "{{ librenms_nginx_official_repository_key_url }}"
+    dest: "{{ librenms_nginx_official_repository_keyring }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Read the official Nginx signing-key fingerprint on Debian
+  ansible.builtin.shell: |
+    set -o pipefail
+    gpg --batch --show-keys --with-colons "{{ librenms_nginx_official_repository_keyring }}" |
+      awk -F: '$1 == "fpr" { print toupper($10); exit }'
+  args:
+    executable: /bin/bash
+  register: librenms_nginx_debian_key_fingerprint
+  changed_when: false
+  check_mode: false
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Validate the official Nginx signing-key fingerprint on Debian
+  ansible.builtin.assert:
+    that:
+      - librenms_nginx_debian_key_fingerprint.stdout | trim == librenms_nginx_official_repository_key_fingerprint
+    fail_msg: >-
+      The downloaded official Nginx signing key does not match the configured
+      fingerprint. Refusing to configure the Nginx repository.
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Configure the official Nginx APT repository
+  ansible.builtin.copy:
+    dest: "{{ librenms_nginx_official_repository_source_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Types: deb
+      URIs: https://nginx.org/packages/{{ librenms_nginx_official_channel_path }}{{ librenms_nginx_official_debian_distribution }}
+      Suites: {{ ansible_facts.distribution_release }}
+      Components: nginx
+      Signed-By: {{ librenms_nginx_official_repository_keyring }}
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Install RedHat Nginx repository prerequisites through native DNF on EL 8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - ca-certificates
+      - curl
+      - gnupg2
+  register: librenms_rhel8_nginx_repo_prerequisites
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_rhel8_nginx_repo_prerequisites.stdout | default('')) ~
+    (librenms_rhel8_nginx_repo_prerequisites.stderr | default('')))
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Install RedHat Nginx repository prerequisites
+  ansible.builtin.package:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg2
+    state: present
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Install the official Nginx RPM signing key
+  ansible.builtin.get_url:
+    url: "{{ librenms_nginx_official_repository_key_url }}"
+    dest: "{{ librenms_nginx_official_repository_key_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Read the official Nginx signing-key fingerprint on RedHat
+  ansible.builtin.shell: |
+    set -o pipefail
+    gpg --batch --show-keys --with-colons "{{ librenms_nginx_official_repository_key_path }}" |
+      awk -F: '$1 == "fpr" { print toupper($10); exit }'
+  args:
+    executable: /bin/bash
+  register: librenms_nginx_redhat_key_fingerprint
+  changed_when: false
+  check_mode: false
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Validate the official Nginx signing-key fingerprint on RedHat
+  ansible.builtin.assert:
+    that:
+      - librenms_nginx_redhat_key_fingerprint.stdout | trim == librenms_nginx_official_repository_key_fingerprint
+    fail_msg: >-
+      The downloaded official Nginx signing key does not match the configured
+      fingerprint. Refusing to configure the Nginx repository.
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool
+
+- name: Configure the official Nginx YUM repository
+  ansible.builtin.copy:
+    dest: "{{ librenms_nginx_official_repository_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [nginx-{{ librenms_nginx_channel }}]
+      name=nginx {{ librenms_nginx_channel }} repo
+      baseurl={{ librenms_nginx_official_rpm_baseurl }}
+      enabled=1
+      gpgcheck=1
+      repo_gpgcheck=0
+      gpgkey=file://{{ librenms_nginx_official_repository_key_path }}
+      module_hotfixes=true
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_repository_mode == 'official'
+    - librenms_enable_extra_repos | bool

@@ -1,0 +1,11 @@
+---
+- name: Execute one reviewed operating-system upgrade command
+  hosts: librenms_nodes:librenms_db:librenms_redis:lb_nodes:gluster_nodes:!maintenance_nodes:!decommission_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: os_upgrade
+      vars:
+        librenms_os_upgrade_action: execute

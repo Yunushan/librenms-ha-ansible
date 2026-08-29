@@ -1,0 +1,1064 @@
+---
+- name: Load OS-specific package variables for the runtime upgrade
+  ansible.builtin.include_vars:
+    file: "{{ lookup('first_found', runtime_upgrade_lookup_params) }}"
+  vars:
+    runtime_upgrade_lookup_params:
+      files:
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
+      paths:
+        - "{{ role_path }}/../common/vars"
+
+- name: Normalize requested runtime upgrade components
+  ansible.builtin.set_fact:
+    librenms_runtime_upgrade_components_effective: >-
+      {{
+        (librenms_runtime_upgrade_components | string).split(',')
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+
+- name: Resolve selected runtime upgrade components
+  ansible.builtin.set_fact:
+    librenms_runtime_upgrade_nginx_selected: >-
+      {{ 'nginx' in librenms_runtime_upgrade_components_effective }}
+    librenms_runtime_upgrade_php_selected: >-
+      {{ 'php' in librenms_runtime_upgrade_components_effective }}
+    librenms_runtime_upgrade_mariadb_selected: >-
+      {{ 'mariadb' in librenms_runtime_upgrade_components_effective }}
+    librenms_redhat_repo_components: >-
+      {{ librenms_runtime_upgrade_components_effective }}
+
+- name: Validate bounded runtime upgrade request
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_action == 'execute'
+      - librenms_runtime_upgrade_confirm | bool
+      - ansible_play_hosts_all | length == 1
+      - ansible_facts.os_family in ['Debian', 'RedHat']
+      - ansible_facts.distribution in librenms_supported_distribution_major_versions
+      - >-
+        (ansible_facts.distribution_major_version | string)
+        in librenms_supported_distribution_major_versions[ansible_facts.distribution]
+      - >-
+        (
+          librenms_supported_distribution_min_versions
+          .get(ansible_facts.distribution, {})
+          .get(ansible_facts.distribution_major_version | string, '')
+          | length == 0
+        )
+        or (
+          ansible_facts.distribution_version
+          is version(
+            librenms_supported_distribution_min_versions
+            .get(ansible_facts.distribution, {})
+            .get(ansible_facts.distribution_major_version | string, ''),
+            '>='
+          )
+        )
+      - librenms_runtime_upgrade_components_effective | length > 0
+      - >-
+        librenms_runtime_upgrade_components_effective
+        | difference(['nginx', 'php', 'mariadb'])
+        | length == 0
+      - >-
+        not librenms_runtime_upgrade_nginx_selected
+        or inventory_hostname in groups.get('librenms_nodes', [])
+      - >-
+        not librenms_runtime_upgrade_php_selected
+        or inventory_hostname in groups.get('librenms_nodes', [])
+      - >-
+        not librenms_runtime_upgrade_mariadb_selected
+        or inventory_hostname in groups.get('librenms_db', [])
+      - >-
+        not librenms_runtime_upgrade_nginx_selected
+        or librenms_manage_nginx | bool
+      - >-
+        not librenms_runtime_upgrade_php_selected
+        or librenms_manage_php_fpm | bool
+      - >-
+        not librenms_runtime_upgrade_mariadb_selected
+        or librenms_db_mode in ['local', 'galera']
+      - >-
+        not librenms_runtime_upgrade_mariadb_selected
+        or librenms_runtime_upgrade_mariadb_confirm | bool
+    fail_msg: >-
+      Runtime package refresh is guarded. Use exactly one supported Debian or
+      RHEL-family host, set librenms_runtime_upgrade_confirm=true, select only
+      nginx, php, or mariadb, and set the separate MariaDB confirmation when
+      refreshing a database package. This role never performs an OS release or
+      MariaDB major-series upgrade.
+
+- name: Check the runtime upgrade maintenance marker
+  ansible.builtin.stat:
+    path: "{{ librenms_runtime_upgrade_maintenance_marker_path }}"
+  register: librenms_runtime_upgrade_maintenance_marker
+  when: librenms_runtime_upgrade_require_maintenance | bool
+
+- name: Require the target node to be in maintenance
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_maintenance_marker.stat.exists | default(false)
+      - librenms_runtime_upgrade_maintenance_marker.stat.isreg | default(false)
+    fail_msg: >-
+      Refusing a package refresh on {{ inventory_hostname }} because the
+      maintenance marker {{ librenms_runtime_upgrade_maintenance_marker_path }}
+      is missing. Run maintenance-enter for this node, verify HA capacity, and
+      retry. This prevents a PHP/Nginx package handoff from occurring while the
+      node is serving traffic.
+  when: librenms_runtime_upgrade_require_maintenance | bool
+
+- name: Validate Nginx runtime upgrade selectors
+  ansible.builtin.assert:
+    that:
+      - librenms_nginx_repository_mode in ['distro', 'official']
+      - librenms_nginx_channel in ['distro', 'stable', 'mainline']
+      - >-
+        (
+          librenms_nginx_repository_mode == 'distro'
+          and librenms_nginx_channel == 'distro'
+        ) or (
+          librenms_nginx_repository_mode == 'official'
+          and librenms_nginx_channel in ['stable', 'mainline']
+        )
+      - >-
+        librenms_nginx_repository_mode != 'official'
+        or librenms_enable_extra_repos | bool
+      - >-
+        librenms_nginx_repository_mode != 'official'
+        or (librenms_nginx_official_repository_key_fingerprint | string | trim)
+        is match('^[A-Fa-f0-9]{40}$')
+      - >-
+        librenms_nginx_expected_series | default('') | string | trim | length == 0
+        or librenms_nginx_expected_series in librenms_supported_nginx_series
+      - librenms_nginx_package_state in ['present', 'latest']
+      - >-
+        (librenms_nginx_package_version | string | trim | length == 0)
+        or librenms_nginx_package_state == 'present'
+  fail_msg: >-
+    Nginx selectors are invalid. Use distro packages or the signed official
+    stable/mainline repository, and keep exact versions with package state
+    present.
+  when: librenms_runtime_upgrade_nginx_selected | bool
+
+- name: Validate PHP runtime upgrade selectors
+  ansible.builtin.assert:
+    that:
+      - librenms_php_selection_mode in ['distro', 'specific', 'latest']
+      - >-
+        librenms_php_selection_mode != 'specific'
+        or (librenms_php_version | string | trim) in librenms_supported_php_versions
+      - >-
+        librenms_php_selection_mode != 'specific'
+        or (librenms_php_version | string | trim | length) > 0
+      - >-
+        ansible_facts.distribution != 'Debian'
+        or librenms_php_selection_mode not in ['specific', 'latest']
+        or (
+          librenms_enable_extra_repos | bool
+          and librenms_debian_php_repository_enabled | bool
+          and (librenms_debian_php_repository_key_fingerprint | string | trim)
+          is match('^[A-Fa-f0-9]{40}$')
+        )
+      - >-
+        ansible_facts.distribution != 'Ubuntu'
+        or (
+          (ansible_facts.distribution_major_version | int) != 22
+          and librenms_php_selection_mode != 'specific'
+          and (librenms_ubuntu_php_version_override | default('') | trim | length == 0)
+        )
+        or (
+          librenms_enable_extra_repos | bool
+          and librenms_ubuntu_php_repository_enabled | bool
+        )
+      - >-
+        ansible_facts.distribution != 'Ubuntu'
+        or librenms_php_selection_mode != 'specific'
+        or (librenms_php_version | string | trim) in librenms_supported_php_versions
+      - >-
+        ansible_facts.distribution not in ['RedHat', 'Red Hat Enterprise Linux', 'Rocky', 'AlmaLinux', 'CentOS']
+        or not (
+          librenms_php_selection_mode == 'specific'
+          and (librenms_php_version | string | trim) in ['8.4', '8.5']
+        )
+        or (
+          (ansible_facts.distribution_major_version | int) >= 10
+          or (
+            librenms_redhat_enable_remi | bool
+            and librenms_redhat_remi_release_url | string | trim | length > 0
+          )
+        )
+  fail_msg: >-
+    PHP selectors are invalid. Specific 8.4/8.5 on Debian-family hosts needs
+    the signed PHP repository; EL8/9 needs a reviewed Remi release package,
+    while EL10 uses its native PHP stream.
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Reject exact PHP selection on the native EL10 path
+  ansible.builtin.assert:
+    that:
+      - not (
+          ansible_facts.os_family == 'RedHat'
+          and (ansible_facts.distribution_major_version | int) >= 10
+          and librenms_php_selection_mode == 'specific'
+        )
+    fail_msg: >-
+      Exact PHP stream selection is not implemented for EL10 in the bounded
+      runtime workflow. EL10 uses its native PHP package stream; use selection
+      mode distro or latest, or provide and review a separate EL10 package
+      contract first.
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Resolve MariaDB runtime repository and target series
+  ansible.builtin.set_fact:
+    librenms_mariadb_repository_mode_effective: >-
+      {{
+        'upstream'
+        if ansible_facts.os_family == 'Debian'
+        and librenms_mariadb_selection_mode in ['specific', 'lts']
+        else librenms_mariadb_repository_mode
+      }}
+    librenms_mariadb_upstream_series_effective: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_mariadb_upstream_series | string | trim
+      }}
+    librenms_redhat_mariadb_stream_effective: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_redhat_mariadb_stream | string | trim
+      }}
+    librenms_redhat_mariadb_expected_series_effective: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_redhat_mariadb_expected_series | string | trim
+      }}
+    librenms_runtime_upgrade_mariadb_target_series: >-
+      {{
+        librenms_mariadb_selected_series | string | trim
+        if librenms_mariadb_selection_mode == 'specific'
+        else librenms_mariadb_lts_series | string | trim
+        if librenms_mariadb_selection_mode == 'lts'
+        else librenms_mariadb_upstream_series | string | trim
+        if librenms_mariadb_repository_mode_effective == 'upstream'
+        else librenms_redhat_mariadb_expected_series | string | trim
+        if ansible_facts.os_family == 'RedHat'
+        else librenms_ubuntu_mariadb_expected_series.get(
+          ansible_facts.distribution_major_version | string, ''
+        )
+        if ansible_facts.distribution == 'Ubuntu'
+        else ''
+      }}
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Validate MariaDB runtime upgrade selector
+  ansible.builtin.assert:
+    that:
+      - librenms_mariadb_selection_mode in ['distro', 'specific', 'lts', 'latest']
+      - librenms_mariadb_repository_mode in ['distro', 'upstream']
+      - >-
+        ansible_facts.os_family != 'Debian'
+        or librenms_mariadb_repository_mode_effective != 'upstream'
+        or librenms_runtime_upgrade_mariadb_target_series in
+        librenms_mariadb_upstream_supported_series
+      - >-
+        ansible_facts.os_family != 'Debian'
+        or librenms_mariadb_repository_mode_effective != 'upstream'
+        or librenms_mariadb_upstream_repo_setup_checksum is
+        match('^sha256:[A-Fa-f0-9]{64}$')
+      - >-
+        ansible_facts.os_family != 'RedHat'
+        or librenms_runtime_upgrade_mariadb_target_series in
+        librenms_redhat_mariadb_supported_streams
+      - >-
+        ansible_facts.os_family != 'RedHat'
+        or librenms_runtime_upgrade_mariadb_target_series in
+        librenms_redhat_mariadb_supported_streams_by_major.get(
+          ansible_facts.distribution_major_version | string, []
+        )
+      - >-
+        ansible_facts.os_family != 'RedHat'
+        or librenms_mariadb_selection_mode not in ['specific', 'lts']
+        or librenms_enable_extra_repos | bool
+  fail_msg: >-
+    MariaDB selectors are invalid or outside the supported distribution stream
+    map. The fast path can refresh packages only inside the currently installed
+    major series; it cannot perform a MariaDB major upgrade.
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Read installed MariaDB series before package refresh
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --version
+  register: librenms_runtime_upgrade_mariadb_version_before
+  changed_when: false
+  failed_when: false
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Determine installed MariaDB series before package refresh
+  ansible.builtin.set_fact:
+    librenms_runtime_upgrade_mariadb_installed_series_before: >-
+      {{
+        (
+          librenms_runtime_upgrade_mariadb_version_before.stdout | default('')
+          ~ ' '
+          ~ librenms_runtime_upgrade_mariadb_version_before.stderr | default('')
+        )
+        | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
+        | first
+        | default('')
+      }}
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Refuse MariaDB major-series change in the package-only workflow
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_mariadb_version_before.rc == 0
+      - librenms_runtime_upgrade_mariadb_installed_series_before | length > 0
+      - >-
+        librenms_runtime_upgrade_mariadb_target_series | length == 0
+        or librenms_runtime_upgrade_mariadb_installed_series_before
+        == librenms_runtime_upgrade_mariadb_target_series
+  fail_msg: >-
+    Refusing a MariaDB major-series change in runtime-upgrade. Installed:
+    {{ librenms_runtime_upgrade_mariadb_installed_series_before | default('unknown') }};
+    requested: {{ librenms_runtime_upgrade_mariadb_target_series | default('distribution-managed') }}.
+    Use the version-specific rolling Galera upgrade runbook instead.
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Configure the signed Nginx repository policy
+  ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/nginx_repos.yml"
+  when: librenms_runtime_upgrade_nginx_selected | bool
+
+- name: Configure Ubuntu PHP repository policy
+  ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/ubuntu_repos.yml"
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.distribution == 'Ubuntu'
+
+- name: Configure Debian PHP repository policy
+  ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/debian_repos.yml"
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.distribution == 'Debian'
+    - librenms_php_selection_mode in ['specific', 'latest']
+
+- name: Configure RedHat PHP or MariaDB repository policy
+  ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/redhat_repos.yml"
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_enable_extra_repos | bool
+    - >-
+      librenms_runtime_upgrade_php_selected | bool
+      or librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Configure Debian MariaDB upstream repository policy
+  ansible.builtin.include_tasks: "{{ role_path }}/../common/tasks/mariadb_repos.yml"
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_mariadb_repository_mode_effective == 'upstream'
+
+- name: Refresh Debian package metadata after repository changes
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Refresh Debian PHP packages within the selected stream
+  ansible.builtin.apt:
+    name: "{{ librenms_php_package_names }}"
+    state: latest
+    update_cache: false
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Refresh RedHat PHP packages within the selected stream
+  ansible.builtin.package:
+    name: "{{ librenms_php_package_names }}"
+    state: latest
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Refresh RedHat PHP packages through native DNF on EL8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'upgrade'] + librenms_php_package_names }}
+  register: librenms_runtime_upgrade_el8_php
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_runtime_upgrade_el8_php.stdout | default('')) ~
+    (librenms_runtime_upgrade_el8_php.stderr | default('')))
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Install the exact Debian Nginx package version
+  ansible.builtin.apt:
+    name: "{{ librenms_nginx_package_name }}={{ librenms_nginx_package_version }}"
+    state: present
+    update_cache: false
+  when:
+    - librenms_runtime_upgrade_nginx_selected | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_package_version | string | trim | length > 0
+
+- name: Install the exact RedHat Nginx package version
+  ansible.builtin.package:
+    name: "{{ librenms_nginx_package_name }}-{{ librenms_nginx_package_version }}"
+    state: present
+  when:
+    - librenms_runtime_upgrade_nginx_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_package_version | string | trim | length > 0
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Install the exact RedHat Nginx version through native DNF on EL8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - install
+      - "{{ librenms_nginx_package_name }}-{{ librenms_nginx_package_version }}"
+  register: librenms_runtime_upgrade_el8_nginx_exact
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_runtime_upgrade_el8_nginx_exact.stdout | default('')) ~
+    (librenms_runtime_upgrade_el8_nginx_exact.stderr | default('')))
+  when:
+    - librenms_runtime_upgrade_nginx_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_nginx_package_version | string | trim | length > 0
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Refresh Debian Nginx package within the selected repository policy
+  ansible.builtin.apt:
+    name: "{{ librenms_nginx_package_name }}"
+    state: latest
+    update_cache: false
+  when:
+    - librenms_runtime_upgrade_nginx_selected | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_nginx_package_version | string | trim | length == 0
+    - librenms_nginx_package_state == 'latest'
+
+- name: Refresh RedHat Nginx package within the selected repository policy
+  ansible.builtin.package:
+    name: "{{ librenms_nginx_package_name }}"
+    state: latest
+  when:
+    - librenms_runtime_upgrade_nginx_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - librenms_nginx_package_version | string | trim | length == 0
+    - librenms_nginx_package_state == 'latest'
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Refresh RedHat Nginx through native DNF on EL8
+  ansible.builtin.command:
+    argv:
+      - dnf
+      - -y
+      - upgrade
+      - "{{ librenms_nginx_package_name }}"
+  register: librenms_runtime_upgrade_el8_nginx
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_runtime_upgrade_el8_nginx.stdout | default('')) ~
+    (librenms_runtime_upgrade_el8_nginx.stderr | default('')))
+  when:
+    - librenms_runtime_upgrade_nginx_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_nginx_package_version | string | trim | length == 0
+    - librenms_nginx_package_state == 'latest'
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Refresh Debian MariaDB packages within the selected series
+  ansible.builtin.apt:
+    name: "{{ librenms_db_packages }}"
+    state: latest
+    update_cache: false
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Refresh RedHat MariaDB packages within the selected stream
+  ansible.builtin.package:
+    name: "{{ librenms_db_packages }}"
+    state: latest
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - >-
+      not (
+        ansible_facts.distribution_major_version | int == 8
+        and librenms_rhel8_package_cli_fallback | default(true) | bool
+      )
+
+- name: Refresh RedHat MariaDB through native DNF on EL8
+  ansible.builtin.command:
+    argv: >-
+      {{ ['dnf', '-y', 'upgrade'] + librenms_db_packages }}
+  register: librenms_runtime_upgrade_el8_mariadb
+  changed_when: >-
+    'Nothing to do' not in
+    ((librenms_runtime_upgrade_el8_mariadb.stdout | default('')) ~
+    (librenms_runtime_upgrade_el8_mariadb.stderr | default('')))
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version | int == 8
+    - librenms_rhel8_package_cli_fallback | default(true) | bool
+
+- name: Pause briefly for package post-install service handoff
+  ansible.builtin.pause:
+    seconds: "{{ librenms_runtime_upgrade_post_package_delay | int }}"
+  when: librenms_runtime_upgrade_components_effective | length > 0
+
+- name: Detect active PHP CLI stream after package refresh
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+  register: librenms_runtime_upgrade_php_version
+  changed_when: false
+  failed_when: false
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Resolve the requested versioned PHP CLI stream
+  ansible.builtin.set_fact:
+    librenms_runtime_upgrade_php_requested_version: >-
+      {{
+        librenms_php_version | string | trim
+        if librenms_php_selection_mode == 'specific'
+        else librenms_ubuntu_php_version_effective | default('') | string | trim
+        if ansible_facts.distribution == 'Ubuntu'
+        and librenms_ubuntu_php_versioned | bool
+        else ''
+      }}
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Resolve active PHP-FPM stream paths
+  ansible.builtin.set_fact:
+    librenms_runtime_upgrade_php_version_effective: >-
+      {{
+        librenms_runtime_upgrade_php_requested_version
+        if librenms_runtime_upgrade_php_requested_version | length > 0
+        else librenms_runtime_upgrade_php_version.stdout | trim
+      }}
+    librenms_runtime_upgrade_php_fpm_service: >-
+      {{
+        'php' ~ (
+          librenms_runtime_upgrade_php_requested_version
+          if librenms_runtime_upgrade_php_requested_version | length > 0
+          else librenms_runtime_upgrade_php_version.stdout | trim
+        ) ~ '-fpm'
+        if ansible_facts.os_family == 'Debian'
+        else librenms_php_fpm_service_name
+      }}
+    librenms_runtime_upgrade_php_fpm_binary: >-
+      {{
+        '/usr/sbin/php-fpm' ~ (
+          librenms_runtime_upgrade_php_requested_version
+          if librenms_runtime_upgrade_php_requested_version | length > 0
+          else librenms_runtime_upgrade_php_version.stdout | trim
+        )
+        if ansible_facts.os_family == 'Debian'
+        else '/usr/sbin/php-fpm'
+      }}
+    librenms_runtime_upgrade_php_fpm_pool_dir: >-
+      {{
+        '/etc/php/' ~ (
+          librenms_runtime_upgrade_php_requested_version
+          if librenms_runtime_upgrade_php_requested_version | length > 0
+          else librenms_runtime_upgrade_php_version.stdout | trim
+        ) ~ '/fpm/pool.d'
+        if ansible_facts.os_family == 'Debian'
+        else librenms_php_fpm_pool_dir
+      }}
+    librenms_runtime_upgrade_php_cli_ini: >-
+      {{
+        '/etc/php/' ~ (
+          librenms_runtime_upgrade_php_requested_version
+          if librenms_runtime_upgrade_php_requested_version | length > 0
+          else librenms_runtime_upgrade_php_version.stdout | trim
+        ) ~ '/cli/php.ini'
+        if ansible_facts.os_family == 'Debian'
+        else librenms_php_cli_ini_path
+      }}
+    librenms_runtime_upgrade_php_fpm_ini: >-
+      {{
+        '/etc/php/' ~ (
+          librenms_runtime_upgrade_php_requested_version
+          if librenms_runtime_upgrade_php_requested_version | length > 0
+          else librenms_runtime_upgrade_php_version.stdout | trim
+        ) ~ '/fpm/php.ini'
+        if ansible_facts.os_family == 'Debian'
+        else librenms_php_fpm_ini_path
+      }}
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Inspect the requested Debian PHP CLI alternative
+  ansible.builtin.command:
+    argv:
+      - update-alternatives
+      - --query
+      - php
+  register: librenms_runtime_upgrade_php_alternative_query
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_runtime_upgrade_php_requested_version | length > 0
+
+- name: Select the requested Debian PHP CLI alternative
+  ansible.builtin.command:
+    argv:
+      - update-alternatives
+      - --set
+      - php
+      - "/usr/bin/php{{ librenms_runtime_upgrade_php_version_effective }}"
+  register: librenms_runtime_upgrade_php_alternative
+  changed_when: true
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_runtime_upgrade_php_requested_version | length > 0
+    - >-
+      ('Value: /usr/bin/php' ~ librenms_runtime_upgrade_php_requested_version)
+      not in (librenms_runtime_upgrade_php_alternative_query.stdout | default(''))
+
+- name: Detect active PHP CLI stream after the requested alternative is selected
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+  register: librenms_runtime_upgrade_php_version_after_selection
+  changed_when: false
+  failed_when: false
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Validate active PHP runtime after package refresh
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_php_version_after_selection.rc == 0
+      - >-
+        librenms_runtime_upgrade_php_version_effective in
+        librenms_supported_php_versions
+      - >-
+        librenms_runtime_upgrade_php_requested_version | length == 0
+        or librenms_runtime_upgrade_php_version_after_selection.stdout | trim
+        == librenms_runtime_upgrade_php_requested_version
+  fail_msg: >-
+    PHP package refresh left an unavailable or mismatched CLI stream on
+    {{ inventory_hostname }}. Detected:
+    {{ librenms_runtime_upgrade_php_version_after_selection.stdout | default('unknown') | trim }}.
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Ensure the selected Debian PHP-FPM pool directory exists
+  ansible.builtin.stat:
+    path: "{{ librenms_runtime_upgrade_php_fpm_pool_dir }}"
+  register: librenms_runtime_upgrade_php_pool_dir
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Require the selected Debian PHP-FPM pool directory
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_php_pool_dir.stat.isdir | default(false)
+  fail_msg: >-
+    The selected PHP-FPM package did not create
+    {{ librenms_runtime_upgrade_php_fpm_pool_dir }}. Refusing to start a
+    mismatched web runtime.
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Find old role-managed Debian PHP-FPM pools
+  ansible.builtin.find:
+    paths: /etc/php
+    patterns: librenms.conf
+    file_type: file
+    recurse: true
+  register: librenms_runtime_upgrade_php_pool_files
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Record old role-managed Debian PHP-FPM pools
+  ansible.builtin.set_fact:
+    librenms_runtime_upgrade_stale_php_pools: >-
+      {{
+        librenms_runtime_upgrade_php_pool_files.files | default([])
+        | map(attribute='path')
+        | reject('equalto', librenms_runtime_upgrade_php_fpm_pool_dir ~ '/librenms.conf')
+        | select('match', '^/etc/php/[0-9]+[.][0-9]+/fpm/pool[.]d/librenms[.]conf$')
+        | list
+      }}
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Gather PHP-FPM service facts before stale pool cleanup
+  ansible.builtin.service_facts:
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+    - librenms_runtime_upgrade_stale_php_pools | default([]) | length > 0
+
+- name: Stop old role-managed Debian PHP-FPM streams
+  ansible.builtin.service:
+    name: "php{{ item | regex_replace('^/etc/php/([^/]+)/.*$', '\\1') }}-fpm"
+    state: stopped
+    enabled: false
+  loop: "{{ librenms_runtime_upgrade_stale_php_pools | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - ansible_facts.os_family == 'Debian'
+    - >-
+      (
+        'php' ~ (item | regex_replace('^/etc/php/([^/]+)/.*$', '\\1'))
+        ~ '-fpm.service'
+      ) in (ansible_facts.services | default({}))
+
+- name: Remove old role-managed Debian PHP-FPM pools
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ librenms_runtime_upgrade_stale_php_pools | default([]) }}"
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Set PHP timezone in the selected runtime configuration
+  ansible.builtin.lineinfile:
+    path: "{{ item }}"
+    regexp: '^;?date.timezone ='
+    line: "date.timezone = {{ librenms_timezone }}"
+    create: false
+  loop:
+    - "{{ librenms_runtime_upgrade_php_cli_ini }}"
+    - "{{ librenms_runtime_upgrade_php_fpm_ini }}"
+  when:
+    - librenms_runtime_upgrade_php_selected | bool
+    - item | length > 0
+
+- name: Deploy the selected LibreNMS PHP-FPM pool
+  ansible.builtin.template:
+    src: "{{ role_path }}/../librenms_app/templates/php-fpm-librenms.conf.j2"
+    dest: "{{ librenms_runtime_upgrade_php_fpm_pool_dir }}/librenms.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Validate the selected PHP-FPM configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_runtime_upgrade_php_fpm_binary }}"
+      - -t
+  register: librenms_runtime_upgrade_php_config_test
+  changed_when: false
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Restart the selected PHP-FPM service with bounded diagnostics
+  block:
+    - name: Reset failed selected PHP-FPM service state
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - reset-failed
+          - "{{ librenms_runtime_upgrade_php_fpm_service }}"
+      changed_when: false
+      failed_when: false
+      when: ansible_facts.service_mgr == 'systemd'
+
+    - name: Restart selected PHP-FPM service through systemd
+      ansible.builtin.systemd_service:
+        name: "{{ librenms_runtime_upgrade_php_fpm_service }}"
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      when: ansible_facts.service_mgr == 'systemd'
+
+    - name: Restart selected PHP-FPM service without systemd
+      ansible.builtin.service:
+        name: "{{ librenms_runtime_upgrade_php_fpm_service }}"
+        state: restarted
+        enabled: true
+      when: ansible_facts.service_mgr != 'systemd'
+  rescue:
+    - name: Capture failed PHP-FPM service status
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_runtime_upgrade_php_fpm_service }}"
+          - --no-pager
+          - -l
+      register: librenms_runtime_upgrade_php_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture failed PHP-FPM service journal
+      ansible.builtin.command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_runtime_upgrade_php_fpm_service }}"
+          - -n
+          - "120"
+          - --no-pager
+      register: librenms_runtime_upgrade_php_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with PHP-FPM runtime upgrade diagnostics
+      ansible.builtin.fail:
+        msg: |-
+          Failed to restart {{ librenms_runtime_upgrade_php_fpm_service }} on
+          {{ inventory_hostname }}.
+
+          PHP-FPM config test:
+          {{ librenms_runtime_upgrade_php_config_test.stdout | default('') }}
+          {{ librenms_runtime_upgrade_php_config_test.stderr | default('') }}
+
+          systemctl status:
+          {{ librenms_runtime_upgrade_php_status.stdout | default('') }}
+          {{ librenms_runtime_upgrade_php_status.stderr | default('') }}
+
+          recent journal:
+          {{ librenms_runtime_upgrade_php_journal.stdout | default('') }}
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Wait for the selected LibreNMS PHP-FPM socket
+  ansible.builtin.wait_for:
+    path: "{{ librenms_php_fpm_socket }}"
+    state: present
+    timeout: "{{ librenms_runtime_upgrade_service_timeout | int }}"
+  when: librenms_runtime_upgrade_php_selected | bool
+
+- name: Validate Nginx configuration after package refresh
+  block:
+    - name: Run Nginx configuration test
+      ansible.builtin.command:
+        argv:
+          - nginx
+          - -t
+      changed_when: false
+
+    - name: Reload Nginx through systemd after package refresh
+      ansible.builtin.systemd_service:
+        name: "{{ librenms_nginx_service_name }}"
+        state: reloaded
+        enabled: true
+      when: ansible_facts.service_mgr == 'systemd'
+
+    - name: Start Nginx after package refresh without systemd
+      ansible.builtin.service:
+        name: "{{ librenms_nginx_service_name }}"
+        state: started
+        enabled: true
+      when: ansible_facts.service_mgr != 'systemd'
+  rescue:
+    - name: Capture failed Nginx service status
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_nginx_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_runtime_upgrade_nginx_status
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Nginx runtime upgrade diagnostics
+      ansible.builtin.fail:
+        msg: |-
+          Nginx configuration or reload failed on {{ inventory_hostname }}.
+
+          systemctl status:
+          {{ librenms_runtime_upgrade_nginx_status.stdout | default('') }}
+          {{ librenms_runtime_upgrade_nginx_status.stderr | default('') }}
+  when: librenms_runtime_upgrade_nginx_selected | bool
+
+- name: Detect Nginx runtime version after package refresh
+  ansible.builtin.command:
+    argv:
+      - nginx
+      - -v
+  register: librenms_runtime_upgrade_nginx_version
+  changed_when: false
+  failed_when: false
+  when: librenms_runtime_upgrade_nginx_selected | bool
+
+- name: Validate Nginx runtime series after package refresh
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_nginx_version.rc == 0
+      - >-
+        (
+          librenms_runtime_upgrade_nginx_version.stdout | default('')
+          ~ ' '
+          ~ librenms_runtime_upgrade_nginx_version.stderr | default('')
+        )
+        | regex_search('[0-9]+[.][0-9]+')
+        in librenms_supported_nginx_series
+      - >-
+        librenms_nginx_expected_series | default('') | string | trim | length == 0
+        or (
+          (
+            librenms_runtime_upgrade_nginx_version.stdout | default('')
+            ~ ' '
+            ~ librenms_runtime_upgrade_nginx_version.stderr | default('')
+          )
+          | regex_search('[0-9]+[.][0-9]+')
+        ) == (librenms_nginx_expected_series | string | trim)
+  fail_msg: >-
+    Nginx runtime is unavailable or outside the selected series after package
+    refresh. Detected: {{ librenms_runtime_upgrade_nginx_version.stderr | default('') | trim }}.
+  when: librenms_runtime_upgrade_nginx_selected | bool
+
+- name: Read MariaDB series after package refresh
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --version
+  register: librenms_runtime_upgrade_mariadb_version_after
+  changed_when: false
+  failed_when: false
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Determine MariaDB series after package refresh
+  ansible.builtin.set_fact:
+    librenms_runtime_upgrade_mariadb_installed_series_after: >-
+      {{
+        (
+          librenms_runtime_upgrade_mariadb_version_after.stdout | default('')
+          ~ ' '
+          ~ librenms_runtime_upgrade_mariadb_version_after.stderr | default('')
+        )
+        | regex_findall('Distrib ([0-9]+\\.[0-9]+)')
+        | first
+        | default('')
+      }}
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Validate MariaDB remained in the same series
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_mariadb_version_after.rc == 0
+      - >-
+        librenms_runtime_upgrade_mariadb_installed_series_after
+        == librenms_runtime_upgrade_mariadb_installed_series_before
+      - >-
+        librenms_runtime_upgrade_mariadb_target_series | length == 0
+        or librenms_runtime_upgrade_mariadb_installed_series_after
+        == librenms_runtime_upgrade_mariadb_target_series
+  fail_msg: >-
+    MariaDB package refresh changed or failed to report the server series.
+    Before: {{ librenms_runtime_upgrade_mariadb_installed_series_before }};
+    after: {{ librenms_runtime_upgrade_mariadb_installed_series_after }};
+    requested: {{ librenms_runtime_upgrade_mariadb_target_series | default('distribution-managed') }}.
+  when: librenms_runtime_upgrade_mariadb_selected | bool
+
+- name: Verify MariaDB service after package refresh
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_mariadb_service_name }}"
+  register: librenms_runtime_upgrade_mariadb_service
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Require MariaDB service to be active after package refresh
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_mariadb_service.rc == 0
+      - librenms_runtime_upgrade_mariadb_service.stdout | trim == 'active'
+  fail_msg: >-
+    MariaDB is not active after the bounded package refresh. No database
+    bootstrap or data-directory repair was attempted.
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - ansible_facts.service_mgr == 'systemd'
+
+- name: Verify local Galera state after package refresh
+  ansible.builtin.command:
+    argv:
+      - mariadb
+      - --protocol=socket
+      - -NBe
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_local_state_comment','wsrep_ready');
+  register: librenms_runtime_upgrade_galera_state
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - librenms_db_mode == 'galera'
+
+- name: Require local Galera member to be Primary and Synced
+  ansible.builtin.assert:
+    that:
+      - librenms_runtime_upgrade_galera_state.rc == 0
+      - "'Primary' in librenms_runtime_upgrade_galera_state.stdout"
+      - "'Synced' in librenms_runtime_upgrade_galera_state.stdout"
+      - "'ON' in librenms_runtime_upgrade_galera_state.stdout"
+  fail_msg: >-
+    The local Galera member is not Primary/Synced/ready after the bounded
+    package refresh. Keep this node out of service and use the recovery or
+    version-specific rolling-upgrade procedure.
+  when:
+    - librenms_runtime_upgrade_mariadb_selected | bool
+    - librenms_db_mode == 'galera'
+
+- name: Report bounded runtime upgrade result
+  ansible.builtin.debug:
+    msg:
+      - "Runtime package upgrade completed on {{ inventory_hostname }}"
+      - "Components: {{ librenms_runtime_upgrade_components_effective | join(', ') }}"
+      - "No OS release upgrade, MariaDB major-series change, database bootstrap, or automatic reboot was performed."

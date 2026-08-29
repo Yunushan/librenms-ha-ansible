@@ -1,0 +1,9 @@
+---
+- name: Read-only one-node MariaDB upgrade preflight
+  hosts: librenms_db:!maintenance_nodes:!decommission_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: mariadb_upgrade_preflight

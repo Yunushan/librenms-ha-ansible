@@ -1,0 +1,170 @@
+---
+- name: Resolve the requested OS upgrade identity
+  ansible.builtin.set_fact:
+    librenms_os_upgrade_current_family_key: >-
+      {{
+        'RedHat'
+        if ansible_facts.os_family == 'RedHat'
+        else ansible_facts.distribution
+      }}
+    librenms_os_upgrade_current_distribution_key: >-
+      {{
+        'RHEL'
+        if ansible_facts.distribution in ['RedHat', 'RHEL', 'Red Hat Enterprise Linux']
+        else 'Rocky'
+        if ansible_facts.distribution in ['Rocky', 'Rocky Linux']
+        else 'AlmaLinux'
+        if ansible_facts.distribution in ['AlmaLinux', 'Alma']
+        else ansible_facts.distribution
+      }}
+    librenms_os_upgrade_target_distribution_effective: >-
+      {{
+        librenms_os_upgrade_target_distribution | string | trim
+        if librenms_os_upgrade_target_distribution | string | trim | length > 0
+        else ansible_facts.distribution
+      }}
+    librenms_os_upgrade_target_major_effective: >-
+      {{ librenms_os_upgrade_target_major | string | trim }}
+    librenms_os_upgrade_current_min_version: >-
+      {{
+        librenms_supported_distribution_min_versions
+        .get(ansible_facts.distribution, {})
+        .get(ansible_facts.distribution_major_version | string, '')
+      }}
+
+- name: Resolve the requested OS upgrade family
+  ansible.builtin.set_fact:
+    librenms_os_upgrade_target_family_key: >-
+      {{
+        'RedHat'
+        if librenms_os_upgrade_target_distribution_effective in [
+          'RedHat', 'RHEL', 'Red Hat Enterprise Linux', 'Rocky',
+          'Rocky Linux', 'AlmaLinux', 'Alma', 'CentOS'
+        ]
+        else librenms_os_upgrade_target_distribution_effective
+      }}
+    librenms_os_upgrade_target_distribution_key: >-
+      {{
+        'RHEL'
+        if librenms_os_upgrade_target_distribution_effective in [
+          'RedHat', 'RHEL', 'Red Hat Enterprise Linux'
+        ]
+        else 'Rocky'
+        if librenms_os_upgrade_target_distribution_effective in ['Rocky', 'Rocky Linux']
+        else 'AlmaLinux'
+        if librenms_os_upgrade_target_distribution_effective in ['AlmaLinux', 'Alma']
+        else librenms_os_upgrade_target_distribution_effective
+      }}
+
+- name: Validate OS upgrade action and target
+  ansible.builtin.assert:
+    that:
+      - librenms_os_upgrade_action in ['preflight', 'execute']
+      - ansible_facts.os_family in ['Debian', 'RedHat']
+      - >-
+        librenms_os_upgrade_current_family_key in
+        librenms_os_upgrade_supported_transitions
+      - >-
+        (ansible_facts.distribution_major_version | string)
+        in librenms_os_upgrade_supported_transitions
+        .get(librenms_os_upgrade_current_family_key, {})
+      - >-
+        librenms_os_upgrade_current_min_version | length == 0
+        or ansible_facts.distribution_version
+        is version(librenms_os_upgrade_current_min_version, '>=')
+      - librenms_os_upgrade_target_distribution_effective | length > 0
+      - librenms_os_upgrade_target_major_effective is match('^[0-9]+$')
+      - >-
+        librenms_os_upgrade_target_family_key
+        == librenms_os_upgrade_current_family_key
+      - >-
+        librenms_os_upgrade_target_distribution_key
+        == librenms_os_upgrade_current_distribution_key
+      - >-
+        librenms_os_upgrade_target_major_effective in
+        librenms_os_upgrade_supported_transitions
+        .get(librenms_os_upgrade_current_family_key, {})
+        .get(ansible_facts.distribution_major_version | string, [])
+      - >-
+        librenms_os_upgrade_target_major_effective
+        != (ansible_facts.distribution_major_version | string)
+    fail_msg: >-
+      OS upgrade target is outside the supported in-place transition matrix.
+      Current host: {{ ansible_facts.distribution }}
+      {{ ansible_facts.distribution_version }}; requested target:
+      {{ librenms_os_upgrade_target_distribution_effective }}
+      {{ librenms_os_upgrade_target_major_effective }}. Supported transitions
+      are Ubuntu 22->24 and 24->26, Debian 12->13, and EL-family 8->9 and
+      9->10. Cross-distribution replacement and skipped major releases require
+      a separate migration plan.
+
+- name: Require a single host for an OS upgrade operation
+  ansible.builtin.assert:
+    that:
+      - ansible_play_hosts_all | length == 1
+    fail_msg: >-
+      OS upgrade operations must target exactly one host with --limit. The
+      selected host set contains {{ ansible_play_hosts_all | length }} hosts.
+      Run the preflight and execution steps one node at a time.
+
+- name: Check the OS upgrade maintenance marker
+  ansible.builtin.stat:
+    path: "{{ librenms_os_upgrade_maintenance_marker_path }}"
+  register: librenms_os_upgrade_maintenance_marker
+  when: librenms_os_upgrade_require_maintenance | bool
+
+- name: Require the OS target node to be in maintenance
+  ansible.builtin.assert:
+    that:
+      - librenms_os_upgrade_maintenance_marker.stat.exists | default(false)
+      - librenms_os_upgrade_maintenance_marker.stat.isreg | default(false)
+    fail_msg: >-
+      Refusing an OS release operation on {{ inventory_hostname }} because the
+      maintenance marker {{ librenms_os_upgrade_maintenance_marker_path }} is
+      missing. Run maintenance-enter for this node and verify remaining HA
+      capacity before continuing.
+  when: librenms_os_upgrade_require_maintenance | bool
+
+- name: Validate explicit OS upgrade execution confirmation
+  ansible.builtin.assert:
+    that:
+      - librenms_os_upgrade_confirm | bool
+      - librenms_os_upgrade_execute_command | bool
+      - librenms_os_upgrade_command | string | trim | length > 0
+      - not (librenms_os_upgrade_reboot | bool)
+    fail_msg: >-
+      OS upgrade execution is intentionally guarded. Set
+      librenms_os_upgrade_confirm=true, provide the reviewed vendor command
+      through librenms_os_upgrade_command, and keep
+      librenms_os_upgrade_reboot=false. This role never reboots a host
+      automatically.
+  when: librenms_os_upgrade_action == 'execute'
+
+- name: Report OS upgrade preflight plan
+  ansible.builtin.debug:
+    msg:
+      - "Current distribution: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
+      - "Requested target: {{ librenms_os_upgrade_target_distribution_effective }} {{ librenms_os_upgrade_target_major_effective }}"
+      - "Action: {{ librenms_os_upgrade_action }}"
+      - "Execution command supplied: {{ (librenms_os_upgrade_command | string | trim | length > 0) | string }}"
+      - "Automatic reboot: disabled"
+      - >-
+        The project does not copy or migrate database files during an OS
+        upgrade; complete backup, maintenance, console, and rollback checks
+        before executing the vendor-specific command.
+
+- name: Execute the reviewed vendor OS upgrade command  # noqa command-instead-of-shell
+  ansible.builtin.shell:
+    cmd: "{{ librenms_os_upgrade_command }}"
+    executable: /bin/bash
+  register: librenms_os_upgrade_execution
+  changed_when: true
+  when: librenms_os_upgrade_action == 'execute'
+
+- name: Report OS upgrade command result
+  ansible.builtin.debug:
+    msg: >-
+      The reviewed OS upgrade command completed on {{ inventory_hostname }}.
+      Reboot remains an operator action. Run the post-reboot and validation
+      workflow only after the host is back and reachable.
+  when: librenms_os_upgrade_action == 'execute'

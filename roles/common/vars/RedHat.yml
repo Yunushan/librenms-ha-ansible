@@ -16,7 +16,7 @@ librenms_base_packages:
   - mtr
   - net-snmp
   - net-snmp-utils
-  - nginx
+  - "{{ librenms_nginx_package_name }}"
   - nmap
   - php-fpm
   - php-cli
@@ -128,3 +128,19 @@ librenms_snmp_persistent_config_candidates:
 librenms_haproxy_service_name: haproxy
 librenms_keepalived_service_name: keepalived
 librenms_glusterd_service_name: glusterd
+
+librenms_nginx_package_name: nginx
+librenms_php_package_names:
+  - php-fpm
+  - php-cli
+  - php-common
+  - php-curl
+  - php-gd
+  - php-gmp
+  - php-mbstring
+  - php-opcache
+  - php-process
+  - php-snmp
+  - php-xml
+  - php-pecl-zip
+  - php-mysqlnd

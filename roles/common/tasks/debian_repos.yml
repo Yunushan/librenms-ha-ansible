@@ -1,0 +1,75 @@
+---
+- name: Install Debian PHP repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: false
+  when:
+    - librenms_enable_extra_repos | bool
+    - librenms_debian_php_repository_enabled | bool
+
+- name: Ensure Debian PHP APT keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - librenms_enable_extra_repos | bool
+    - librenms_debian_php_repository_enabled | bool
+
+- name: Install the configured Debian PHP repository signing key
+  ansible.builtin.get_url:
+    url: "{{ librenms_debian_php_repository_key_url }}"
+    dest: "{{ librenms_debian_php_repository_keyring }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - librenms_enable_extra_repos | bool
+    - librenms_debian_php_repository_enabled | bool
+
+- name: Read the Debian PHP repository signing-key fingerprint
+  ansible.builtin.shell: |
+    set -o pipefail
+    gpg --batch --show-keys --with-colons "{{ librenms_debian_php_repository_keyring }}" |
+      awk -F: '$1 == "fpr" { print toupper($10); exit }'
+  args:
+    executable: /bin/bash
+  register: librenms_debian_php_key_fingerprint
+  changed_when: false
+  check_mode: false
+  when:
+    - librenms_enable_extra_repos | bool
+    - librenms_debian_php_repository_enabled | bool
+
+- name: Validate the Debian PHP repository signing-key fingerprint
+  ansible.builtin.assert:
+    that:
+      - librenms_debian_php_key_fingerprint.stdout | trim == librenms_debian_php_repository_key_fingerprint
+    fail_msg: >-
+      The downloaded Debian PHP repository signing key does not match the
+      configured fingerprint. Refusing to configure the PHP repository.
+  when:
+    - librenms_enable_extra_repos | bool
+    - librenms_debian_php_repository_enabled | bool
+
+- name: Configure the signed Debian PHP repository
+  ansible.builtin.copy:
+    dest: "{{ librenms_debian_php_repository_source_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Types: deb
+      URIs: {{ librenms_debian_php_repository_uri }}
+      Suites: {{ ansible_facts.distribution_release }}
+      Components: main
+      Signed-By: {{ librenms_debian_php_repository_keyring }}
+  when:
+    - librenms_enable_extra_repos | bool
+    - librenms_debian_php_repository_enabled | bool
