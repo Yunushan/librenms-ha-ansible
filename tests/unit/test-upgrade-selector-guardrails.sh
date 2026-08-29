@@ -93,6 +93,9 @@ main() {
     contains "${RUNTIME_TASKS_FILE}" 'librenms_runtime_upgrade_maintenance_marker_path'
     contains "${RUNTIME_TASKS_FILE}" 'Reject exact PHP selection on the native EL10 path'
     contains "${RUNTIME_TASKS_FILE}" 'No OS release upgrade, MariaDB major-series change'
+    if grep -nE '^  fail_msg:' "${COMMON_TASKS_FILE}" "${RUNTIME_TASKS_FILE}"; then
+        fail 'assert fail_msg must be nested under its module'
+    fi
     contains "${RUNTIME_PLAYBOOK}" 'serial: 1'
     contains "${RUNTIME_PLAYBOOK}" 'any_errors_fatal: true'
 

@@ -138,10 +138,10 @@
       - >-
         (librenms_nginx_package_version | string | trim | length == 0)
         or librenms_nginx_package_state == 'present'
-  fail_msg: >-
-    Nginx selectors are invalid. Use distro packages or the signed official
-    stable/mainline repository, and keep exact versions with package state
-    present.
+    fail_msg: >-
+      Nginx selectors are invalid. Use distro packages or the signed official
+      stable/mainline repository, and keep exact versions with package state
+      present.
   when: librenms_runtime_upgrade_nginx_selected | bool
 
 - name: Validate PHP runtime upgrade selectors
@@ -191,10 +191,10 @@
             and librenms_redhat_remi_release_url | string | trim | length > 0
           )
         )
-  fail_msg: >-
-    PHP selectors are invalid. Specific 8.4/8.5 on Debian-family hosts needs
-    the signed PHP repository; EL8/9 needs a reviewed Remi release package,
-    while EL10 uses its native PHP stream.
+    fail_msg: >-
+      PHP selectors are invalid. Specific 8.4/8.5 on Debian-family hosts needs
+      the signed PHP repository; EL8/9 needs a reviewed Remi release package,
+      while EL10 uses its native PHP stream.
   when: librenms_runtime_upgrade_php_selected | bool
 
 - name: Reject exact PHP selection on the native EL10 path
@@ -292,10 +292,10 @@
         ansible_facts.os_family != 'RedHat'
         or librenms_mariadb_selection_mode not in ['specific', 'lts']
         or librenms_enable_extra_repos | bool
-  fail_msg: >-
-    MariaDB selectors are invalid or outside the supported distribution stream
-    map. The fast path can refresh packages only inside the currently installed
-    major series; it cannot perform a MariaDB major upgrade.
+    fail_msg: >-
+      MariaDB selectors are invalid or outside the supported distribution stream
+      map. The fast path can refresh packages only inside the currently installed
+      major series; it cannot perform a MariaDB major upgrade.
   when: librenms_runtime_upgrade_mariadb_selected | bool
 
 - name: Read installed MariaDB series before package refresh
@@ -332,11 +332,11 @@
         librenms_runtime_upgrade_mariadb_target_series | length == 0
         or librenms_runtime_upgrade_mariadb_installed_series_before
         == librenms_runtime_upgrade_mariadb_target_series
-  fail_msg: >-
-    Refusing a MariaDB major-series change in runtime-upgrade. Installed:
-    {{ librenms_runtime_upgrade_mariadb_installed_series_before | default('unknown') }};
-    requested: {{ librenms_runtime_upgrade_mariadb_target_series | default('distribution-managed') }}.
-    Use the version-specific rolling Galera upgrade runbook instead.
+    fail_msg: >-
+      Refusing a MariaDB major-series change in runtime-upgrade. Installed:
+      {{ librenms_runtime_upgrade_mariadb_installed_series_before | default('unknown') }};
+      requested: {{ librenms_runtime_upgrade_mariadb_target_series | default('distribution-managed') }}.
+      Use the version-specific rolling Galera upgrade runbook instead.
   when: librenms_runtime_upgrade_mariadb_selected | bool
 
 - name: Configure the signed Nginx repository policy
@@ -683,10 +683,10 @@
         librenms_runtime_upgrade_php_requested_version | length == 0
         or librenms_runtime_upgrade_php_version_after_selection.stdout | trim
         == librenms_runtime_upgrade_php_requested_version
-  fail_msg: >-
-    PHP package refresh left an unavailable or mismatched CLI stream on
-    {{ inventory_hostname }}. Detected:
-    {{ librenms_runtime_upgrade_php_version_after_selection.stdout | default('unknown') | trim }}.
+    fail_msg: >-
+      PHP package refresh left an unavailable or mismatched CLI stream on
+      {{ inventory_hostname }}. Detected:
+      {{ librenms_runtime_upgrade_php_version_after_selection.stdout | default('unknown') | trim }}.
   when: librenms_runtime_upgrade_php_selected | bool
 
 - name: Ensure the selected Debian PHP-FPM pool directory exists
@@ -701,10 +701,10 @@
   ansible.builtin.assert:
     that:
       - librenms_runtime_upgrade_php_pool_dir.stat.isdir | default(false)
-  fail_msg: >-
-    The selected PHP-FPM package did not create
-    {{ librenms_runtime_upgrade_php_fpm_pool_dir }}. Refusing to start a
-    mismatched web runtime.
+    fail_msg: >-
+      The selected PHP-FPM package did not create
+      {{ librenms_runtime_upgrade_php_fpm_pool_dir }}. Refusing to start a
+      mismatched web runtime.
   when:
     - librenms_runtime_upgrade_php_selected | bool
     - ansible_facts.os_family == 'Debian'
@@ -952,9 +952,9 @@
           )
           | regex_search('[0-9]+[.][0-9]+')
         ) == (librenms_nginx_expected_series | string | trim)
-  fail_msg: >-
-    Nginx runtime is unavailable or outside the selected series after package
-    refresh. Detected: {{ librenms_runtime_upgrade_nginx_version.stderr | default('') | trim }}.
+    fail_msg: >-
+      Nginx runtime is unavailable or outside the selected series after package
+      refresh. Detected: {{ librenms_runtime_upgrade_nginx_version.stderr | default('') | trim }}.
   when: librenms_runtime_upgrade_nginx_selected | bool
 
 - name: Read MariaDB series after package refresh
@@ -993,11 +993,11 @@
         librenms_runtime_upgrade_mariadb_target_series | length == 0
         or librenms_runtime_upgrade_mariadb_installed_series_after
         == librenms_runtime_upgrade_mariadb_target_series
-  fail_msg: >-
-    MariaDB package refresh changed or failed to report the server series.
-    Before: {{ librenms_runtime_upgrade_mariadb_installed_series_before }};
-    after: {{ librenms_runtime_upgrade_mariadb_installed_series_after }};
-    requested: {{ librenms_runtime_upgrade_mariadb_target_series | default('distribution-managed') }}.
+    fail_msg: >-
+      MariaDB package refresh changed or failed to report the server series.
+      Before: {{ librenms_runtime_upgrade_mariadb_installed_series_before }};
+      after: {{ librenms_runtime_upgrade_mariadb_installed_series_after }};
+      requested: {{ librenms_runtime_upgrade_mariadb_target_series | default('distribution-managed') }}.
   when: librenms_runtime_upgrade_mariadb_selected | bool
 
 - name: Verify MariaDB service after package refresh
@@ -1018,9 +1018,9 @@
     that:
       - librenms_runtime_upgrade_mariadb_service.rc == 0
       - librenms_runtime_upgrade_mariadb_service.stdout | trim == 'active'
-  fail_msg: >-
-    MariaDB is not active after the bounded package refresh. No database
-    bootstrap or data-directory repair was attempted.
+    fail_msg: >-
+      MariaDB is not active after the bounded package refresh. No database
+      bootstrap or data-directory repair was attempted.
   when:
     - librenms_runtime_upgrade_mariadb_selected | bool
     - ansible_facts.service_mgr == 'systemd'
@@ -1048,10 +1048,10 @@
       - "'Primary' in librenms_runtime_upgrade_galera_state.stdout"
       - "'Synced' in librenms_runtime_upgrade_galera_state.stdout"
       - "'ON' in librenms_runtime_upgrade_galera_state.stdout"
-  fail_msg: >-
-    The local Galera member is not Primary/Synced/ready after the bounded
-    package refresh. Keep this node out of service and use the recovery or
-    version-specific rolling-upgrade procedure.
+    fail_msg: >-
+      The local Galera member is not Primary/Synced/ready after the bounded
+      package refresh. Keep this node out of service and use the recovery or
+      version-specific rolling-upgrade procedure.
   when:
     - librenms_runtime_upgrade_mariadb_selected | bool
     - librenms_db_mode == 'galera'

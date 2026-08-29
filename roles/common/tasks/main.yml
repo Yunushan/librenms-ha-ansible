@@ -101,7 +101,7 @@
       - >-
         librenms_php_selection_mode != 'specific'
         or (librenms_php_version | string | trim | length) > 0
-  fail_msg: >-
+    fail_msg: >-
       PHP selection must be distro, latest, or specific. Specific selection
       requires librenms_php_version to be one of the supported PHP streams:
       {{ librenms_supported_php_versions | join(', ') }}.
