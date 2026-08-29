@@ -4,6 +4,16 @@
 
 ### Added
 
+- Added fail-closed optional platform lifecycle guards: k3s and RKE2 server
+  bootstrap now require an explicitly named first host and endpoint/token-based
+  joins, while MicroK8s primary bootstrap is restricted to one named host.
+- Added an explicit Kubernetes chart production profile requiring immutable
+  images, retained shared storage, resource requests/limits, pod security
+  controls, topology spreading, NetworkPolicy rules, and reviewed TLS ingress
+  or Route configuration.
+- Added a pinned Helm chart CI job and a fail-closed production-profile test so
+  chart rendering and its required storage, networking, TLS, and pod-security
+  controls are checked on every change.
 - Added explicit MariaDB Community Server series capability checks for 11.4,
   11.8, and 12.3. Local/standalone deployments support all three series;
   the built-in Galera profile is restricted to 11.4 and 11.8 because the 12.3

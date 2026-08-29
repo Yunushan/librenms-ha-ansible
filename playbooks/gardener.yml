@@ -1,0 +1,7 @@
+---
+- name: Run optional Gardener shoot access adapter
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: gardener_platform

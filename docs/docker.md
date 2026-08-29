@@ -83,3 +83,6 @@ That bundle includes Compose examples for:
 - HAProxy
 
 It is intentionally documented as **experimental** and **operator-driven**. Shared RRD storage, VIP failover, and TLS termination still need deliberate infrastructure choices. The Galera Compose example fails closed until `MARIADB_GALERA_IMAGE` is set to an approved immutable image digest.
+
+For the guarded Ansible lifecycle wrapper, use `make docker-ha` with the
+separate platform inventory and see [Optional Platform Profiles](optional-platforms.md).

@@ -41,10 +41,16 @@ It is intentionally kept separate from the existing Ansible roles:
 
 Each subdirectory contains a `compose.yml` and an `.env.example` or config template.
 
+When using `make docker-ha` or `make podman-ha`, the Compose files must also be
+available on the selected container host. Set
+`CONTAINER_PLATFORM_EXAMPLES_ROOT` to that host-local checkout path; the
+default is `/opt/librenms-ha-ansible/examples/docker-ha`.
+
 ## Boot Order
 
 1. Prepare shared storage for LibreNMS data and RRDs.
-2. Copy each `.env.example` to `.env`, replace every password placeholder, and set `MARIADB_GALERA_IMAGE` to an approved immutable digest.
+2. Copy each `.env.example` to `.env`, replace every password and image
+   placeholder, and set every image variable to an approved immutable digest.
 3. Bootstrap the first Galera node once with `--wsrep-new-cluster`, then bring up the remaining Galera nodes from the normal `compose.yml`.
 4. Bring up the Redis Sentinel stack on all Redis nodes.
 5. Bring up LibreNMS containers on each application node.

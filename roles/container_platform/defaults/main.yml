@@ -1,0 +1,42 @@
+---
+# Optional container deployment profile. This role is never imported by the
+# package-based site playbook.
+librenms_container_platform: docker
+librenms_container_action: preflight
+librenms_container_confirm: false
+librenms_container_become: false
+librenms_container_runtime_binary: >-
+  {{ 'podman' if librenms_container_platform == 'podman' else 'docker' }}
+librenms_container_compose_command:
+  - "{{ librenms_container_runtime_binary }}"
+  - compose
+librenms_container_project_name: librenms-ha
+librenms_container_command_timeout: 300
+librenms_container_examples_root: /opt/librenms-ha-ansible/examples/docker-ha
+librenms_container_manifests:
+  - name: librenms
+    directory: "{{ librenms_container_examples_root }}/librenms"
+    compose_file: compose.yml
+    env_file: .env
+    services:
+      - librenms
+      - dispatcher
+  - name: mariadb-galera
+    directory: "{{ librenms_container_examples_root }}/mariadb-galera"
+    compose_file: compose.yml
+    env_file: .env
+    services:
+      - mariadb-galera
+  - name: redis-sentinel
+    directory: "{{ librenms_container_examples_root }}/redis-sentinel"
+    compose_file: compose.yml
+    env_file: .env
+    services:
+      - redis
+      - sentinel
+  - name: haproxy
+    directory: "{{ librenms_container_examples_root }}/haproxy"
+    compose_file: compose.yml
+    env_file: .env
+    services:
+      - haproxy

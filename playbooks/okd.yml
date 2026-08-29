@@ -1,0 +1,12 @@
+---
+- name: Manage the optional OKD LibreNMS profile
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: kubernetes_platform
+      librenms_kubernetes_platform: okd
+      librenms_kubernetes_cli_binary: oc
+      librenms_kubernetes_cli_version_args:
+        - version
+        - --client

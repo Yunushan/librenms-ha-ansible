@@ -1,0 +1,21 @@
+{% if librenms_k3s_token | string | trim | length > 0 %}
+token: {{ librenms_k3s_token | quote }}
+{% endif %}
+{% if librenms_k3s_node_role == 'server' and inventory_hostname == librenms_k3s_bootstrap_host and librenms_k3s_cluster_init | bool %}
+cluster-init: true
+{% endif %}
+{% if (librenms_k3s_node_role == 'agent' or inventory_hostname != librenms_k3s_bootstrap_host) and librenms_k3s_server_url | string | trim | length > 0 %}
+server: {{ librenms_k3s_server_url | quote }}
+{% endif %}
+{% if librenms_k3s_tls_san | length > 0 %}
+tls-san:
+{% for item in librenms_k3s_tls_san %}
+  - {{ item | quote }}
+{% endfor %}
+{% endif %}
+{% if librenms_k3s_disable_components | length > 0 %}
+disable:
+{% for item in librenms_k3s_disable_components %}
+  - {{ item | quote }}
+{% endfor %}
+{% endif %}

@@ -1,0 +1,7 @@
+---
+- name: Run optional KubeOne lifecycle adapter
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: kubeone_platform

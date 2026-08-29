@@ -1,0 +1,179 @@
+---
+- name: Validate optional Kubernetes application request
+  ansible.builtin.assert:
+    that:
+      - librenms_kubernetes_platform in librenms_kubernetes_supported_platforms
+      - librenms_kubernetes_action in ['preflight', 'deploy', 'delete', 'status']
+      - ansible_play_hosts_all | length == 1
+      - librenms_kubernetes_values_file | string | trim | length > 0
+      - >-
+        librenms_kubernetes_action in ['preflight', 'status']
+        or librenms_kubernetes_confirm | bool
+    fail_msg: >-
+      Kubernetes deployment is opt-in and guarded. Use one controller host,
+      provide a reviewed values file, and set
+      librenms_kubernetes_confirm=true before deploy or delete.
+
+- name: Check the Kubernetes client
+  ansible.builtin.command:
+    argv: "{{ [librenms_kubernetes_cli_binary] + librenms_kubernetes_cli_version_args }}"
+  register: librenms_kubernetes_cli_version
+  changed_when: false
+
+- name: Check Helm
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_kubernetes_helm_binary }}"
+      - version
+  register: librenms_kubernetes_helm_version
+  changed_when: false
+
+- name: Check the Kubernetes chart directory
+  ansible.builtin.stat:
+    path: "{{ librenms_kubernetes_chart_path }}"
+    follow: false
+  register: librenms_kubernetes_chart
+
+- name: Require the Kubernetes chart directory
+  ansible.builtin.assert:
+    that:
+      - librenms_kubernetes_chart.stat.isdir | default(false)
+      - not librenms_kubernetes_chart.stat.islnk | default(false)
+    fail_msg: "Kubernetes chart directory is missing: {{ librenms_kubernetes_chart_path }}"
+
+- name: Check the Kubernetes values file
+  ansible.builtin.stat:
+    path: "{{ librenms_kubernetes_values_file }}"
+    follow: false
+  register: librenms_kubernetes_values
+
+- name: Require the Kubernetes values file
+  ansible.builtin.assert:
+    that:
+      - librenms_kubernetes_values.stat.isreg | default(false)
+      - not librenms_kubernetes_values.stat.islnk | default(false)
+    fail_msg: "Kubernetes values file is missing: {{ librenms_kubernetes_values_file }}"
+
+- name: Build optional Kubernetes context arguments
+  ansible.builtin.set_fact:
+    librenms_kubernetes_kubectl_context_args: >-
+      {{ ['--context', librenms_kubernetes_context]
+         if librenms_kubernetes_context | string | trim | length > 0 else [] }}
+    librenms_kubernetes_helm_context_args: >-
+      {{ ['--kube-context', librenms_kubernetes_context]
+         if librenms_kubernetes_context | string | trim | length > 0 else [] }}
+    librenms_kubernetes_environment: >-
+      {{ {'KUBECONFIG': librenms_kubernetes_kubeconfig}
+         if librenms_kubernetes_kubeconfig | string | trim | length > 0 else {} }}
+
+- name: Render the LibreNMS Helm chart without changing the cluster
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubernetes_helm_binary, 'template', librenms_kubernetes_release,
+         librenms_kubernetes_chart_path, '--namespace', librenms_kubernetes_namespace,
+         '--values', librenms_kubernetes_values_file]
+        + librenms_kubernetes_helm_context_args
+      }}
+  environment: "{{ librenms_kubernetes_environment }}"
+  register: librenms_kubernetes_template
+  changed_when: false
+
+- name: Lint the LibreNMS Helm chart
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubernetes_helm_binary, 'lint', librenms_kubernetes_chart_path,
+         '--namespace', librenms_kubernetes_namespace,
+         '--values', librenms_kubernetes_values_file]
+        + librenms_kubernetes_helm_context_args
+      }}
+  environment: "{{ librenms_kubernetes_environment }}"
+  register: librenms_kubernetes_lint
+  changed_when: false
+
+- name: Show Kubernetes application status
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubernetes_cli_binary, 'get', 'all',
+         '--namespace', librenms_kubernetes_namespace]
+        + librenms_kubernetes_kubectl_context_args
+      }}
+  environment: "{{ librenms_kubernetes_environment }}"
+  register: librenms_kubernetes_status
+  changed_when: false
+  when: librenms_kubernetes_action == 'status'
+
+- name: Deploy the LibreNMS Helm release
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubernetes_helm_binary, 'upgrade', '--install',
+         librenms_kubernetes_release, librenms_kubernetes_chart_path,
+         '--namespace', librenms_kubernetes_namespace, '--create-namespace',
+         '--values', librenms_kubernetes_values_file, '--timeout',
+         librenms_kubernetes_timeout]
+        + (['--wait'] if librenms_kubernetes_wait | bool else [])
+        + (['--atomic'] if librenms_kubernetes_atomic | bool else [])
+        + librenms_kubernetes_helm_context_args
+      }}
+  environment: "{{ librenms_kubernetes_environment }}"
+  register: librenms_kubernetes_deploy
+  changed_when: true
+  when: librenms_kubernetes_action == 'deploy'
+
+- name: Delete the LibreNMS Helm release
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubernetes_helm_binary, 'uninstall', librenms_kubernetes_release,
+         '--namespace', librenms_kubernetes_namespace]
+        + librenms_kubernetes_helm_context_args
+      }}
+  environment: "{{ librenms_kubernetes_environment }}"
+  register: librenms_kubernetes_delete
+  changed_when: true
+  when: librenms_kubernetes_action == 'delete'
+
+- name: Wait for the LibreNMS web deployment
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubernetes_cli_binary, 'rollout', 'status',
+         'deployment/' ~ librenms_kubernetes_release ~ '-librenms-ha-web',
+         '--namespace', librenms_kubernetes_namespace,
+         '--timeout', librenms_kubernetes_timeout]
+        + librenms_kubernetes_kubectl_context_args
+      }}
+  environment: "{{ librenms_kubernetes_environment }}"
+  changed_when: false
+  when:
+    - librenms_kubernetes_action == 'deploy'
+    - librenms_kubernetes_wait | bool
+
+- name: Wait for the LibreNMS dispatcher statefulset
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [librenms_kubernetes_cli_binary, 'rollout', 'status',
+         'statefulset/' ~ librenms_kubernetes_release ~ '-librenms-ha-dispatcher',
+         '--namespace', librenms_kubernetes_namespace,
+         '--timeout', librenms_kubernetes_timeout]
+        + librenms_kubernetes_kubectl_context_args
+      }}
+  environment: "{{ librenms_kubernetes_environment }}"
+  changed_when: false
+  when:
+    - librenms_kubernetes_action == 'deploy'
+    - librenms_kubernetes_wait | bool
+
+- name: Report optional Kubernetes application result
+  ansible.builtin.debug:
+    msg:
+      - "Kubernetes platform: {{ librenms_kubernetes_platform }}"
+      - "Action: {{ librenms_kubernetes_action }}"
+      - "Namespace: {{ librenms_kubernetes_namespace }}"
+      - "Release: {{ librenms_kubernetes_release }}"
+      - "Kubernetes client: {{ librenms_kubernetes_cli_version.stdout | default('') | trim }}"
+      - "Helm: {{ librenms_kubernetes_helm_version.stdout | default('') | trim }}"

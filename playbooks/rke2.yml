@@ -1,0 +1,9 @@
+---
+- name: Manage the optional RKE2 cluster adapter
+  hosts: rke2_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: rke2_platform

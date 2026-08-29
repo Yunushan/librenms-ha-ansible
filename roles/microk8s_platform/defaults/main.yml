@@ -1,0 +1,12 @@
+---
+# Optional MicroK8s adapter. MicroK8s cluster tokens are supplied explicitly;
+# this role never scrapes or prints a join token from another node.
+librenms_microk8s_action: preflight
+librenms_microk8s_confirm: false
+librenms_microk8s_node_role: primary
+librenms_microk8s_primary_host: ""
+librenms_microk8s_channel: ""
+librenms_microk8s_binary: microk8s
+librenms_microk8s_join_endpoint: ""
+librenms_microk8s_join_token: ""
+librenms_microk8s_addons: []

@@ -1,0 +1,29 @@
+---
+# Optional Kubernetes-compatible application deployment. This role is never
+# imported by the package-based site playbook.
+librenms_kubernetes_platform: kubernetes
+librenms_kubernetes_action: preflight
+librenms_kubernetes_confirm: false
+librenms_kubernetes_cli_binary: kubectl
+librenms_kubernetes_cli_version_args:
+  - version
+  - --client=true
+librenms_kubernetes_helm_binary: helm
+librenms_kubernetes_kubeconfig: ""
+librenms_kubernetes_context: ""
+librenms_kubernetes_namespace: librenms
+librenms_kubernetes_release: librenms
+librenms_kubernetes_chart_path: "{{ playbook_dir }}/../charts/librenms-ha"
+librenms_kubernetes_values_file: ""
+librenms_kubernetes_timeout: 10m
+librenms_kubernetes_atomic: true
+librenms_kubernetes_wait: true
+librenms_kubernetes_supported_platforms:
+  - kubernetes
+  - k3s
+  - rke2
+  - microk8s
+  - okd
+  - kubespray
+  - kubeone
+  - gardener

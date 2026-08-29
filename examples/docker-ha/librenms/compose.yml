@@ -1,7 +1,7 @@
 ---
 services:
   librenms:
-    image: ${LIBRENMS_IMAGE:-librenms/librenms:latest}
+    image: ${LIBRENMS_IMAGE:?Set LIBRENMS_IMAGE to an approved immutable image digest in .env}
     container_name: librenms-web
     network_mode: host
     restart: unless-stopped
@@ -27,7 +27,7 @@ services:
       - ${LIBRENMS_SHARED_DATA_DIR}:/data
 
   dispatcher:
-    image: ${LIBRENMS_IMAGE:-librenms/librenms:latest}
+    image: ${LIBRENMS_IMAGE:?Set LIBRENMS_IMAGE to an approved immutable image digest in .env}
     container_name: librenms-dispatcher
     network_mode: host
     restart: unless-stopped

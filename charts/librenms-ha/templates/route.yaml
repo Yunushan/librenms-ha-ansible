@@ -1,0 +1,17 @@
+{{- if .Values.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "librenms-ha.fullname" . }}
+  labels:
+    {{- include "librenms-ha.labels" . | nindent 4 }}
+spec:
+  host: {{ .Values.route.host | quote }}
+  to:
+    kind: Service
+    name: {{ include "librenms-ha.fullname" . }}
+  port:
+    targetPort: http
+  tls:
+    termination: {{ .Values.route.tls.termination }}
+{{- end }}

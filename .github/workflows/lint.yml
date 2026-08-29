@@ -156,6 +156,9 @@ jobs:
       - name: Test GitHub governance guardrails
         run: make test-github-governance-guardrails
 
+      - name: Test optional platform guardrails
+        run: make test-optional-platform-guardrails
+
       - name: Run ansible-lint
         run: ansible-lint
 
@@ -184,6 +187,22 @@ jobs:
           bash tests/platform/managed-runtime-smoke.sh almalinux:8 3.11 alma-8
           bash tests/platform/managed-runtime-smoke.sh almalinux:9 3.9 alma-9
           bash tests/platform/managed-runtime-smoke.sh almalinux:10 3.12 alma-10
+
+  helm-chart:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: v3.18.4
+
+      - name: Test Helm chart
+        run: make test-helm-chart
 
   haproxy-web-failover:
     runs-on: ubuntu-24.04

@@ -1,0 +1,29 @@
+---
+# gardenctl command layouts vary between Gardener installations. Keep the
+# command arguments overridable instead of hiding provider-specific behavior.
+librenms_gardener_action: preflight
+librenms_gardener_confirm: false
+librenms_gardener_binary: gardenctl
+librenms_gardener_garden: ""
+librenms_gardener_project: ""
+librenms_gardener_shoot: ""
+librenms_gardener_kubeconfig_destination: ""
+librenms_gardener_environment: {}
+librenms_gardener_status_args:
+  - resolve
+  - shoot
+  - --garden
+  - "{{ librenms_gardener_garden }}"
+  - --project
+  - "{{ librenms_gardener_project }}"
+  - --shoot
+  - "{{ librenms_gardener_shoot }}"
+librenms_gardener_kubeconfig_args:
+  - kubeconfig
+  - --garden
+  - "{{ librenms_gardener_garden }}"
+  - --project
+  - "{{ librenms_gardener_project }}"
+  - --shoot
+  - "{{ librenms_gardener_shoot }}"
+  - --raw

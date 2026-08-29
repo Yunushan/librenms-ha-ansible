@@ -1,0 +1,13 @@
+{% if librenms_rke2_token | string | trim | length > 0 %}
+token: {{ librenms_rke2_token | quote }}
+{% endif %}
+{% if (librenms_rke2_node_role == 'agent' or inventory_hostname != librenms_rke2_bootstrap_host) and librenms_rke2_server_url | string | trim | length > 0 %}
+server: {{ librenms_rke2_server_url | quote }}
+{% endif %}
+{% if librenms_rke2_tls_san | length > 0 %}
+tls-san:
+{% for item in librenms_rke2_tls_san %}
+  - {{ item | quote }}
+{% endfor %}
+{% endif %}
+write-kubeconfig-mode: {{ librenms_rke2_write_kubeconfig_mode | quote }}

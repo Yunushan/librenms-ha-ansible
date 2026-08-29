@@ -1,0 +1,12 @@
+---
+# Optional Kubespray adapter. Kubespray itself is operator-managed and is not
+# vendored into this repository.
+librenms_kubespray_action: preflight
+librenms_kubespray_confirm: false
+librenms_kubespray_binary: ansible-playbook
+librenms_kubespray_directory: ""
+librenms_kubespray_inventory: ""
+librenms_kubespray_cluster_playbook: cluster.yml
+librenms_kubespray_reset_playbook: reset.yml
+librenms_kubespray_extra_args: []
+librenms_kubespray_environment: {}

@@ -883,6 +883,12 @@ def main() -> int:
         failures.append("Lint workflow must build the Ansible controller image")
     if "docker compose run --rm --no-deps ansible make ci" not in lint_workflow:
         failures.append("Lint workflow must run quality gates inside the controller image")
+    if "helm-chart:" not in lint_workflow:
+        failures.append("Lint workflow must run the Helm chart production gate")
+    if not re.search(r"azure/setup-helm@[0-9a-f]{40}(?:\s+#\s+v\S+)?", lint_workflow):
+        failures.append("Lint workflow must pin azure/setup-helm to an immutable commit")
+    if "run: make test-helm-chart" not in lint_workflow:
+        failures.append("Lint workflow must execute the Helm chart guardrail test")
 
     dependency_review_workflow = read(".github/workflows/dependency-review.yml")
     if "permissions:\n  contents: read" not in dependency_review_workflow:
@@ -948,6 +954,7 @@ def main() -> int:
     )
     expected_required_checks = (
         "python-314-runtime",
+        "helm-chart",
         "platform-packages (ubuntu-22.04)",
         "platform-packages (ubuntu-24.04)",
         "platform-packages (ubuntu-24.04-php-8.4)",

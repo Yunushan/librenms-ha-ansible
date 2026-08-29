@@ -12,6 +12,7 @@ Use this page as the first stop for operator and maintainer documentation.
 6. [Upgrade Workflows](upgrades.md) - guarded OS release, Nginx, PHP, MariaDB, and package-only runtime upgrade procedures.
 7. [LibreNMS HA Operator Checklists](operator-checklists.md) - copyable checklists for maintenance, hard power-off testing, restart validation, and incident triage.
 8. [Failure Scenario Runbook](failure-scenarios.md) - targeted troubleshooting for VIP, Galera, Redis Sentinel, GlusterFS, LibreNMS dispatcher, and validation failures.
+9. [Optional Platform Profiles](optional-platforms.md) - isolated Docker, Podman, Kubernetes, k3s, RKE2, MicroK8s, OKD, Kubespray, KubeOne, and Gardener workflows.
 
 ## Task Map
 
@@ -26,6 +27,7 @@ Use this page as the first stop for operator and maintainer documentation.
 | Recover from failed validation | [Failure Scenario Runbook](failure-scenarios.md) |
 | Add or remove capacity | [Scaling and Lifecycle](scaling.md) |
 | Run the project in containers | [Docker Support](docker.md) |
+| Use optional container or Kubernetes platform profiles | [Optional Platform Profiles](optional-platforms.md) |
 | Use AWX instead of the CLI | [Optional AWX Controller](awx-controller.md) |
 | Prepare a project release | [Maintainer Release Checklist](release-checklist.md) |
 
@@ -42,6 +44,7 @@ Use this page as the first stop for operator and maintainer documentation.
 - [Support Matrix and Production Readiness](support-matrix.md)
 - [Scaling and Lifecycle](scaling.md)
 - [Docker Support](docker.md)
+- [Optional Platform Profiles](optional-platforms.md)
 - [Optional AWX Controller](awx-controller.md)
 
 ## Maintainer Docs
