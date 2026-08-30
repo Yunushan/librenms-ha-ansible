@@ -28,11 +28,15 @@ line_number() {
 main() {
     local start_line
     local wait_line
+    local when_line
+    local block_line
     local rescue_line
 
     require_file_text "${DEFAULTS}" \
         'librenms_post_reboot_systemctl_timeout: 20'
     require_file_text "${TASKS}" 'Ensure HAProxy is active after reboot'
+    require_file_text "${TASKS}" 'Reconcile HAProxy non-local VIP binding after reboot'
+    require_file_text "${TASKS}" 'net.ipv4.ip_nonlocal_bind'
     require_file_text "${TASKS}" 'systemctl'
     require_file_text "${TASKS}" 'reset-failed'
     require_file_text "${TASKS}" 'Validate HAProxy configuration after reboot'
@@ -41,16 +45,22 @@ main() {
     require_file_text "${TASKS}" 'Capture HAProxy status after failed post-reboot recovery'
     require_file_text "${TASKS}" 'Capture HAProxy journal after failed post-reboot recovery'
     require_file_text "${TASKS}" 'Capture HAProxy listeners after failed post-reboot recovery'
+    require_file_text "${TASKS}" 'Capture HAProxy non-local bind state after failed post-reboot recovery'
+    require_file_text "${TASKS}" 'Capture HAProxy service properties after failed post-reboot recovery'
     require_file_text "${TASKS}" 'Fail with HAProxy post-reboot diagnostics'
-    require_file_text "${TASKS}" '--no-block'
     require_file_text "${TASKS}" 'haproxy -c:'
 
     start_line="$(line_number "${TASKS}" 'Start HAProxy after reboot')"
     wait_line="$(line_number "${TASKS}" 'Wait for HAProxy after reboot')"
+    when_line="$(line_number "${TASKS}" 'when: inventory_hostname in librenms_post_reboot_active_lb_nodes')"
+    block_line="$(line_number "${TASKS}" '  block:')"
     rescue_line="$(line_number "${TASKS}" 'Capture HAProxy status after failed post-reboot recovery')"
 
-    [[ -n "${start_line}" && -n "${wait_line}" && -n "${rescue_line}" ]] ||
+    [[ -n "${start_line}" && -n "${wait_line}" && -n "${when_line}" &&
+        -n "${block_line}" && -n "${rescue_line}" ]] ||
         fail 'could not locate HAProxy recovery boundaries'
+    ((when_line < block_line)) ||
+        fail 'HAProxy block condition must precede block for Ansible key ordering'
     ((start_line < wait_line && wait_line < rescue_line)) ||
         fail 'HAProxy must be started and waited for before diagnostics'
 

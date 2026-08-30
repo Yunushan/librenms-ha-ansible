@@ -108,7 +108,16 @@
   run_once: true
 
 - name: Ensure HAProxy is active after reboot
+  when: inventory_hostname in librenms_post_reboot_active_lb_nodes
   block:
+    - name: Reconcile HAProxy non-local VIP binding after reboot
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_nonlocal_bind
+        value: "1"
+        state: present
+        reload: true
+      when: librenms_vip_enabled | bool
+
     - name: Reset failed HAProxy state after reboot
       command:
         argv:
@@ -141,7 +150,6 @@
           - "{{ librenms_post_reboot_systemctl_timeout | int }}s"
           - systemctl
           - start
-          - --no-block
           - "{{ librenms_haproxy_service_name }}"
       changed_when: true
 
@@ -157,10 +165,31 @@
           - "{{ librenms_haproxy_service_name }}"
       register: librenms_post_reboot_haproxy_state
       changed_when: false
-      until: librenms_post_reboot_haproxy_state.stdout | trim == 'active'
-      retries: "{{ librenms_post_reboot_service_retries | int }}"
-      delay: "{{ librenms_post_reboot_service_delay | int }}"
   rescue:
+    - name: Capture HAProxy non-local bind state after failed post-reboot recovery
+      command:
+        argv:
+          - sysctl
+          - -n
+          - net.ipv4.ip_nonlocal_bind
+      register: librenms_post_reboot_haproxy_nonlocal_bind
+      changed_when: false
+      failed_when: false
+
+    - name: Capture HAProxy service properties after failed post-reboot recovery
+      command:
+        argv:
+          - systemctl
+          - show
+          - "{{ librenms_haproxy_service_name }}"
+          - --property=ActiveState
+          - --property=SubState
+          - --property=Result
+          - --property=ExecMainStatus
+      register: librenms_post_reboot_haproxy_properties
+      changed_when: false
+      failed_when: false
+
     - name: Capture HAProxy status after failed post-reboot recovery
       command:
         argv:
@@ -177,12 +206,23 @@
       command:
         argv:
           - journalctl
+          - -b
           - -u
           - "{{ librenms_haproxy_service_name }}"
           - -n
           - "100"
           - --no-pager
       register: librenms_post_reboot_haproxy_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture network addresses after failed HAProxy post-reboot recovery
+      command:
+        argv:
+          - ip
+          - -brief
+          - address
+      register: librenms_post_reboot_haproxy_addresses
       changed_when: false
       failed_when: false
 
@@ -204,6 +244,12 @@
           {{ librenms_post_reboot_haproxy_config_check.stdout | default('') }}
           {{ librenms_post_reboot_haproxy_config_check.stderr | default('') }}
 
+          net.ipv4.ip_nonlocal_bind:
+          {{ librenms_post_reboot_haproxy_nonlocal_bind.stdout | default('unavailable') }}
+
+          systemctl show:
+          {{ librenms_post_reboot_haproxy_properties.stdout | default('') }}
+
           systemctl status:
           {{ librenms_post_reboot_haproxy_status.stdout | default('') }}
 
@@ -212,7 +258,9 @@
 
           listening sockets:
           {{ librenms_post_reboot_haproxy_sockets.stdout | default('') }}
-  when: inventory_hostname in librenms_post_reboot_active_lb_nodes
+
+          network addresses:
+          {{ librenms_post_reboot_haproxy_addresses.stdout | default('') }}
 
 - name: Wait for keepalived after reboot
   command:
