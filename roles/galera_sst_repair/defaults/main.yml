@@ -1,0 +1,6 @@
+---
+librenms_galera_sst_repair_confirm: false
+librenms_galera_sst_repair_retries: 96
+librenms_galera_sst_repair_delay: 10
+librenms_galera_sst_repair_galera_retries: 30
+librenms_galera_sst_repair_galera_delay: 10

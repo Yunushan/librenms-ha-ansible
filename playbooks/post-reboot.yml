@@ -17,6 +17,10 @@
   become: true
   gather_facts: true
   roles:
+    - role: galera_sst_helper
+      when:
+        - librenms_db_mode == 'galera'
+        - inventory_hostname in groups.get('librenms_db', [])
     - role: post_reboot
 
 - name: Verify LibreNMS HA status after post-reboot convergence

@@ -222,6 +222,7 @@ require_text "$MANAGED_RUNTIME_SCRIPT" 'PreferredAuthentications=password,public
 require_text "$PACKAGE_SMOKE_FILE" 'rocky|almalinux|rhel)'
 require_text "$PACKAGE_SMOKE_FILE" '22.04|24.04|26.04'
 require_text "$PACKAGE_SMOKE_FILE" 'galera_new_cluster galera_recovery'
+require_text "$PACKAGE_SMOKE_FILE" 'wsrep_sst_rsync'
 require_text "$PACKAGE_SMOKE_FILE" 'get_mariadb_series()'
 require_text "$PACKAGE_SMOKE_FILE" '(Distrib|from)'
 require_text "$PACKAGE_SMOKE_FILE" 'expected_mariadb_series=10.6'

@@ -1,0 +1,88 @@
+---
+- name: Validate the configured Galera SST helper path
+  ansible.builtin.assert:
+    that:
+      - librenms_galera_sst_method | string | trim is match('^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
+      - librenms_galera_sst_helper_path | string | trim is match('^/[^\\n\\r]+$')
+    fail_msg: >-
+      The Galera SST method or helper path is invalid. Configure a simple SST
+      method name and an absolute helper path before database convergence.
+
+- name: Inspect the configured Galera SST helper
+  ansible.builtin.stat:
+    path: "{{ librenms_galera_sst_helper_path }}"
+    follow: true
+  register: librenms_galera_sst_helper_before
+
+- name: Require the configured Galera SST helper
+  ansible.builtin.assert:
+    that:
+      - librenms_galera_sst_helper_before.stat.exists | default(false)
+      - librenms_galera_sst_helper_before.stat.isreg | default(false)
+    fail_msg: >-
+      The configured Galera SST helper is missing or is not a regular file:
+      {{ librenms_galera_sst_helper_path }}. Reinstall the matching MariaDB
+      server package before starting this Galera member.
+
+- name: Reconcile package-owned Galera SST helper permissions
+  ansible.builtin.file:
+    path: "{{ librenms_galera_sst_helper_path }}"
+    state: file
+    follow: true
+    owner: "{{ librenms_galera_sst_helper_owner }}"
+    group: "{{ librenms_galera_sst_helper_group }}"
+    mode: "{{ librenms_galera_sst_helper_mode }}"
+  when: librenms_galera_sst_helper_manage_permissions | bool
+
+- name: Restore the Galera SST helper SELinux label
+  ansible.builtin.command:
+    argv:
+      - restorecon
+      - -F
+      - -v
+      - "{{ librenms_galera_sst_helper_path }}"
+  register: librenms_galera_sst_helper_restorecon
+  changed_when: librenms_galera_sst_helper_restorecon.stdout | trim | length > 0
+  when:
+    - librenms_galera_sst_helper_manage_permissions | bool
+    - ansible_facts.os_family == 'RedHat'
+
+- name: Verify the Galera SST helper is executable
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/test
+      - -x
+      - "{{ librenms_galera_sst_helper_path }}"
+  changed_when: false
+
+- name: Verify rsync is executable for rsync SST
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/test
+      - -x
+      - /usr/bin/rsync
+  changed_when: false
+  when: librenms_galera_sst_method == 'rsync'
+
+- name: Read the Galera SST helper filesystem mount options
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - OPTIONS
+      - --target
+      - "{{ librenms_galera_sst_helper_path }}"
+  register: librenms_galera_sst_helper_mount
+  changed_when: false
+
+- name: Reject a noexec Galera SST helper filesystem
+  ansible.builtin.assert:
+    that:
+      - >-
+        'noexec' not in
+        (librenms_galera_sst_helper_mount.stdout | trim).split(',')
+    fail_msg: >-
+      {{ librenms_galera_sst_helper_path }} is on a noexec filesystem. Galera
+      cannot run the configured SST helper until the host mount policy is
+      corrected.

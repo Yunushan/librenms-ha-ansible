@@ -173,6 +173,27 @@ It never stops a healthy MariaDB service, bootstraps Galera, edits
 or deletes an RRD/Gluster directory. A Galera `Primary|Synced` failure still
 requires the separate, operator-confirmed `galera-recover` procedure.
 
+## Repair one failed Galera SST joiner
+
+If MariaDB reaches the Galera `joiner` state but the journal reports
+`posix_spawnp(wsrep_sst_rsync ...) failed: 13 (Permission denied)`, use the
+focused SST helper repair instead of cluster recovery:
+
+```sh
+make galera-sst-repair-ask-become-pass \
+  GALERA_SST_REPAIR_CONFIRM=true \
+  GALERA_SST_REPAIR_LIMIT=lnms3
+```
+
+The playbook first requires exactly one target and independently verifies a
+Primary/Synced quorum on the other database nodes. It then restores the
+package-owned SST helper's executable metadata, rejects a `noexec` filesystem,
+queues a normal MariaDB start, and waits up to 16 minutes for an IST or SST and
+the final `Primary`, `Synced`, and `wsrep_ready=ON` state. It never bootstraps
+Galera, changes recovered positions, or deletes the MariaDB datadir. If the
+helper remains blocked, the failure includes path, kernel, AppArmor, SELinux,
+service, and journal evidence.
+
 The RRD permission helper fixes the shared mount root during ordinary startup.
 It does not recursively walk the complete RRD tree unless
 `librenms_rrd_permission_repair_recursive: true` is explicitly selected for a

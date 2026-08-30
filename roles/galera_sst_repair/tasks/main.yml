@@ -1,0 +1,225 @@
+---
+- name: Load OS-specific MariaDB service variables
+  ansible.builtin.include_vars:
+    file: "{{ lookup('first_found', librenms_galera_sst_repair_vars_lookup) }}"
+  vars:
+    librenms_galera_sst_repair_vars_lookup:
+      files:
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
+      paths:
+        - "{{ playbook_dir }}/../roles/common/vars"
+
+- name: Determine active Galera nodes for SST repair
+  ansible.builtin.set_fact:
+    librenms_galera_sst_repair_active_nodes: >-
+      {{
+        groups.get('librenms_db', [])
+        | difference(librenms_inactive_inventory_nodes)
+      }}
+
+- name: Require an explicit single-node Galera SST repair
+  ansible.builtin.assert:
+    that:
+      - librenms_galera_sst_repair_confirm | bool
+      - librenms_db_mode == 'galera'
+      - ansible_play_hosts_all | length == 1
+      - inventory_hostname in librenms_galera_sst_repair_active_nodes
+      - librenms_galera_sst_repair_active_nodes | length >= 3
+    fail_msg: >-
+      Galera SST repair is restricted to one active database host and requires
+      explicit confirmation. Set GALERA_SST_REPAIR_CONFIRM=true and
+      GALERA_SST_REPAIR_LIMIT to exactly one failed joiner.
+
+- name: Probe Galera members before SST helper repair
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - --protocol=socket
+      - "--socket={{ librenms_mariadb_socket }}"
+      - -Nse
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment','wsrep_cluster_size');
+  loop: "{{ librenms_galera_sst_repair_active_nodes }}"
+  delegate_to: "{{ item }}"
+  register: librenms_galera_sst_repair_member_probes
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+
+- name: Record healthy Galera peers before SST helper repair
+  ansible.builtin.set_fact:
+    librenms_galera_sst_repair_healthy_peers: >-
+      {{
+        librenms_galera_sst_repair_member_probes.results | default([])
+        | selectattr('item', 'defined')
+        | rejectattr('item', 'equalto', inventory_hostname)
+        | selectattr('rc', 'defined')
+        | selectattr('rc', 'equalto', 0)
+        | selectattr('stdout', 'defined')
+        | selectattr('stdout', 'search', 'wsrep_cluster_status[ \\t]+Primary')
+        | selectattr('stdout', 'search', 'wsrep_ready[ \\t]+ON')
+        | selectattr('stdout', 'search', 'wsrep_local_state_comment[ \\t]+Synced')
+        | map(attribute='item')
+        | list
+      }}
+    librenms_galera_sst_repair_required_peers: >-
+      {{ ((librenms_galera_sst_repair_active_nodes | length) // 2) + 1 }}
+
+- name: Require a healthy Primary quorum before SST helper repair
+  ansible.builtin.assert:
+    that:
+      - >-
+        librenms_galera_sst_repair_healthy_peers | length
+        >= librenms_galera_sst_repair_required_peers | int
+    fail_msg: |-
+      A healthy Primary/Synced quorum was not independently verified.
+      Healthy peers: {{ librenms_galera_sst_repair_healthy_peers }}
+      Required peers: {{ librenms_galera_sst_repair_required_peers }}
+      Refusing to touch the failed member. This playbook never bootstraps Galera.
+
+- name: Reconcile the configured Galera SST helper
+  ansible.builtin.include_role:
+    name: galera_sst_helper
+
+- name: Read MariaDB state before normal Galera rejoin
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - "{{ librenms_mariadb_service_name }}"
+      - --property=ActiveState
+      - --value
+  register: librenms_galera_sst_repair_initial_state
+  changed_when: false
+  failed_when: false
+
+- name: Reset failed MariaDB state before normal Galera rejoin
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_mariadb_service_name }}"
+  changed_when: false
+  failed_when: false
+
+- name: Queue MariaDB for a normal Galera rejoin # noqa: command-instead-of-module
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - start
+      - --no-block
+      - "{{ librenms_mariadb_service_name }}"
+  changed_when: >-
+    librenms_galera_sst_repair_initial_state.stdout | trim != 'active'
+
+- name: Ensure the repaired Galera member rejoins normally
+  block:
+    - name: Wait for MariaDB after SST helper repair
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - "{{ librenms_mariadb_service_name }}"
+          - --property=ActiveState
+          - --value
+      register: librenms_galera_sst_repair_mariadb_state
+      changed_when: false
+      failed_when: false
+      until: librenms_galera_sst_repair_mariadb_state.stdout | trim == 'active'
+      retries: "{{ librenms_galera_sst_repair_retries | int }}"
+      delay: "{{ librenms_galera_sst_repair_delay | int }}"
+
+    - name: Wait for Primary and Synced state after SST helper repair
+      ansible.builtin.command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - "--socket={{ librenms_mariadb_socket }}"
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment','wsrep_cluster_size');
+      register: librenms_galera_sst_repair_final_state
+      changed_when: false
+      until:
+        - librenms_galera_sst_repair_final_state.stdout is search('wsrep_cluster_status[ \\t]+Primary')
+        - librenms_galera_sst_repair_final_state.stdout is search('wsrep_ready[ \\t]+ON')
+        - librenms_galera_sst_repair_final_state.stdout is search('wsrep_local_state_comment[ \\t]+Synced')
+      retries: "{{ librenms_galera_sst_repair_galera_retries | int }}"
+      delay: "{{ librenms_galera_sst_repair_galera_delay | int }}"
+  rescue:
+    - name: Capture MariaDB status after failed SST helper repair
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_mariadb_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_galera_sst_repair_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture MariaDB journal after failed SST helper repair
+      ansible.builtin.command:
+        argv:
+          - journalctl
+          - -b
+          - -u
+          - "{{ librenms_mariadb_service_name }}"
+          - -n
+          - "200"
+          - --no-pager
+      register: librenms_galera_sst_repair_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture SST helper path permissions after failed repair
+      ansible.builtin.command:
+        argv:
+          - namei
+          - -l
+          - "{{ librenms_galera_sst_helper_path }}"
+      register: librenms_galera_sst_repair_namei
+      changed_when: false
+      failed_when: false
+
+    - name: Capture kernel execution denials after failed SST helper repair
+      ansible.builtin.shell: |-
+        set -o pipefail
+        journalctl -k -b --no-pager |
+          grep -Ei 'apparmor|avc:|denied|wsrep_sst' |
+          tail -n 80
+      args:
+        executable: /bin/bash
+      register: librenms_galera_sst_repair_kernel_denials
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with Galera SST helper repair diagnostics
+      ansible.builtin.fail:
+        msg: |-
+          {{ inventory_hostname }} did not rejoin after the SST helper repair.
+          No bootstrap, recovered-position mutation, or datadir deletion was attempted.
+
+          systemctl status:
+          {{ librenms_galera_sst_repair_status.stdout | default('') }}
+
+          MariaDB journal:
+          {{ librenms_galera_sst_repair_journal.stdout | default('') }}
+
+          helper path permissions:
+          {{ librenms_galera_sst_repair_namei.stdout | default('') }}
+
+          kernel/AppArmor/SELinux denials:
+          {{ librenms_galera_sst_repair_kernel_denials.stdout | default('none found', true) }}
+
+- name: Report successful Galera SST helper repair
+  ansible.builtin.debug:
+    msg: |-
+      {{ inventory_hostname }} rejoined the existing Primary component normally.
+      Healthy peers before repair: {{ librenms_galera_sst_repair_healthy_peers }}
+      Final Galera state:
+      {{ librenms_galera_sst_repair_final_state.stdout }}

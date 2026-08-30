@@ -1,6 +1,7 @@
 .PHONY: controller-bootstrap install lint yaml-parse docs-check python-smoke syntax-check inventory-check github-governance-check ci test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-docker-ha-galera-config integration-platform-runtime integration-galera integration-haproxy-web integration-redis-sentinel standalone platform-bootstrap-ask-become-pass site site-ask-become-pass readiness-repair readiness-repair-ask-become-pass rrdcached-unit-repair rrdcached-unit-repair-ask-become-pass repair repair-ask-become-pass repair-check cluster doctor doctor-live status status-strict post-reboot maintenance-enter maintenance-exit galera-recover galera-recover-ask-become-pass ha-failover-test firewall backup restore-test validate production-readiness production-readiness-ask-become-pass diagnostics pre-maintenance post-change post-restart failover-drill upgrade-node-exit awx-controller awx-bootstrap os-upgrade-preflight os-upgrade-node os-upgrade-execute mariadb-upgrade-preflight runtime-upgrade runtime-upgrade-ask-become-pass test-upgrade-selector-guardrails docker-build docker-lint docker-python-smoke docker-shell docker-standalone docker-cluster docker-doctor docker-doctor-live docker-status docker-status-strict docker-post-reboot docker-maintenance-enter docker-maintenance-exit docker-galera-recover docker-ha-failover-test docker-backup docker-restore-test docker-validate docker-production-readiness docker-production-readiness-ask-become-pass docker-diagnostics docker-pre-maintenance docker-post-change docker-post-restart docker-failover-drill docker-upgrade-node-exit docker-awx-controller docker-awx-bootstrap
 .PHONY: test-maintenance-stop-guardrails
 .PHONY: test-post-reboot-service-guardrails
+.PHONY: test-galera-sst-helper-guardrails galera-sst-repair galera-sst-repair-ask-become-pass
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -27,6 +28,10 @@ FAST_REPAIR_MANAGER_PROBE_TIMEOUT ?= 10
 READINESS_REPAIR_LIMIT ?= librenms_db
 READINESS_REPAIR_TIMEOUT ?= 30
 READINESS_REPAIR_FORKS ?= 1
+GALERA_SST_REPAIR_CONFIRM ?= false
+GALERA_SST_REPAIR_LIMIT ?=
+GALERA_SST_REPAIR_TIMEOUT ?= 120
+GALERA_SST_REPAIR_FORKS ?= 1
 OS_UPGRADE_LIMIT ?=
 OS_UPGRADE_TARGET_DISTRIBUTION ?=
 OS_UPGRADE_TARGET_MAJOR ?=
@@ -145,7 +150,7 @@ inventory-check:
 github-governance-check:
 	python3 scripts/ci-github-governance-check.py --branch main
 
-ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails
+ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-galera-sst-helper-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails
 
 test-controller-collection-bootstrap:
 	bash tests/unit/test-controller-collection-bootstrap.sh
@@ -155,6 +160,9 @@ test-galera-readiness:
 
 test-galera-bootstrap-guardrails:
 	bash tests/unit/test-galera-bootstrap-guardrails.sh
+
+test-galera-sst-helper-guardrails:
+	bash tests/unit/test-galera-sst-helper-guardrails.sh
 
 test-mariadb-series-guardrails:
 	bash tests/unit/test-mariadb-series-guardrails.sh
@@ -296,6 +304,16 @@ readiness-repair:
 
 readiness-repair-ask-become-pass:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/readiness-repair.yml --ask-become-pass --limit "$(READINESS_REPAIR_LIMIT)" --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+galera-sst-repair:
+	@test -n "$(GALERA_SST_REPAIR_LIMIT)" || (echo "Refusing Galera SST repair: set GALERA_SST_REPAIR_LIMIT to exactly one failed joiner" && exit 2)
+	@test "$(GALERA_SST_REPAIR_CONFIRM)" = "true" || (echo "Refusing Galera SST repair: set GALERA_SST_REPAIR_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/galera-sst-repair.yml --limit "$(GALERA_SST_REPAIR_LIMIT)" --timeout $(GALERA_SST_REPAIR_TIMEOUT) --forks $(GALERA_SST_REPAIR_FORKS) -e librenms_galera_sst_repair_confirm=true $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+galera-sst-repair-ask-become-pass:
+	@test -n "$(GALERA_SST_REPAIR_LIMIT)" || (echo "Refusing Galera SST repair: set GALERA_SST_REPAIR_LIMIT to exactly one failed joiner" && exit 2)
+	@test "$(GALERA_SST_REPAIR_CONFIRM)" = "true" || (echo "Refusing Galera SST repair: set GALERA_SST_REPAIR_CONFIRM=true" && exit 2)
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/galera-sst-repair.yml --ask-become-pass --become-method sudo --limit "$(GALERA_SST_REPAIR_LIMIT)" --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) -e librenms_galera_sst_repair_confirm=true $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 # Install and validate the native foreground RRDCacheD systemd drop-in without
 # starting or stopping the service. This is safe to run before a controlled

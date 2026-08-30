@@ -19,6 +19,8 @@
   roles:
     - role: mariadb
       when: librenms_db_mode in ['local', 'galera']
+    - role: galera_sst_helper
+      when: librenms_db_mode == 'galera'
     - role: galera
       when: librenms_db_mode == 'galera'
 

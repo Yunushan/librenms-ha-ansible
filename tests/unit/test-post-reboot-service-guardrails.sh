@@ -35,7 +35,7 @@ main() {
     require_file_text "${DEFAULTS}" \
         'librenms_post_reboot_systemctl_timeout: 20'
     require_file_text "${DEFAULTS}" \
-        'librenms_post_reboot_mariadb_retries: 30'
+        'librenms_post_reboot_mariadb_retries: 96'
     require_file_text "${DEFAULTS}" \
         'librenms_post_reboot_mariadb_delay: 10'
     require_file_text "${TASKS}" 'Ensure HAProxy is active after reboot'
@@ -54,11 +54,18 @@ main() {
     require_file_text "${TASKS}" 'Fail with HAProxy post-reboot diagnostics'
     require_file_text "${TASKS}" 'haproxy -c:'
     require_file_text "${TASKS}" 'Ensure MariaDB reaches an active state after reboot'
+    require_file_text "${TASKS}" 'Read MariaDB state before post-reboot convergence'
+    require_file_text "${TASKS}" 'Reset terminal MariaDB state before post-reboot convergence'
+    require_file_text "${TASKS}" 'Queue MariaDB after terminal post-reboot state'
+    require_file_text "${TASKS}" '--no-block'
     require_file_text "${TASKS}" 'Wait while MariaDB is starting after reboot'
     require_file_text "${TASKS}" 'Verify MariaDB is active after reboot'
     require_file_text "${TASKS}" 'TimeoutStartUSec'
     require_file_text "${TASKS}" 'Capture MariaDB unit definition after failed post-reboot convergence'
     require_file_text "${TASKS}" 'Capture MariaDB current-boot journal after failed post-reboot convergence'
+    require_file_text "${TASKS}" 'Capture Galera SST helper path permissions after failed post-reboot convergence'
+    require_file_text "${TASKS}" 'Capture Galera SST helper mount after failed post-reboot convergence'
+    require_file_text "${TASKS}" 'Capture kernel execution denials after failed post-reboot convergence'
     require_file_text "${TASKS}" 'Capture local Galera state after failed post-reboot convergence'
     require_file_text "${TASKS}" 'Fail with MariaDB post-reboot diagnostics'
     require_file_text "${TASKS}" 'No Galera bootstrap or recovered-position mutation was attempted.'

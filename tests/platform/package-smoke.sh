@@ -217,7 +217,7 @@ case "${ID}" in
             'import command_runner, dotenv, psutil, pymysql, redis, setuptools, systemd'
 
         for command_name in \
-            galera_new_cluster galera_recovery mariadb php nginx rrdtool rrdcached redis-server redis-cli \
+            galera_new_cluster galera_recovery wsrep_sst_rsync mariadb php nginx rrdtool rrdcached redis-server redis-cli \
             haproxy keepalived snmpd; do
             check_command "${command_name}"
         done
@@ -318,7 +318,7 @@ case "${ID}" in
         test -f /usr/lib/systemd/system/rrdcached.service
 
         for command_name in \
-            galera_new_cluster galera_recovery mariadb php php-fpm nginx rrdtool rrdcached haproxy keepalived \
+            galera_new_cluster galera_recovery wsrep_sst_rsync mariadb php php-fpm nginx rrdtool rrdcached haproxy keepalived \
             snmpd; do
             check_command "${command_name}"
         done

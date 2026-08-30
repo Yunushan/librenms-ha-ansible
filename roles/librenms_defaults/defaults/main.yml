@@ -539,6 +539,12 @@ librenms_runtime_db_wait_delay: 5
 
 librenms_galera_cluster_name: librenms_cluster
 librenms_galera_sst_method: rsync
+librenms_galera_sst_helper_path: >-
+  /usr/bin/wsrep_sst_{{ librenms_galera_sst_method | replace('-', '_') }}
+librenms_galera_sst_helper_manage_permissions: true
+librenms_galera_sst_helper_owner: root
+librenms_galera_sst_helper_group: root
+librenms_galera_sst_helper_mode: "0755"
 librenms_galera_pc_recovery: true
 # Retain enough write-set history for routine rolling convergence and staged
 # LTS upgrades to use IST. Size this from the site's peak write rate and the

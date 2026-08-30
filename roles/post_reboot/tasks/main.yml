@@ -277,6 +277,50 @@
     - librenms_vip_enabled | bool
     - inventory_hostname in librenms_post_reboot_active_lb_nodes
 
+- name: Read MariaDB state before post-reboot convergence
+  command:
+    argv:
+      - systemctl
+      - show
+      - "{{ librenms_mariadb_service_name }}"
+      - --property=ActiveState
+      - --value
+  register: librenms_post_reboot_mariadb_initial_state
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - inventory_hostname in librenms_post_reboot_active_db_nodes
+
+- name: Reset terminal MariaDB state before post-reboot convergence
+  command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "{{ librenms_mariadb_service_name }}"
+  changed_when: false
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - inventory_hostname in librenms_post_reboot_active_db_nodes
+    - >-
+      librenms_post_reboot_mariadb_initial_state.stdout | trim
+      not in ['active', 'activating', 'reloading']
+
+- name: Queue MariaDB after terminal post-reboot state # noqa: command-instead-of-module
+  command:
+    argv:
+      - systemctl
+      - start
+      - --no-block
+      - "{{ librenms_mariadb_service_name }}"
+  changed_when: true
+  when:
+    - librenms_db_mode in ['local', 'galera']
+    - inventory_hostname in librenms_post_reboot_active_db_nodes
+    - >-
+      librenms_post_reboot_mariadb_initial_state.stdout | trim
+      not in ['active', 'activating', 'reloading']
+
 - name: Ensure MariaDB reaches an active state after reboot
   when:
     - librenms_db_mode in ['local', 'galera']
@@ -361,6 +405,43 @@
       changed_when: false
       failed_when: false
 
+    - name: Capture Galera SST helper path permissions after failed post-reboot convergence
+      command:
+        argv:
+          - namei
+          - -l
+          - "{{ librenms_galera_sst_helper_path }}"
+      register: librenms_post_reboot_mariadb_sst_helper_namei
+      changed_when: false
+      failed_when: false
+      when: librenms_db_mode == 'galera'
+
+    - name: Capture Galera SST helper mount after failed post-reboot convergence
+      command:
+        argv:
+          - findmnt
+          - --target
+          - "{{ librenms_galera_sst_helper_path }}"
+          - --output
+          - TARGET,FSTYPE,OPTIONS
+      register: librenms_post_reboot_mariadb_sst_helper_mount
+      changed_when: false
+      failed_when: false
+      when: librenms_db_mode == 'galera'
+
+    - name: Capture kernel execution denials after failed post-reboot convergence
+      shell: |-
+        set -o pipefail
+        journalctl -k -b --no-pager |
+          grep -Ei 'apparmor|avc:|denied|wsrep_sst' |
+          tail -n 80
+      args:
+        executable: /bin/bash
+      register: librenms_post_reboot_mariadb_kernel_denials
+      changed_when: false
+      failed_when: false
+      when: librenms_db_mode == 'galera'
+
     - name: Capture local Galera state after failed post-reboot convergence
       command:
         argv:
@@ -422,6 +503,15 @@
 
           current-boot journal:
           {{ librenms_post_reboot_mariadb_journal.stdout | default('') }}
+
+          Galera SST helper path permissions:
+          {{ librenms_post_reboot_mariadb_sst_helper_namei.stdout | default('unavailable') }}
+
+          Galera SST helper filesystem:
+          {{ librenms_post_reboot_mariadb_sst_helper_mount.stdout | default('unavailable') }}
+
+          kernel/AppArmor/SELinux denials:
+          {{ librenms_post_reboot_mariadb_kernel_denials.stdout | default('none found', true) }}
 
           local Galera state:
           {{ librenms_post_reboot_mariadb_galera_state.stdout | default('unavailable') }}

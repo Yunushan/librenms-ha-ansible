@@ -1,0 +1,9 @@
+---
+- name: Repair one failed Galera joiner's SST helper and rejoin it safely
+  hosts: librenms_db:!decommission_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: galera_sst_repair
