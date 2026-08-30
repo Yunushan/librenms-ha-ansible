@@ -65,6 +65,14 @@ require_contains "${SESSION_PROBE}" "if (\$action === 'read')" \
     'The session probe must support reading through Laravel.'
 require_contains "${SESSION_PROBE}" 'app_key_sha256=' \
     'The session probe must expose a non-secret APP_KEY parity digest.'
+require_contains "${SESSION_PROBE}" 'function canonicalSentinelHosts(array $hosts): array' \
+    'The session probe must canonicalize Sentinel hosts before comparing web nodes.'
+require_contains "${SESSION_PROBE}" 'usort(' \
+    'The session probe must compare Sentinel hosts independently of runtime preference order.'
+require_contains "${SESSION_PROBE}" '$sentinelHosts = canonicalSentinelHosts($sentinelHosts);' \
+    'The session probe must fingerprint the canonical Sentinel host set.'
+require_contains "${SESSION_PROBE}" "hash('sha256', (string) json_encode(\$sentinelHosts" \
+    'The session probe must hash the canonical Sentinel host set.'
 require_contains "${SESSION_PROBE}" 'session_secure=' \
     'The session probe must compare effective cookie security across web nodes.'
 

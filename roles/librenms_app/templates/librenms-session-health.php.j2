@@ -24,6 +24,21 @@ function requireProbeArgument(array $arguments, int $index, string $name): strin
     return $value;
 }
 
+function canonicalSentinelHosts(array $hosts): array
+{
+    $hosts = array_values($hosts);
+
+    usort(
+        $hosts,
+        static fn ($left, $right): int => strcmp(
+            (string) json_encode($left, JSON_UNESCAPED_SLASHES),
+            (string) json_encode($right, JSON_UNESCAPED_SLASHES),
+        ),
+    );
+
+    return $hosts;
+}
+
 $baseDir = {{ librenms_install_dir | to_json }};
 $action = (string) ($argv[1] ?? '');
 
@@ -49,6 +64,7 @@ if ($action === 'config') {
     $sentinelParameters = (array) ($sentinelHosts['options']['parameters'] ?? []);
 
     unset($sentinelHosts['options']);
+    $sentinelHosts = canonicalSentinelHosts($sentinelHosts);
 
     echo 'driver=' . $driver . PHP_EOL;
     echo 'connection=' . $connection . PHP_EOL;
@@ -60,7 +76,9 @@ if ($action === 'config') {
     echo 'session_same_site=' . (string) $config->get('session.same_site') . PHP_EOL;
     echo 'session_lifetime=' . (string) $config->get('session.lifetime') . PHP_EOL;
     echo 'app_key_sha256=' . hash('sha256', $appKey) . PHP_EOL;
-    echo 'sentinel_hosts_sha256=' . hash('sha256', json_encode(array_values($sentinelHosts))) . PHP_EOL;
+    echo 'sentinel_hosts_sha256='
+        . hash('sha256', (string) json_encode($sentinelHosts, JSON_UNESCAPED_SLASHES))
+        . PHP_EOL;
     echo 'sentinel_service=' . (string) $config->get('database.redis.sentinel_session.options.service') . PHP_EOL;
     echo 'session_database=' . (string) ($sentinelParameters['database'] ?? '') . PHP_EOL;
     exit(0);
