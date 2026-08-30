@@ -277,20 +277,168 @@
     - librenms_vip_enabled | bool
     - inventory_hostname in librenms_post_reboot_active_lb_nodes
 
-- name: Wait for MariaDB after reboot
-  command:
-    argv:
-      - systemctl
-      - is-active
-      - "{{ librenms_mariadb_service_name }}"
-  register: librenms_post_reboot_mariadb_state
-  changed_when: false
-  until: librenms_post_reboot_mariadb_state.stdout == 'active'
-  retries: "{{ librenms_post_reboot_service_retries | int }}"
-  delay: "{{ librenms_post_reboot_service_delay | int }}"
+- name: Ensure MariaDB reaches an active state after reboot
   when:
     - librenms_db_mode in ['local', 'galera']
     - inventory_hostname in librenms_post_reboot_active_db_nodes
+  block:
+    - name: Wait while MariaDB is starting after reboot
+      command:
+        argv:
+          - systemctl
+          - show
+          - "{{ librenms_mariadb_service_name }}"
+          - --property=ActiveState
+          - --value
+      register: librenms_post_reboot_mariadb_state
+      changed_when: false
+      failed_when: false
+      until: >-
+        (librenms_post_reboot_mariadb_state.stdout | trim)
+        not in ['activating', 'reloading']
+      retries: "{{ librenms_post_reboot_mariadb_retries | int }}"
+      delay: "{{ librenms_post_reboot_mariadb_delay | int }}"
+
+    - name: Verify MariaDB is active after reboot
+      assert:
+        that:
+          - (librenms_post_reboot_mariadb_state.stdout | trim) == 'active'
+        fail_msg: >-
+          MariaDB entered terminal state
+          '{{ librenms_post_reboot_mariadb_state.stdout | trim | default('unknown', true) }}'.
+  rescue:
+    - name: Capture MariaDB service properties after failed post-reboot convergence
+      command:
+        argv:
+          - systemctl
+          - show
+          - "{{ librenms_mariadb_service_name }}"
+          - --property=ActiveState
+          - --property=SubState
+          - --property=Result
+          - --property=MainPID
+          - --property=ControlPID
+          - --property=ExecMainStatus
+          - --property=StatusText
+          - --property=TimeoutStartUSec
+      register: librenms_post_reboot_mariadb_properties
+      changed_when: false
+      failed_when: false
+
+    - name: Capture MariaDB unit definition after failed post-reboot convergence
+      command:
+        argv:
+          - systemctl
+          - cat
+          - "{{ librenms_mariadb_service_name }}"
+      register: librenms_post_reboot_mariadb_unit
+      changed_when: false
+      failed_when: false
+
+    - name: Capture MariaDB status after failed post-reboot convergence
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_mariadb_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_post_reboot_mariadb_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture MariaDB current-boot journal after failed post-reboot convergence
+      command:
+        argv:
+          - journalctl
+          - -b
+          - -u
+          - "{{ librenms_mariadb_service_name }}"
+          - -n
+          - "200"
+          - --no-pager
+      register: librenms_post_reboot_mariadb_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture local Galera state after failed post-reboot convergence
+      command:
+        argv:
+          - mysql
+          - --protocol=socket
+          - "--socket={{ librenms_mariadb_socket }}"
+          - -Nse
+          - >-
+            SHOW GLOBAL STATUS WHERE Variable_name IN
+            ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment','wsrep_cluster_size');
+      register: librenms_post_reboot_mariadb_galera_state
+      changed_when: false
+      failed_when: false
+      when: librenms_db_mode == 'galera'
+
+    - name: Capture systemd jobs after failed MariaDB post-reboot convergence
+      command:
+        argv:
+          - systemctl
+          - list-jobs
+          - --no-pager
+      register: librenms_post_reboot_mariadb_jobs
+      changed_when: false
+      failed_when: false
+
+    - name: Capture database listeners after failed post-reboot convergence
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: librenms_post_reboot_mariadb_listeners
+      changed_when: false
+      failed_when: false
+
+    - name: Capture database filesystem usage after failed post-reboot convergence
+      command:
+        argv:
+          - df
+          - -h
+          - /var/lib/mysql
+      register: librenms_post_reboot_mariadb_disk
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with MariaDB post-reboot diagnostics
+      fail:
+        msg: |-
+          MariaDB did not become active after reboot on {{ inventory_hostname }}.
+          No Galera bootstrap or recovered-position mutation was attempted.
+
+          systemctl show:
+          {{ librenms_post_reboot_mariadb_properties.stdout | default('') }}
+
+          systemctl cat:
+          {{ librenms_post_reboot_mariadb_unit.stdout | default('') }}
+
+          systemctl status:
+          {{ librenms_post_reboot_mariadb_status.stdout | default('') }}
+
+          current-boot journal:
+          {{ librenms_post_reboot_mariadb_journal.stdout | default('') }}
+
+          local Galera state:
+          {{ librenms_post_reboot_mariadb_galera_state.stdout | default('unavailable') }}
+          {{ librenms_post_reboot_mariadb_galera_state.stderr | default('') }}
+
+          systemd jobs:
+          {{ librenms_post_reboot_mariadb_jobs.stdout | default('') }}
+
+          database listeners:
+          {{ librenms_post_reboot_mariadb_listeners.stdout | default('') }}
+
+          database filesystem:
+          {{ librenms_post_reboot_mariadb_disk.stdout | default('') }}
+
+          When the other Galera members remain Primary/Synced, this node must
+          rejoin normally through IST or SST. Do not run guarded Galera recovery
+          unless the cluster has lost its Primary component.
 
 - name: Wait for Galera Primary and Synced state
   command:

@@ -4,6 +4,8 @@ librenms_post_reboot_connection_delay: 5
 librenms_post_reboot_systemctl_timeout: 20
 librenms_post_reboot_service_retries: 24
 librenms_post_reboot_service_delay: 5
+librenms_post_reboot_mariadb_retries: 30
+librenms_post_reboot_mariadb_delay: 10
 librenms_post_reboot_runtime_retries: 24
 librenms_post_reboot_runtime_delay: 5
 librenms_post_reboot_vip_retries: 24

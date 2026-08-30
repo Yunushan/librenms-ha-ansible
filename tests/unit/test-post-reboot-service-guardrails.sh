@@ -34,6 +34,10 @@ main() {
 
     require_file_text "${DEFAULTS}" \
         'librenms_post_reboot_systemctl_timeout: 20'
+    require_file_text "${DEFAULTS}" \
+        'librenms_post_reboot_mariadb_retries: 30'
+    require_file_text "${DEFAULTS}" \
+        'librenms_post_reboot_mariadb_delay: 10'
     require_file_text "${TASKS}" 'Ensure HAProxy is active after reboot'
     require_file_text "${TASKS}" 'Reconcile HAProxy non-local VIP binding after reboot'
     require_file_text "${TASKS}" 'net.ipv4.ip_nonlocal_bind'
@@ -49,6 +53,19 @@ main() {
     require_file_text "${TASKS}" 'Capture HAProxy service properties after failed post-reboot recovery'
     require_file_text "${TASKS}" 'Fail with HAProxy post-reboot diagnostics'
     require_file_text "${TASKS}" 'haproxy -c:'
+    require_file_text "${TASKS}" 'Ensure MariaDB reaches an active state after reboot'
+    require_file_text "${TASKS}" 'Wait while MariaDB is starting after reboot'
+    require_file_text "${TASKS}" 'Verify MariaDB is active after reboot'
+    require_file_text "${TASKS}" 'TimeoutStartUSec'
+    require_file_text "${TASKS}" 'Capture MariaDB unit definition after failed post-reboot convergence'
+    require_file_text "${TASKS}" 'Capture MariaDB current-boot journal after failed post-reboot convergence'
+    require_file_text "${TASKS}" 'Capture local Galera state after failed post-reboot convergence'
+    require_file_text "${TASKS}" 'Fail with MariaDB post-reboot diagnostics'
+    require_file_text "${TASKS}" 'No Galera bootstrap or recovered-position mutation was attempted.'
+
+    if grep -Eq 'galera_new_cluster|--wsrep-new-cluster|safe_to_bootstrap' "${TASKS}"; then
+        fail 'post-reboot convergence must never bootstrap or mutate Galera recovery state'
+    fi
 
     start_line="$(line_number "${TASKS}" 'Start HAProxy after reboot')"
     wait_line="$(line_number "${TASKS}" 'Wait for HAProxy after reboot')"
