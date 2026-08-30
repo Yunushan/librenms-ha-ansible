@@ -1,6 +1,7 @@
 ---
 librenms_post_reboot_connection_timeout: 300
 librenms_post_reboot_connection_delay: 5
+librenms_post_reboot_systemctl_timeout: 20
 librenms_post_reboot_service_retries: 24
 librenms_post_reboot_service_delay: 5
 librenms_post_reboot_runtime_retries: 24

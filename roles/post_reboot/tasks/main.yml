@@ -107,17 +107,111 @@
       }}
   run_once: true
 
-- name: Wait for HAProxy after reboot
-  command:
-    argv:
-      - systemctl
-      - is-active
-      - "{{ librenms_haproxy_service_name }}"
-  register: librenms_post_reboot_haproxy_state
-  changed_when: false
-  until: librenms_post_reboot_haproxy_state.stdout == 'active'
-  retries: "{{ librenms_post_reboot_service_retries | int }}"
-  delay: "{{ librenms_post_reboot_service_delay | int }}"
+- name: Ensure HAProxy is active after reboot
+  block:
+    - name: Reset failed HAProxy state after reboot
+      command:
+        argv:
+          - timeout
+          - --foreground
+          - --kill-after=5s
+          - "{{ librenms_post_reboot_systemctl_timeout | int }}s"
+          - systemctl
+          - reset-failed
+          - "{{ librenms_haproxy_service_name }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Validate HAProxy configuration after reboot
+      command:
+        argv:
+          - haproxy
+          - -c
+          - -f
+          - /etc/haproxy/haproxy.cfg
+      register: librenms_post_reboot_haproxy_config_check
+      changed_when: false
+
+    - name: Start HAProxy after reboot
+      command:
+        argv:
+          - timeout
+          - --foreground
+          - --kill-after=5s
+          - "{{ librenms_post_reboot_systemctl_timeout | int }}s"
+          - systemctl
+          - start
+          - --no-block
+          - "{{ librenms_haproxy_service_name }}"
+      changed_when: true
+
+    - name: Wait for HAProxy after reboot
+      command:
+        argv:
+          - timeout
+          - --foreground
+          - --kill-after=5s
+          - "{{ librenms_post_reboot_systemctl_timeout | int }}s"
+          - systemctl
+          - is-active
+          - "{{ librenms_haproxy_service_name }}"
+      register: librenms_post_reboot_haproxy_state
+      changed_when: false
+      until: librenms_post_reboot_haproxy_state.stdout | trim == 'active'
+      retries: "{{ librenms_post_reboot_service_retries | int }}"
+      delay: "{{ librenms_post_reboot_service_delay | int }}"
+  rescue:
+    - name: Capture HAProxy status after failed post-reboot recovery
+      command:
+        argv:
+          - systemctl
+          - status
+          - "{{ librenms_haproxy_service_name }}"
+          - --no-pager
+          - -l
+      register: librenms_post_reboot_haproxy_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture HAProxy journal after failed post-reboot recovery
+      command:
+        argv:
+          - journalctl
+          - -u
+          - "{{ librenms_haproxy_service_name }}"
+          - -n
+          - "100"
+          - --no-pager
+      register: librenms_post_reboot_haproxy_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture HAProxy listeners after failed post-reboot recovery
+      command:
+        argv:
+          - ss
+          - -ltnp
+      register: librenms_post_reboot_haproxy_sockets
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with HAProxy post-reboot diagnostics
+      fail:
+        msg: |-
+          HAProxy did not become active after reboot on {{ inventory_hostname }}.
+
+          haproxy -c:
+          {{ librenms_post_reboot_haproxy_config_check.stdout | default('') }}
+          {{ librenms_post_reboot_haproxy_config_check.stderr | default('') }}
+
+          systemctl status:
+          {{ librenms_post_reboot_haproxy_status.stdout | default('') }}
+
+          journalctl:
+          {{ librenms_post_reboot_haproxy_journal.stdout | default('') }}
+
+          listening sockets:
+          {{ librenms_post_reboot_haproxy_sockets.stdout | default('') }}
   when: inventory_hostname in librenms_post_reboot_active_lb_nodes
 
 - name: Wait for keepalived after reboot
