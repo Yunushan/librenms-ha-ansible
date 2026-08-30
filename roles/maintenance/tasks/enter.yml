@@ -72,6 +72,127 @@
 - name: Stop target LibreNMS workers and timers
   shell: |
     set -eu
+
+    systemctl_bounded() {
+      timeout --foreground --kill-after=5s \
+        "{{ librenms_maintenance_systemctl_timeout | int }}s" \
+        systemctl "$@"
+    }
+
+    unit_exists() {
+      load_state="$(
+        systemctl_bounded show --property=LoadState --value "$1" \
+          2>/dev/null
+      )" || return 2
+      [ "${load_state}" != not-found ] && [ -n "${load_state}" ]
+    }
+
+    unit_state() {
+      systemctl_bounded show --property=ActiveState --value "$1" \
+        2>/dev/null
+    }
+
+    wait_until_stopped() {
+      stop_unit="$1"
+      stop_timeout="$2"
+      attempt=0
+      while [ "${attempt}" -lt "${stop_timeout}" ]; do
+        state="$(unit_state "${stop_unit}")" || return 1
+        case "${state}" in
+          inactive|failed|dead)
+            return 0
+            ;;
+        esac
+        sleep 1
+        attempt=$((attempt + 1))
+      done
+      state="$(unit_state "${stop_unit}")" || return 1
+      case "${state}" in
+        inactive|failed|dead)
+          return 0
+          ;;
+      esac
+      return 1
+    }
+
+    print_stop_diagnostics() {
+      diagnostic_unit="$1"
+      echo "--- ${diagnostic_unit} properties ---" >&2
+      systemctl_bounded show \
+        --property=LoadState,ActiveState,SubState,Result,MainPID,ControlPID,ControlGroup \
+        "${diagnostic_unit}" >&2 || true
+      echo "--- ${diagnostic_unit} status ---" >&2
+      systemctl_bounded status --no-pager "${diagnostic_unit}" >&2 || true
+      echo "--- systemd jobs ---" >&2
+      systemctl_bounded list-jobs --no-pager >&2 || true
+    }
+
+    stop_service_unit() {
+      stop_unit="$1"
+      state="$(unit_state "${stop_unit}")" || {
+        echo "could not inspect ${stop_unit} before maintenance stop" >&2
+        return 1
+      }
+      case "${state}" in
+        inactive|failed|dead)
+          systemctl_bounded reset-failed "${stop_unit}" >/dev/null 2>&1 || true
+          return 0
+          ;;
+      esac
+
+      echo "stopping ${stop_unit} (${state})"
+      systemctl_bounded stop --no-block "${stop_unit}" >/dev/null 2>&1 || true
+      if wait_until_stopped \
+        "${stop_unit}" "{{ librenms_maintenance_unit_stop_timeout | int }}"; then
+        systemctl_bounded reset-failed "${stop_unit}" >/dev/null 2>&1 || true
+        return 0
+      fi
+
+      state="$(unit_state "${stop_unit}")" || {
+        echo "systemd manager stopped responding while quiescing ${stop_unit}" >&2
+        print_stop_diagnostics "${stop_unit}"
+        return 1
+      }
+      case "${state}" in
+        inactive|failed|dead)
+          systemctl_bounded reset-failed "${stop_unit}" >/dev/null 2>&1 || true
+          return 0
+          ;;
+      esac
+
+      case "${stop_unit}" in
+        *.service)
+          ;;
+        *)
+          echo "${stop_unit} remained ${state}; refusing to signal a non-service unit" >&2
+          print_stop_diagnostics "${stop_unit}"
+          return 1
+          ;;
+      esac
+
+      echo "${stop_unit} remained ${state}; sending SIGTERM to its service cgroup" >&2
+      systemctl_bounded kill --kill-whom=all --signal=TERM "${stop_unit}" \
+        >/dev/null 2>&1 || true
+      sleep "{{ librenms_maintenance_unit_kill_grace | int }}"
+      if wait_until_stopped "${stop_unit}" 5; then
+        systemctl_bounded reset-failed "${stop_unit}" >/dev/null 2>&1 || true
+        return 0
+      fi
+
+      echo "${stop_unit} did not stop after SIGTERM; sending SIGKILL to its service cgroup" >&2
+      systemctl_bounded kill --kill-whom=all --signal=KILL "${stop_unit}" \
+        >/dev/null 2>&1 || true
+      systemctl_bounded stop --no-block "${stop_unit}" >/dev/null 2>&1 || true
+      if wait_until_stopped "${stop_unit}" 5; then
+        systemctl_bounded reset-failed "${stop_unit}" >/dev/null 2>&1 || true
+        return 0
+      fi
+
+      echo "failed to quiesce ${stop_unit}; refusing to continue maintenance" >&2
+      print_stop_diagnostics "${stop_unit}"
+      return 1
+    }
+
     for unit in \
       librenms-scheduler.timer \
       librenms-scheduler.service \
@@ -79,9 +200,13 @@
       librenms-daily.service \
       librenms.service
     do
-      if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
-        if systemctl is-active --quiet "$unit"; then
-          systemctl stop "$unit"
+      if unit_exists "${unit}"; then
+        stop_service_unit "${unit}"
+      else
+        unit_rc=$?
+        if [ "${unit_rc}" -ne 1 ]; then
+          echo "could not inspect ${unit} before maintenance stop" >&2
+          exit "${unit_rc}"
         fi
       fi
     done

@@ -7,6 +7,11 @@ librenms_maintenance_stop_application_services: true
 librenms_maintenance_stop_data_services: true
 librenms_maintenance_stop_keepalived: true
 librenms_maintenance_stop_rrdcached: true
+# Keep planned maintenance stops bounded even when a service has a pending
+# start job or a slow shutdown.
+librenms_maintenance_systemctl_timeout: 10
+librenms_maintenance_unit_stop_timeout: 30
+librenms_maintenance_unit_kill_grace: 5
 librenms_maintenance_resume_daily_timer: true
 librenms_maintenance_fail_on_degraded_after_exit: true
 librenms_maintenance_probe_retries: 24
