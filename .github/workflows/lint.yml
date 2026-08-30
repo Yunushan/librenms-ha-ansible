@@ -138,6 +138,9 @@ jobs:
       - name: Test web-session HA guardrails
         run: make test-web-session-ha-guardrails
 
+      - name: Test session repair guardrails
+        run: make test-session-repair-guardrails
+
       - name: Test failover recovery guardrails
         run: make test-failover-recovery-guardrails
 

@@ -282,6 +282,24 @@ make post-change PLAYBOOK_FLAGS=--ask-become-pass
 make docker-post-change PLAYBOOK_FLAGS=--ask-become-pass
 ```
 
+If a role update introduces the Redis AOF and cross-node Laravel session checks
+while one member must remain in `maintenance_nodes`, do not bypass the
+three-node topology assertions and do not temporarily rejoin the broken member.
+Use the bounded active-node repair instead:
+
+```bash
+make maintenance-hold MAINTENANCE_TARGET=lnms3 \
+  PLAYBOOK_FLAGS=--ask-become-pass
+make session-repair-ask-become-pass SESSION_REPAIR_CONFIRM=true
+make status-strict PLAYBOOK_FLAGS=--ask-become-pass
+```
+
+The maintenance hold stops application and HA self-repair units again on the
+excluded node. Session repair checks the surviving Sentinel quorum, enables AOF
+live and serially without restarting Redis, persists that runtime setting, and
+deploys the Laravel session probe only to active web nodes. Full HAProxy and
+cluster convergence still waits until the third member can rejoin.
+
 During serialized Galera convergence, the node-drain helper gives active
 LibreNMS workers `librenms_galera_web_drain_unit_stop_timeout` seconds to stop
 cleanly. If a worker remains stuck, the helper sends TERM and then KILL only to

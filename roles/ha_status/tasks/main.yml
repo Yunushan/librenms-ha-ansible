@@ -1133,7 +1133,9 @@
         + [
             item.item.0 ~ ' is listed in maintenance_nodes but '
             ~ item.item.1
-            ~ ' is still active.'
+            ~ ' is still '
+            ~ (item.stdout | default('unknown') | trim)
+            ~ '.'
           ]
       }}
   loop: "{{ librenms_status_maintenance_unit_activity.results | default([]) }}"
@@ -1142,7 +1144,9 @@
   when:
     - librenms_status_maintenance_drift_enabled | bool
     - not (item.unreachable | default(false))
-    - (item.stdout | default('')) == 'active'
+    - >-
+      (item.stdout | default('') | trim)
+      in ['active', 'activating', 'reloading', 'deactivating']
   run_once: true
 
 - name: Record missing VIP owner degradation

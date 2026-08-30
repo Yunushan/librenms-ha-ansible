@@ -29,6 +29,10 @@ librenms_status_maintenance_probe_units:
   - librenms.service
   - librenms-scheduler.timer
   - librenms-daily.timer
+  - librenms-ha-startup-repair.timer
+  - librenms-ha-startup-repair.service
+  - librenms-dispatcher-ha-recover.timer
+  - librenms-dispatcher-ha-recover.service
   - "{{ librenms_nginx_service_name }}"
   - "{{ librenms_haproxy_service_name }}"
   - "{{ librenms_keepalived_service_name }}"

@@ -1,0 +1,10 @@
+---
+- name: Reassert the drained state of one inventory maintenance node
+  hosts: maintenance_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: maintenance
+      vars:
+        librenms_maintenance_action: hold

@@ -1,0 +1,32 @@
+---
+- name: Preflight maintenance-safe LibreNMS session continuity repair
+  hosts: librenms_nodes:librenms_redis:!maintenance_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: session_continuity_repair
+      vars:
+        librenms_session_repair_action: preflight
+
+- name: Enable Redis AOF live without restarting the active session store
+  hosts: librenms_redis:!maintenance_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: session_continuity_repair
+      vars:
+        librenms_session_repair_action: redis
+
+- name: Deploy and verify the LibreNMS shared-session probe
+  hosts: librenms_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: session_continuity_repair
+      vars:
+        librenms_session_repair_action: web

@@ -197,6 +197,25 @@
     - librenms_maintenance_app_probe_delegate | length > 0
   run_once: true
 
+- name: Resume target HA repair timers after maintenance
+  ansible.builtin.service:
+    name: "{{ item.name }}"
+    state: started
+  loop:
+    - name: librenms-ha-startup-repair.timer
+      enabled: "{{ librenms_startup_repair_enabled | bool }}"
+    - name: librenms-dispatcher-ha-recover.timer
+      enabled: >-
+        {{
+          (librenms_manage_dispatcher | bool)
+          and (librenms_dispatcher_failover_recovery_enabled | bool)
+        }}
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_target in librenms_maintenance_app_nodes
+    - item.enabled | bool
+  run_once: true
+
 - name: Verify VIP is reachable after maintenance exit
   uri:
     url: "{{ librenms_maintenance_vip_url }}"

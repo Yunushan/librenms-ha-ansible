@@ -1,0 +1,155 @@
+---
+- name: Require an active Redis member for live AOF repair
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_redis_service_name }}"
+  register: librenms_session_repair_redis_active
+  changed_when: false
+
+- name: Inspect live Redis AOF state
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - INFO
+      - persistence
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_session_repair_aof_before
+  changed_when: false
+  no_log: true
+
+- name: Inspect live Redis AOF fsync policy
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - CONFIG
+      - GET
+      - appendfsync
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_session_repair_fsync_before
+  changed_when: false
+  no_log: true
+
+- name: Enable AOF against the live Redis session dataset
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - CONFIG
+      - SET
+      - appendonly
+      - "yes"
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  changed_when: true
+  no_log: true
+  when:
+    - librenms_session_repair_aof_before.stdout is not search('aof_enabled:1')
+
+- name: Apply the live Redis AOF fsync policy
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - CONFIG
+      - SET
+      - appendfsync
+      - "{{ librenms_redis_appendfsync }}"
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  changed_when: true
+  no_log: true
+  when:
+    - >-
+      librenms_redis_appendfsync
+      not in (librenms_session_repair_fsync_before.stdout_lines | default([]))
+
+- name: Wait for the live Redis AOF rewrite
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - INFO
+      - persistence
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_session_repair_aof_ready
+  changed_when: false
+  retries: "{{ librenms_session_repair_aof_retries | int }}"
+  delay: "{{ librenms_session_repair_aof_delay | int }}"
+  until:
+    - librenms_session_repair_aof_ready.stdout is search('aof_enabled:1')
+    - >-
+      librenms_session_repair_aof_ready.stdout
+      is search('aof_rewrite_in_progress:0')
+    - >-
+      librenms_session_repair_aof_ready.stdout
+      is search('aof_last_bgrewrite_status:ok')
+    - >-
+      librenms_session_repair_aof_ready.stdout
+      is search('aof_last_write_status:ok')
+  no_log: true
+
+- name: Persist live Redis AOF settings
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - CONFIG
+      - REWRITE
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_session_repair_config_rewrite
+  changed_when: false
+  no_log: true
+
+- name: Verify persisted live Redis AOF settings
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - CONFIG
+      - GET
+      - "append*"
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_session_repair_aof_config
+  changed_when: false
+  no_log: true
+
+- name: Confirm persisted live Redis AOF settings
+  ansible.builtin.assert:
+    that:
+      - (librenms_session_repair_config_rewrite.stdout | trim) == 'OK'
+      - "'yes' in librenms_session_repair_aof_config.stdout_lines"
+      - >-
+        librenms_redis_appendfsync
+        in librenms_session_repair_aof_config.stdout_lines
+    fail_msg: >-
+      Redis AOF was not safely enabled and persisted on {{ inventory_hostname }}.

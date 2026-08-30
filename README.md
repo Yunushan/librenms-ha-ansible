@@ -1164,8 +1164,30 @@ Make targets are available:
 
 ```bash
 make maintenance-enter MAINTENANCE_TARGET=lnms1
+make maintenance-hold MAINTENANCE_TARGET=lnms1
 make maintenance-exit MAINTENANCE_TARGET=lnms1
 ```
+
+`maintenance-hold` is for a reachable host that is already listed in
+`maintenance_nodes`. It reasserts the drain, stops HA self-repair timers before
+they can wake application workers, and verifies that the remaining Galera,
+Redis, VIP, and dispatcher capacity is still usable. It does not rejoin the
+target.
+
+When a code update adds the shared-session checks while one node must remain in
+maintenance, full `cluster.yml` convergence correctly refuses the reduced
+three-member Galera/Sentinel topology. Adopt Redis AOF live and deploy the
+session probe only on active nodes with:
+
+```bash
+make session-repair-ask-become-pass SESSION_REPAIR_CONFIRM=true
+make status-strict PLAYBOOK_FLAGS=--ask-become-pass
+```
+
+The repair verifies Sentinel quorum first, enables and persists AOF one Redis
+member at a time without a Redis restart, and verifies the effective Laravel
+session driver on each active web node. It does not bootstrap Galera, alter the
+maintenance node, or lower the normal three-node production guard.
 
 ---
 

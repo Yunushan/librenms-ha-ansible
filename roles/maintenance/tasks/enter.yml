@@ -17,7 +17,7 @@
     mode: "0644"
     content: |
       target={{ librenms_maintenance_target }}
-      action=enter
+      action={{ librenms_maintenance_action }}
       timestamp={{ ansible_facts.date_time.iso8601 }}
   delegate_to: "{{ librenms_maintenance_target }}"
   run_once: true
@@ -204,6 +204,10 @@
     }
 
     for unit in \
+      librenms-ha-startup-repair.timer \
+      librenms-dispatcher-ha-recover.timer \
+      librenms-ha-startup-repair.service \
+      librenms-dispatcher-ha-recover.service \
       librenms-scheduler.timer \
       librenms-scheduler.service \
       librenms-daily.timer \

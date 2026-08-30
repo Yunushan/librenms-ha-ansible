@@ -1,0 +1,34 @@
+---
+- name: Load OS-specific session repair variables
+  ansible.builtin.include_vars:
+    file: "{{ lookup('first_found', librenms_session_repair_vars_lookup) }}"
+  vars:
+    librenms_session_repair_vars_lookup:
+      files:
+        - "{{ ansible_facts.distribution | replace(' ', '') }}.yml"
+        - "{{ ansible_facts.os_family }}.yml"
+      paths:
+        - "{{ role_path }}/../common/vars"
+
+- name: Validate session continuity repair action
+  ansible.builtin.assert:
+    that:
+      - librenms_session_repair_confirm | bool
+      - librenms_session_repair_action in ['preflight', 'redis', 'web']
+      - inventory_hostname not in groups.get('maintenance_nodes', [])
+      - inventory_hostname not in groups.get('decommission_nodes', [])
+    fail_msg: >-
+      Session continuity repair requires explicit confirmation and may target
+      only active inventory nodes.
+
+- name: Run session continuity repair preflight
+  ansible.builtin.include_tasks: preflight.yml
+  when: librenms_session_repair_action == 'preflight'
+
+- name: Enable live Redis session durability
+  ansible.builtin.include_tasks: redis.yml
+  when: librenms_session_repair_action == 'redis'
+
+- name: Deploy LibreNMS session continuity probe
+  ansible.builtin.include_tasks: web.yml
+  when: librenms_session_repair_action == 'web'

@@ -1,0 +1,16 @@
+---
+librenms_session_repair_action: preflight
+librenms_session_repair_confirm: false
+librenms_session_repair_active_web_nodes: >-
+  {{
+    groups.get('librenms_web', groups.get('librenms_nodes', []))
+    | difference(librenms_inactive_inventory_nodes)
+  }}
+librenms_session_repair_active_redis_nodes: >-
+  {{
+    groups.get('librenms_redis', [])
+    | difference(librenms_inactive_inventory_nodes)
+  }}
+librenms_session_repair_min_web_nodes: 2
+librenms_session_repair_aof_retries: 60
+librenms_session_repair_aof_delay: 2

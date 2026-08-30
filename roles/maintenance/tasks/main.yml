@@ -59,17 +59,41 @@
         | unique
       }}
     librenms_maintenance_remaining_app_nodes: >-
-      {{ librenms_maintenance_app_nodes | difference([librenms_maintenance_target]) }}
+      {{
+        librenms_maintenance_app_nodes
+        | difference([librenms_maintenance_target])
+        | difference(groups.get('maintenance_nodes', []))
+      }}
     librenms_maintenance_remaining_web_nodes: >-
-      {{ librenms_maintenance_web_nodes | difference([librenms_maintenance_target]) }}
+      {{
+        librenms_maintenance_web_nodes
+        | difference([librenms_maintenance_target])
+        | difference(groups.get('maintenance_nodes', []))
+      }}
     librenms_maintenance_remaining_db_nodes: >-
-      {{ librenms_maintenance_db_nodes | difference([librenms_maintenance_target]) }}
+      {{
+        librenms_maintenance_db_nodes
+        | difference([librenms_maintenance_target])
+        | difference(groups.get('maintenance_nodes', []))
+      }}
     librenms_maintenance_remaining_redis_nodes: >-
-      {{ librenms_maintenance_redis_nodes | difference([librenms_maintenance_target]) }}
+      {{
+        librenms_maintenance_redis_nodes
+        | difference([librenms_maintenance_target])
+        | difference(groups.get('maintenance_nodes', []))
+      }}
     librenms_maintenance_remaining_lb_nodes: >-
-      {{ librenms_maintenance_lb_nodes | difference([librenms_maintenance_target]) }}
+      {{
+        librenms_maintenance_lb_nodes
+        | difference([librenms_maintenance_target])
+        | difference(groups.get('maintenance_nodes', []))
+      }}
     librenms_maintenance_remaining_gluster_nodes: >-
-      {{ librenms_maintenance_gluster_nodes | difference([librenms_maintenance_target]) }}
+      {{
+        librenms_maintenance_gluster_nodes
+        | difference([librenms_maintenance_target])
+        | difference(groups.get('maintenance_nodes', []))
+      }}
   run_once: true
 
 - name: Determine maintenance probe endpoints
@@ -153,7 +177,7 @@
   assert:
     that:
       - librenms_mode == 'ha'
-      - librenms_maintenance_action in ['enter', 'exit']
+      - librenms_maintenance_action in ['enter', 'exit', 'hold']
       - librenms_maintenance_target | length > 0
       - librenms_maintenance_target in librenms_maintenance_managed_nodes
       - librenms_maintenance_target not in librenms_maintenance_decommission_nodes
@@ -171,6 +195,18 @@
       Remove {{ librenms_maintenance_target }} from maintenance_nodes before
       running maintenance-exit.yml so the final HA status check includes it.
   when: librenms_maintenance_action == 'exit'
+  run_once: true
+
+- name: Require hold target to remain excluded in inventory
+  ansible.builtin.assert:
+    that:
+      - librenms_maintenance_target in groups.get('maintenance_nodes', [])
+      - librenms_maintenance_target in ansible_play_hosts_all
+      - ansible_play_hosts_all | length == 1
+    fail_msg: >-
+      maintenance-hold must be limited to exactly one target that is already
+      listed in maintenance_nodes.
+  when: librenms_maintenance_action == 'hold'
   run_once: true
 
 - name: Validate remaining HA capacity before entering maintenance
@@ -199,12 +235,12 @@
       Taking {{ librenms_maintenance_target }} down would leave too little HA
       capacity. Check remaining web, load-balancer, Galera, Redis Sentinel, and
       Gluster nodes before proceeding.
-  when: librenms_maintenance_action == 'enter'
+  when: librenms_maintenance_action in ['enter', 'hold']
   run_once: true
 
 - name: Run maintenance enter workflow
   include_tasks: enter.yml
-  when: librenms_maintenance_action == 'enter'
+  when: librenms_maintenance_action in ['enter', 'hold']
   run_once: true
 
 - name: Run maintenance exit workflow

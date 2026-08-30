@@ -1,0 +1,76 @@
+---
+- name: Validate maintenance-safe session repair topology
+  ansible.builtin.assert:
+    that:
+      - librenms_mode == 'ha'
+      - librenms_redis_mode == 'sentinel'
+      - librenms_redis_persistence_enabled | bool
+      - librenms_redis_appendonly | bool
+      - >-
+        (librenms_session_repair_active_web_nodes | length)
+        >= (librenms_session_repair_min_web_nodes | int)
+      - >-
+        (librenms_session_repair_active_redis_nodes | length)
+        >= (librenms_redis_quorum | int)
+    fail_msg: >-
+      Session repair requires HA Redis Sentinel mode, at least two active web
+      nodes, a live Sentinel quorum, and configured AOF persistence. It does
+      not weaken the normal three-member production topology guard.
+  run_once: true
+
+- name: Verify active Redis service before session repair
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_redis_service_name }}"
+  register: librenms_session_repair_redis_service
+  changed_when: false
+  when: inventory_hostname in librenms_session_repair_active_redis_nodes
+
+- name: Verify local Redis accepts authenticated commands
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - PING
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_session_repair_redis_ping
+  changed_when: false
+  no_log: true
+  when: inventory_hostname in librenms_session_repair_active_redis_nodes
+
+- name: Verify local Sentinel retains quorum
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "26379"
+      - SENTINEL
+      - CKQUORUM
+      - "{{ librenms_redis_sentinel_service }}"
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_sentinel_password }}"
+  register: librenms_session_repair_sentinel_quorum
+  changed_when: false
+  no_log: true
+  when: inventory_hostname in librenms_session_repair_active_redis_nodes
+
+- name: Confirm local Redis and Sentinel preflight
+  ansible.builtin.assert:
+    that:
+      - (librenms_session_repair_redis_service.stdout | trim) == 'active'
+      - (librenms_session_repair_redis_ping.stdout | trim) == 'PONG'
+      - >-
+        (librenms_session_repair_sentinel_quorum.stdout | default(''))
+        is search('^OK')
+    fail_msg: >-
+      {{ inventory_hostname }} does not have an active, writable Redis runtime
+      with Sentinel quorum. No AOF or application change was attempted.
+  when: inventory_hostname in librenms_session_repair_active_redis_nodes
