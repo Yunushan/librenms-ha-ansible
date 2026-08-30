@@ -842,9 +842,11 @@ ansible-playbook -i inventories/ha/hosts.yml playbooks/maintenance-enter.yml \
   -e librenms_maintenance_confirm=true
 ```
 
-The playbook moves the VIP away when needed, stops the target web backend and
-LibreNMS workers, gracefully triggers Redis/Galera failover for the target when
-applicable, and verifies the remaining HA layer before you power the node off.
+The playbook moves the VIP away when needed, stops the target HAProxy, web
+backend, LibreNMS workers, and Gluster daemon, gracefully triggers Redis/Galera
+failover for the target when applicable, and verifies the remaining HA layer
+before you power the node off. This matches the service-inactivity checks used
+for hosts listed in `maintenance_nodes`.
 
 3. Add the node to `maintenance_nodes` while it is intentionally unavailable:
 

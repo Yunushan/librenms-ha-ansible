@@ -6,7 +6,9 @@ librenms_maintenance_marker_path: /var/lib/librenms-ha-ansible/maintenance
 librenms_maintenance_stop_application_services: true
 librenms_maintenance_stop_data_services: true
 librenms_maintenance_stop_keepalived: true
+librenms_maintenance_stop_haproxy: true
 librenms_maintenance_stop_rrdcached: true
+librenms_maintenance_stop_glusterd: true
 # Keep planned maintenance stops bounded even when a service has a pending
 # start job or a slow shutdown.
 librenms_maintenance_systemctl_timeout: 10

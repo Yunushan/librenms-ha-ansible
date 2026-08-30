@@ -58,6 +58,16 @@
     - librenms_maintenance_target in librenms_maintenance_lb_nodes
   run_once: true
 
+- name: Stop target HAProxy before maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_haproxy_service_name | default(librenms_haproxy_service_name) }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_haproxy | bool
+    - librenms_maintenance_target in librenms_maintenance_lb_nodes
+  run_once: true
+
 - name: Stop target web frontend
   service:
     name: "{{ hostvars[librenms_maintenance_target].librenms_nginx_service_name | default(librenms_nginx_service_name) }}"
@@ -280,6 +290,17 @@
   when:
     - librenms_db_mode == 'galera'
     - librenms_maintenance_remaining_db_nodes | length > 0
+
+- name: Stop target glusterd before maintenance
+  service:
+    name: "{{ hostvars[librenms_maintenance_target].librenms_glusterd_service_name | default(librenms_glusterd_service_name) }}"
+    state: stopped
+  delegate_to: "{{ librenms_maintenance_target }}"
+  when:
+    - librenms_maintenance_stop_glusterd | bool
+    - librenms_rrd_mode == 'glusterfs'
+    - librenms_maintenance_target in librenms_maintenance_gluster_nodes
+  run_once: true
 
 - name: Verify VIP is reachable after target drain
   uri:

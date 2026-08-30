@@ -25,6 +25,10 @@ main() {
         'librenms_maintenance_unit_stop_timeout: 30'
     require_file_text "${DEFAULTS}" \
         'librenms_maintenance_unit_kill_grace: 5'
+    require_file_text "${DEFAULTS}" \
+        'librenms_maintenance_stop_haproxy: true'
+    require_file_text "${DEFAULTS}" \
+        'librenms_maintenance_stop_glusterd: true'
     require_file_text "${TASKS}" 'systemctl_bounded()'
     require_file_text "${TASKS}" 'unit_exists()'
     require_file_text "${TASKS}" 'wait_until_stopped()'
@@ -34,6 +38,10 @@ main() {
     require_file_text "${TASKS}" \
         'systemctl_bounded kill --kill-whom=all --signal=KILL "${stop_unit}"'
     require_file_text "${TASKS}" 'print_stop_diagnostics()'
+    require_file_text "${TASKS}" 'Stop target HAProxy before maintenance'
+    require_file_text "${TASKS}" 'librenms_maintenance_stop_haproxy | bool'
+    require_file_text "${TASKS}" 'Stop target glusterd before maintenance'
+    require_file_text "${TASKS}" 'librenms_maintenance_stop_glusterd | bool'
 
     if grep -Fq -- 'systemctl stop "$unit"' "${TASKS}"; then
         fail 'maintenance workers must not use an unbounded synchronous unit stop'
