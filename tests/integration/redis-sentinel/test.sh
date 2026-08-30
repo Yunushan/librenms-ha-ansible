@@ -5,6 +5,7 @@ readonly TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly COMPOSE_FILE="${TEST_DIR}/compose.yml"
 readonly PROJECT_NAME="librenms-redis-sentinel-integration"
 readonly SENTINELS=(sentinel-1 sentinel-2 sentinel-3)
+readonly ORIGINAL_REPLICAS=(redis-2 redis-3)
 readonly TIMEOUT_SECONDS="${REDIS_SENTINEL_TEST_TIMEOUT_SECONDS:-180}"
 readonly ORIGINAL_MASTER="172.30.77.11:6379"
 
@@ -61,6 +62,15 @@ all_sentinels_are_ready_for_failover() {
     done
 }
 
+all_original_replicas_have_test_value() {
+    local replica
+
+    for replica in "${ORIGINAL_REPLICAS[@]}"; do
+        [ "$(compose exec -T "${replica}" redis-cli --raw GET \
+            librenms:integration:before-failover)" = "ready" ] || return 1
+    done
+}
+
 sentinel_elected_replica() {
     local master
     master="$(sentinel_master sentinel-1)"
@@ -96,6 +106,8 @@ main() {
 
     compose exec -T sentinel-1 redis-cli -h "${ORIGINAL_MASTER%:*}" SET \
         librenms:integration:before-failover ready >/dev/null
+    wait_for "both Redis replicas to acknowledge the pre-failover write" \
+        all_original_replicas_have_test_value
     compose stop redis-1
 
     local new_master
