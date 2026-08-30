@@ -436,6 +436,9 @@ librenms_default_fqdn_placeholder: librenms.example.com
 librenms_app_url: ""
 librenms_session_secure_cookie: ""
 librenms_app_key: CHANGE_ME
+librenms_manage_session_health_probe: >-
+  {{ librenms_mode == 'ha' and librenms_redis_mode == 'sentinel' }}
+librenms_session_health_probe_path: /usr/local/sbin/librenms-session-health
 
 librenms_timezone: Etc/UTC
 # Keep hardware-clock synchronization disabled on virtual machines and hosts
@@ -585,10 +588,14 @@ librenms_redis_restart_sec: 3
 librenms_redis_systemd_timeout_start_sec: 30
 librenms_redis_systemd_timeout_stop_sec: 30
 librenms_redis_clear_stuck_stop_job: true
-librenms_redis_persistence_enabled: false
+librenms_redis_persistence_enabled: "{{ librenms_redis_mode == 'sentinel' }}"
 librenms_redis_remove_persistence_files_when_disabled: true
 librenms_redis_save_rules: []
-librenms_redis_appendonly: false
+librenms_redis_appendonly: "{{ librenms_redis_persistence_enabled | bool }}"
+librenms_redis_appendfsync: everysec
+librenms_redis_aof_live_migration_enabled: true
+librenms_redis_aof_live_migration_retries: 60
+librenms_redis_aof_live_migration_delay: 2
 librenms_redis_manage_overcommit_memory: true
 librenms_redis_custom_conf_path: "{{ librenms_redis_data_dir }}/librenms-redis.conf"
 librenms_redis_conf_path_effective: >-
@@ -770,6 +777,9 @@ librenms_haproxy_web_runtime_check_enabled: "{{ librenms_manage_web_runtime_heal
 librenms_haproxy_web_runtime_check_interval: 1s
 librenms_haproxy_web_runtime_check_fall: 1
 librenms_haproxy_web_runtime_check_rise: 3
+librenms_haproxy_web_session_persistence_enabled: "{{ librenms_mode == 'ha' }}"
+librenms_haproxy_web_session_cookie_name: LIBRENMSWEB
+librenms_haproxy_web_session_cookie_secure: "{{ librenms_haproxy_tls_enabled | bool }}"
 librenms_nginx_redirect_unmatched_hosts: "{{ librenms_vip_enabled | bool }}"
 librenms_haproxy_db_mysql_check_enabled: true
 librenms_haproxy_db_health_user: haproxy_check

@@ -64,10 +64,12 @@ librenms_redis_master_host: lnms1
 librenms_redis_password: CHANGE_ME_REDIS_PASSWORD
 librenms_redis_sentinel_password: CHANGE_ME_SENTINEL_PASSWORD
 librenms_redis_sentinel_service: mymaster
-# LibreNMS uses Redis for cache, sessions, locks, and queues. In HA Sentinel
-# mode, keep Redis persistence disabled by default so RDB snapshots cannot make
-# Redis restarts hang during deploys or automatic maintenance.
-librenms_redis_persistence_enabled: false
+# LibreNMS uses Redis for cache, sessions, locks, and queues. Keep AOF enabled
+# in HA so a rolling Redis restart cannot invalidate browser sessions or drop
+# queued work. The role enables AOF live before its first managed restart.
+librenms_redis_persistence_enabled: true
+librenms_redis_appendonly: true
+librenms_redis_appendfsync: everysec
 librenms_redis_remove_persistence_files_when_disabled: true
 librenms_redis_clear_stuck_stop_job: true
 librenms_redis_manage_overcommit_memory: true

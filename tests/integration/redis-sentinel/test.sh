@@ -105,6 +105,11 @@ main() {
         all_sentinels_agree_on "${new_master}"
 
     local new_master_host="${new_master%:*}"
+    [ "$(compose exec -T sentinel-1 redis-cli --raw -h "${new_master_host}" GET \
+        librenms:integration:before-failover)" = "ready" ] || {
+        printf 'The elected Redis master lost data written before failover.\n' >&2
+        return 1
+    }
     compose exec -T sentinel-1 redis-cli -h "${new_master_host}" SET \
         librenms:integration:after-failover ready >/dev/null
 

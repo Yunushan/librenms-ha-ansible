@@ -135,6 +135,9 @@ jobs:
       - name: Test runtime web-health guardrails
         run: make test-runtime-web-health-guardrails
 
+      - name: Test web-session HA guardrails
+        run: make test-web-session-ha-guardrails
+
       - name: Test failover recovery guardrails
         run: make test-failover-recovery-guardrails
 

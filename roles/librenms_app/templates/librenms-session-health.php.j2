@@ -1,0 +1,113 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Contracts\Console\Kernel;
+
+const PROBE_KEY = '_librenms_ha_session_probe';
+
+function failProbe(string $message): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit(1);
+}
+
+function requireProbeArgument(array $arguments, int $index, string $name): string
+{
+    $value = (string) ($arguments[$index] ?? '');
+
+    if ($value === '') {
+        failProbe("missing {$name}");
+    }
+
+    return $value;
+}
+
+$baseDir = {{ librenms_install_dir | to_json }};
+$action = (string) ($argv[1] ?? '');
+
+if (! is_file($baseDir . '/vendor/autoload.php')) {
+    failProbe('LibreNMS Composer autoload is unavailable');
+}
+
+require $baseDir . '/vendor/autoload.php';
+$app = require $baseDir . '/bootstrap/app.php';
+$app->make(Kernel::class)->bootstrap();
+
+$config = $app->make('config');
+$driver = (string) $config->get('session.driver');
+$connection = (string) $config->get('session.connection');
+$appKey = (string) $config->get('app.key');
+
+if ($action === 'config') {
+    if ($appKey === '' || str_contains($appKey, 'CHANGE_ME')) {
+        failProbe('LibreNMS APP_KEY is missing or unsafe');
+    }
+
+    $sentinelHosts = (array) $config->get('database.redis.sentinel_session', []);
+    $sentinelParameters = (array) ($sentinelHosts['options']['parameters'] ?? []);
+
+    unset($sentinelHosts['options']);
+
+    echo 'driver=' . $driver . PHP_EOL;
+    echo 'connection=' . $connection . PHP_EOL;
+    echo 'cookie=' . (string) $config->get('session.cookie') . PHP_EOL;
+    echo 'session_domain=' . (string) $config->get('session.domain') . PHP_EOL;
+    echo 'session_path=' . (string) $config->get('session.path') . PHP_EOL;
+    echo 'session_secure=' . json_encode((bool) $config->get('session.secure')) . PHP_EOL;
+    echo 'session_http_only=' . json_encode((bool) $config->get('session.http_only')) . PHP_EOL;
+    echo 'session_same_site=' . (string) $config->get('session.same_site') . PHP_EOL;
+    echo 'session_lifetime=' . (string) $config->get('session.lifetime') . PHP_EOL;
+    echo 'app_key_sha256=' . hash('sha256', $appKey) . PHP_EOL;
+    echo 'sentinel_hosts_sha256=' . hash('sha256', json_encode(array_values($sentinelHosts))) . PHP_EOL;
+    echo 'sentinel_service=' . (string) $config->get('database.redis.sentinel_session.options.service') . PHP_EOL;
+    echo 'session_database=' . (string) ($sentinelParameters['database'] ?? '') . PHP_EOL;
+    exit(0);
+}
+
+{% if librenms_redis_mode == 'sentinel' %}
+if ($driver !== 'redis' || $connection !== 'sentinel_session') {
+    failProbe('LibreNMS is not using the Redis Sentinel session connection');
+}
+{% endif %}
+
+$sessionId = requireProbeArgument($argv, 2, 'session id');
+
+if (! preg_match('/^[A-Za-z0-9]{40}$/', $sessionId)) {
+    failProbe('session id must contain exactly 40 alphanumeric characters');
+}
+
+$session = $app->make('session')->driver();
+
+if ($action === 'write') {
+    $marker = requireProbeArgument($argv, 3, 'marker');
+    $session->setId($sessionId);
+    $session->start();
+    $session->put(PROBE_KEY, $marker);
+    $session->save();
+    echo "written\n";
+    exit(0);
+}
+
+if ($action === 'read') {
+    $marker = requireProbeArgument($argv, 3, 'marker');
+    $session->setId($sessionId);
+    $session->start();
+    $actual = (string) $session->get(PROBE_KEY, '');
+
+    if (! hash_equals($marker, $actual)) {
+        failProbe('shared session marker was not readable');
+    }
+
+    echo "readable\n";
+    exit(0);
+}
+
+if ($action === 'destroy') {
+    $session->getHandler()->destroy($sessionId);
+    echo "destroyed\n";
+    exit(0);
+}
+
+failProbe('usage: librenms-session-health config|write|read|destroy [session-id] [marker]');

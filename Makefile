@@ -2,6 +2,7 @@
 .PHONY: test-maintenance-stop-guardrails
 .PHONY: test-post-reboot-service-guardrails
 .PHONY: test-galera-sst-helper-guardrails galera-sst-repair galera-sst-repair-ask-become-pass
+.PHONY: test-web-session-ha-guardrails
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -150,7 +151,7 @@ inventory-check:
 github-governance-check:
 	python3 scripts/ci-github-governance-check.py --branch main
 
-ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-galera-sst-helper-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails
+ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-galera-sst-helper-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-web-session-ha-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails
 
 test-controller-collection-bootstrap:
 	bash tests/unit/test-controller-collection-bootstrap.sh
@@ -184,6 +185,9 @@ test-daily-maintenance-guardrails:
 
 test-runtime-web-health-guardrails:
 	bash tests/unit/test-runtime-web-health-guardrails.sh
+
+test-web-session-ha-guardrails:
+	bash tests/unit/test-web-session-ha-guardrails.sh
 
 test-outage-recovery-guardrails:
 	bash tests/unit/test-outage-recovery-guardrails.sh

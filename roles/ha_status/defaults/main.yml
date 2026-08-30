@@ -6,6 +6,12 @@ librenms_status_vip_probe_statuses: "{{ librenms_app_probe_success_statuses }}"
 librenms_status_vip_probe_follow_redirects: "{{ librenms_app_probe_follow_redirects }}"
 librenms_status_runtime_wait_probe_enabled: true
 librenms_status_runtime_wait_probe_timeout: 20
+librenms_status_session_probe_enabled: >-
+  {{ librenms_mode == 'ha' and librenms_redis_mode == 'sentinel' }}
+librenms_status_session_probe_timeout: 20
+librenms_status_session_expected_driver: redis
+librenms_status_session_expected_connection: sentinel_session
+librenms_status_session_durability_required: true
 librenms_status_dispatcher_db_probe_enabled: true
 librenms_status_unit_drift_enabled: true
 librenms_status_writable_path_drift_enabled: true

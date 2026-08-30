@@ -1033,7 +1033,11 @@ It reports the VIP owner and probe status, HAProxy/Keepalived service state,
 LibreNMS dispatcher and scheduler state, Galera state, Redis Sentinel master
 reports, Gluster volume status, expected systemd unit drift, LibreNMS writable
 path ownership drift, and whether any host listed in `maintenance_nodes` is
-still running HA or application services.
+still running HA or application services. In Sentinel HA mode it also compares
+the effective APP_KEY and session configuration on every active web node, then
+writes one Laravel session through the first node and reads it through every
+other node. A green strict status therefore proves cross-node browser-session
+continuity instead of checking Redis infrastructure alone.
 
 It can also act as a lightweight HA alert source. By default it only reports
 degraded conditions. Enable failure or webhook delivery explicitly:
@@ -1762,10 +1766,11 @@ librenms_redis_sentinel_restart_sec: 3
 librenms_redis_systemd_timeout_start_sec: 30
 librenms_redis_systemd_timeout_stop_sec: 30
 librenms_redis_clear_stuck_stop_job: true
-librenms_redis_persistence_enabled: false
+librenms_redis_persistence_enabled: true
 librenms_redis_remove_persistence_files_when_disabled: true
 librenms_redis_save_rules: []
-librenms_redis_appendonly: false
+librenms_redis_appendonly: true
+librenms_redis_appendfsync: everysec
 librenms_redis_manage_overcommit_memory: true
 ```
 
@@ -1779,13 +1784,14 @@ for slower networks.
 LibreNMS when Sentinel mode is enabled. Keep it longer than blocking queue reads
 so dispatcher workers do not time out while waiting on an empty Redis queue.
 
-Redis persistence is disabled by default for the managed LibreNMS Redis nodes.
-LibreNMS uses Redis for runtime cache, sessions, locks, and queues, so large RDB
-snapshots are usually not worth blocking Redis restarts. To persist Redis data
-anyway, set `librenms_redis_persistence_enabled: true` and define either
-`librenms_redis_save_rules` or `librenms_redis_appendonly: true`.
-When persistence is disabled, the role removes stale Redis persistence files
-such as `dump.rdb` so Redis does not spend minutes loading old cache data.
+Sentinel mode enables Redis AOF persistence with `appendfsync everysec` by
+default. Browser sessions and queued work therefore survive a rolling Redis
+restart. When an existing in-memory deployment first adopts AOF, the role uses
+live `CONFIG SET appendonly yes` and waits for the initial AOF rewrite before it
+may restart Redis. Disabling persistence is suitable only for disposable labs;
+`status-strict` rejects it while the shared-session durability check is enabled.
+When persistence is explicitly disabled, the role removes stale Redis
+persistence files such as `dump.rdb` so Redis does not load unwanted old data.
 When `librenms_redis_clear_stuck_stop_job` is enabled, the role also clears a
 Redis unit that is already stuck in systemd's `deactivating/stop-sigterm` state
 before continuing service management.

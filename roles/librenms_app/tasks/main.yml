@@ -1221,6 +1221,26 @@
     - librenms_manage_php_fpm | bool
     - librenms_manage_web_runtime_health_probe | bool
 
+- name: Deploy LibreNMS shared-session health probe
+  template:
+    src: librenms-session-health.php.j2
+    dest: "{{ librenms_session_health_probe_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_manage_session_health_probe | bool
+
+- name: Validate LibreNMS shared-session health probe syntax
+  command:
+    argv:
+      - php
+      - -l
+      - "{{ librenms_session_health_probe_path }}"
+  changed_when: false
+  when:
+    - librenms_manage_session_health_probe | bool
+
 - name: Deploy LibreNMS PHP-FPM pool
   template:
     src: php-fpm-librenms.conf.j2

@@ -698,6 +698,133 @@
     - librenms_redis_mode == 'sentinel'
     - inventory_hostname in librenms_status_active_redis_nodes
 
+- name: Inspect live Redis session durability
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - INFO
+      - persistence
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_status_redis_persistence_probe
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_session_durability_required | bool
+    - inventory_hostname in librenms_status_active_redis_nodes
+
+- name: Inspect LibreNMS runtime session configuration
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "{{ librenms_status_session_probe_timeout | int }}s"
+      - "{{ librenms_session_health_probe_path }}"
+      - config
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_status_session_config_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - inventory_hostname in librenms_status_active_web_nodes
+
+- name: Generate shared-session continuity probe values
+  ansible.builtin.set_fact:
+    librenms_status_session_probe_id: >-
+      {{
+        (
+          'librenms-session-status-'
+          ~ ansible_facts.date_time.iso8601_micro
+          ~ '-'
+          ~ (999999999 | random | string)
+        )
+        | hash('sha256')
+        | truncate(40, true, '')
+      }}
+    librenms_status_session_probe_marker: >-
+      {{
+        (
+          'librenms-session-marker-'
+          ~ ansible_facts.date_time.iso8601_micro
+          ~ '-'
+          ~ (999999999 | random | string)
+        )
+        | hash('sha256')
+      }}
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_active_web_nodes | length > 0
+  run_once: true
+
+- name: Write shared LibreNMS session continuity marker
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "{{ librenms_status_session_probe_timeout | int }}s"
+      - "{{ librenms_session_health_probe_path }}"
+      - write
+      - "{{ librenms_status_session_probe_id }}"
+      - "{{ librenms_status_session_probe_marker }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  delegate_to: "{{ librenms_status_active_web_nodes | first }}"
+  register: librenms_status_session_write_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_active_web_nodes | length > 0
+  run_once: true
+
+- name: Read shared LibreNMS session continuity marker on every web node
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "{{ librenms_status_session_probe_timeout | int }}s"
+      - "{{ librenms_session_health_probe_path }}"
+      - read
+      - "{{ librenms_status_session_probe_id }}"
+      - "{{ librenms_status_session_probe_marker }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_status_active_web_nodes }}"
+  register: librenms_status_session_read_probes
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_active_web_nodes | length > 0
+    - (librenms_status_session_write_probe.rc | default(1) | int) == 0
+  run_once: true
+
+- name: Remove shared LibreNMS session continuity marker
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "{{ librenms_status_session_probe_timeout | int }}s"
+      - "{{ librenms_session_health_probe_path }}"
+      - destroy
+      - "{{ librenms_status_session_probe_id }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ librenms_status_active_web_nodes }}"
+  register: librenms_status_session_cleanup_probes
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_active_web_nodes | length > 0
+  run_once: true
+
 - name: Check Gluster volume status
   command:
     argv:
@@ -724,6 +851,174 @@
   set_fact:
     librenms_status_degraded_reasons: []
     librenms_status_redis_known_masters: []
+    librenms_status_redis_aof_probe_rcs: {}
+    librenms_status_session_config_signatures: []
+  run_once: true
+
+- name: Collect live Redis session durability results
+  ansible.builtin.set_fact:
+    librenms_status_redis_aof_probe_rcs: >-
+      {{
+        librenms_status_redis_aof_probe_rcs
+        | combine(
+            {
+              item: hostvars[item].librenms_status_redis_persistence_probe.rc
+              | default('not-probed')
+            }
+          )
+      }}
+  loop: "{{ librenms_status_active_redis_nodes }}"
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_session_durability_required | bool
+  run_once: true
+
+- name: Collect LibreNMS runtime session configuration signatures
+  ansible.builtin.set_fact:
+    librenms_status_session_config_signatures: >-
+      {{
+        librenms_status_session_config_signatures
+        + [hostvars[item].librenms_status_session_config_probe.stdout | default('')]
+      }}
+  loop: "{{ librenms_status_active_web_nodes }}"
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - (hostvars[item].librenms_status_session_config_probe.rc | default(1) | int) == 0
+  run_once: true
+
+- name: Record unavailable LibreNMS runtime session configuration
+  ansible.builtin.set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [item ~ ' could not inspect the LibreNMS runtime session configuration.']
+      }}
+  loop: "{{ librenms_status_active_web_nodes }}"
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - (hostvars[item].librenms_status_session_config_probe.rc | default(1) | int) != 0
+  run_once: true
+
+- name: Record unsafe LibreNMS runtime session configuration
+  ansible.builtin.set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item ~ ' is not using the expected shared session store: driver='
+            ~ (
+              hostvars[item].librenms_status_session_config_probe.stdout_lines
+              | default([])
+              | select('match', '^driver=')
+              | first
+              | default('driver=unknown')
+              | regex_replace('^driver=', '')
+            )
+            ~ ', connection='
+            ~ (
+              hostvars[item].librenms_status_session_config_probe.stdout_lines
+              | default([])
+              | select('match', '^connection=')
+              | first
+              | default('connection=unknown')
+              | regex_replace('^connection=', '')
+            )
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_active_web_nodes }}"
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - (hostvars[item].librenms_status_session_config_probe.rc | default(1) | int) == 0
+    - >-
+      ('driver=' ~ librenms_status_session_expected_driver)
+      not in (hostvars[item].librenms_status_session_config_probe.stdout_lines | default([]))
+      or
+      ('connection=' ~ librenms_status_session_expected_connection)
+      not in (hostvars[item].librenms_status_session_config_probe.stdout_lines | default([]))
+  run_once: true
+
+- name: Record LibreNMS runtime session configuration disagreement
+  ansible.builtin.set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + ['LibreNMS web nodes do not share one APP_KEY and session configuration.']
+      }}
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - (librenms_status_session_config_signatures | unique | list | length) > 1
+  run_once: true
+
+- name: Record unsafe Redis session durability configuration
+  ansible.builtin.set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            'Redis Sentinel browser-session durability requires persistence=true '
+            ~ 'and appendonly=true.'
+          ]
+      }}
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_session_durability_required | bool
+    - >-
+      not (librenms_redis_persistence_enabled | bool)
+      or not (librenms_redis_appendonly | bool)
+  run_once: true
+
+- name: Record unsafe live Redis session durability
+  ansible.builtin.set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [item ~ ' does not have a healthy live Redis AOF session store.']
+      }}
+  loop: "{{ librenms_status_active_redis_nodes }}"
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_session_durability_required | bool
+    - >-
+      (hostvars[item].librenms_status_redis_persistence_probe.rc | default(1) | int) != 0
+      or 'aof_enabled:1'
+      not in (hostvars[item].librenms_status_redis_persistence_probe.stdout_lines | default([]))
+      or 'aof_last_bgrewrite_status:ok'
+      not in (hostvars[item].librenms_status_redis_persistence_probe.stdout_lines | default([]))
+      or 'aof_last_write_status:ok'
+      not in (hostvars[item].librenms_status_redis_persistence_probe.stdout_lines | default([]))
+  run_once: true
+
+- name: Record failed shared LibreNMS session write
+  ansible.builtin.set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + ['LibreNMS could not write the shared browser-session continuity marker.']
+      }}
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - (librenms_status_session_write_probe.rc | default(1) | int) != 0
+  run_once: true
+
+- name: Record failed shared LibreNMS session reads
+  ansible.builtin.set_fact:
+    librenms_status_degraded_reasons: >-
+      {{
+        librenms_status_degraded_reasons
+        + [
+            item.item
+            ~ ' could not read a Laravel session written by '
+            ~ (librenms_status_active_web_nodes | first)
+            ~ '.'
+          ]
+      }}
+  loop: "{{ librenms_status_session_read_probes.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('unknown') }}"
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - (item.rc | default(1) | int) != 0
   run_once: true
 
 - name: Record systemd unit drift degradation
@@ -1148,6 +1443,13 @@
         dispatcher_query_state: "{{ librenms_status_dispatcher_db_query_state | default('not-probed') }}"
       redis:
         sentinel_masters: "{{ librenms_status_redis_known_masters | default([]) | unique | list }}"
+      sessions:
+        probe_enabled: "{{ librenms_status_session_probe_enabled | bool }}"
+        persistence_enabled: "{{ librenms_redis_persistence_enabled | bool }}"
+        appendonly_enabled: "{{ librenms_redis_appendonly | bool }}"
+        writer: "{{ librenms_status_active_web_nodes | first | default('none') }}"
+        write_probe_rc: "{{ librenms_status_session_write_probe.rc | default('not-probed') }}"
+        redis_aof_probe_rcs: "{{ librenms_status_redis_aof_probe_rcs }}"
       drift:
         checked_units: "{{ librenms_status_unit_drift_enabled | bool }}"
         checked_writable_paths: "{{ librenms_status_writable_path_drift_enabled | bool }}"
@@ -1234,6 +1536,23 @@
       Galera:
       {% for host in librenms_status_active_db_nodes %}
         - {{ host }}: {{ hostvars[host].librenms_status_galera | default(['not-checked']) | join('; ') }}
+      {% endfor %}
+
+      Shared browser sessions:
+        enabled: {{ librenms_status_session_probe_enabled | bool }}
+        persistence: {{ librenms_redis_persistence_enabled | bool }}
+        appendonly: {{ librenms_redis_appendonly | bool }}
+        writer: {{ librenms_status_active_web_nodes | first | default('none') }}
+        write_probe_rc: {{ librenms_status_session_write_probe.rc | default('not-probed') }}
+      {% for host in librenms_status_active_web_nodes %}
+      {% set host_reads = librenms_status_session_read_probes.results | default([]) | selectattr('item', 'equalto', host) | list %}
+        - {{ host }}:
+            config_probe_rc: {{ hostvars[host].librenms_status_session_config_probe.rc | default('not-probed') }}
+            read_probe_rc: {{ (host_reads | first | default({})).rc | default('not-probed') }}
+      {% endfor %}
+      {% for host in librenms_status_active_redis_nodes %}
+        - {{ host }}:
+            aof_probe_rc: {{ hostvars[host].librenms_status_redis_persistence_probe.rc | default('not-probed') }}
       {% endfor %}
 
       Redis Sentinel:

@@ -406,6 +406,16 @@ def main() -> int:
         "CI must run the runtime web-health guardrail test",
     )
     failures += require(
+        "tests/unit/test-web-session-ha-guardrails.sh",
+        "Web-session HA guardrail test passed",
+        "CI must test shared browser-session continuity guardrails",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-web-session-ha-guardrails",
+        "CI must run the web-session HA guardrail test",
+    )
+    failures += require(
         "roles/librenms_defaults/defaults/main.yml",
         "librenms_galera_recovery_tie_breaker: manual",
         "Galera recovery must not choose the first tied member by default",

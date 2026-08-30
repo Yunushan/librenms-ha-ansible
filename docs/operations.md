@@ -727,11 +727,14 @@ removed after the check. That
 run applies the configured daily retention policy.
 
 HA deployments use a dedicated PHP runtime health route for each web backend by
-default. It performs a small fresh database query and returns only `200 ok` or
+default. It performs a small fresh database query, verifies the configured
+Redis Sentinel session connection, and returns only `200 ok` or
 `503 unavailable`; it does not expose credentials or exception details. If a
-PHP-FPM worker has lost its MariaDB connection, or an update leaves one node with
+PHP-FPM worker has lost a runtime dependency, or an update leaves one node with
 broken Composer dependencies or a Laravel boot error, HAProxy marks that backend
-down before it can continue returning intermittent browser `500` responses.
+down before it can continue returning intermittent browser errors. HAProxy also
+issues a backend-persistence cookie; shared Redis sessions still allow safe
+redispatch when that preferred node is unavailable.
 The static `/about` check remains available by setting
 `librenms_haproxy_web_runtime_check_enabled: false`.
 `production-readiness.yml` also probes that same runtime endpoint directly on
@@ -1129,11 +1132,12 @@ ansible librenms_nodes -i inventories/ha/hosts.yml -b -m shell -a \
 
 `deactivating (stop-sigterm)` with `Saving the final RDB snapshot`, or
 `activating (start)` with `Redis is loading...` from an old multi-GB `dump.rdb`,
-is not a normal short restart. The default role disables Redis RDB/AOF
-persistence, removes stale persistence files when persistence is disabled, and
-sets bounded systemd start/stop timeouts so future maintenance cannot hang on a
-large runtime cache snapshot. The role also clears an already-stuck Redis stop
-job when `librenms_redis_clear_stuck_stop_job: true`.
+is not a normal short restart. Sentinel mode uses AOF with an every-second fsync
+so browser sessions and queues survive rolling restarts without relying on a
+large shutdown RDB snapshot. When AOF is first enabled, the role creates it from
+the live dataset and waits for the rewrite before restart. It also sets bounded
+systemd start/stop timeouts and clears an already-stuck Redis stop job when
+`librenms_redis_clear_stuck_stop_job: true`.
 
 If you need to clear one host by hand before pulling the fixed playbook, run:
 

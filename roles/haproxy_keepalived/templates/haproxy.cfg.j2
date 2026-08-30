@@ -149,6 +149,9 @@ frontend librenms_web_https
 backend librenms_web_nodes
     mode http
     balance roundrobin
+{% if librenms_haproxy_web_session_persistence_enabled | bool %}
+    cookie {{ librenms_haproxy_web_session_cookie_name }} insert indirect nocache httponly{% if librenms_haproxy_web_session_cookie_secure | bool %} secure{% endif %}
+{% endif %}
 {% if librenms_bootstrap_completed_effective | bool %}
     default-server {{ librenms_haproxy_web_default_server }}
     option httpchk
@@ -156,13 +159,16 @@ backend librenms_web_nodes
     http-check expect rstatus ^(2|3)[0-9][0-9]$
 {% endif %}
 {% for host in librenms_haproxy_web_backend_nodes %}
-    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check
+    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check{% if librenms_haproxy_web_session_persistence_enabled | bool %} cookie {{ host | regex_replace('[^A-Za-z0-9_.-]', '_') }}{% endif %}
 {% endfor %}
 
 backend librenms_web_validation_nodes
     mode http
     balance roundrobin
     timeout server {{ librenms_web_validation_timeout }}
+{% if librenms_haproxy_web_session_persistence_enabled | bool %}
+    cookie {{ librenms_haproxy_web_session_cookie_name }} insert indirect nocache httponly{% if librenms_haproxy_web_session_cookie_secure | bool %} secure{% endif %}
+{% endif %}
 {% if librenms_bootstrap_completed_effective | bool %}
     default-server {{ librenms_haproxy_web_default_server }}
     option httpchk
@@ -170,7 +176,7 @@ backend librenms_web_validation_nodes
     http-check expect rstatus ^(2|3)[0-9][0-9]$
 {% endif %}
 {% for host in librenms_haproxy_web_backend_nodes %}
-    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check
+    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:80 check{% if librenms_haproxy_web_session_persistence_enabled | bool %} cookie {{ host | regex_replace('[^A-Za-z0-9_.-]', '_') }}{% endif %}
 {% endfor %}
 
 {% if librenms_db_mode == 'galera' %}

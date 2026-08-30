@@ -20,6 +20,17 @@ try {
         throw new RuntimeException('database readiness query returned an unexpected result');
     }
 
+{% if librenms_redis_mode == 'sentinel' %}
+    $sessionDriver = (string) config('session.driver');
+    $sessionConnection = (string) config('session.connection');
+
+    if ($sessionDriver !== 'redis' || $sessionConnection !== 'sentinel_session') {
+        throw new RuntimeException('the HA session store is not configured for Redis Sentinel');
+    }
+
+    app('redis')->connection($sessionConnection)->command('ping', []);
+
+{% endif %}
 {% if
   librenms_db_mode == 'galera'
   and librenms_db_host | length == 0

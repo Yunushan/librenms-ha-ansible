@@ -232,6 +232,104 @@
     - not (librenms_redis_persistence_enabled | bool)
     - librenms_redis_remove_persistence_files_when_disabled | bool
 
+- name: Check live Redis state before enabling AOF persistence
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_redis_service_name }}"
+  register: librenms_redis_aof_live_service_state
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_redis_mode in ['local', 'sentinel']
+    - ansible_facts.service_mgr == 'systemd'
+    - librenms_redis_persistence_enabled | bool
+    - librenms_redis_appendonly | bool
+    - librenms_redis_aof_live_migration_enabled | bool
+
+- name: Query live Redis AOF state before managed restart
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - INFO
+      - persistence
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_aof_live_state
+  changed_when: false
+  no_log: true
+  when:
+    - librenms_redis_aof_live_service_state.stdout | default('') == 'active'
+
+- name: Enable AOF against the live Redis dataset before managed restart
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - CONFIG
+      - SET
+      - appendonly
+      - "yes"
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_aof_live_enable
+  changed_when: true
+  no_log: true
+  when:
+    - librenms_redis_aof_live_service_state.stdout | default('') == 'active'
+    - librenms_redis_aof_live_state.stdout | default('') is not search('aof_enabled:1')
+
+- name: Apply live Redis AOF fsync policy before managed restart
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - CONFIG
+      - SET
+      - appendfsync
+      - "{{ librenms_redis_appendfsync }}"
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  changed_when: false
+  no_log: true
+  when:
+    - librenms_redis_aof_live_service_state.stdout | default('') == 'active'
+
+- name: Wait for live Redis AOF rewrite before managed restart
+  ansible.builtin.command:
+    argv:
+      - "{{ librenms_redis_cli_binary }}"
+      - -h
+      - 127.0.0.1
+      - -p
+      - "6379"
+      - INFO
+      - persistence
+  environment:
+    REDISCLI_AUTH: "{{ librenms_redis_password }}"
+  register: librenms_redis_aof_live_ready
+  changed_when: false
+  retries: "{{ librenms_redis_aof_live_migration_retries | int }}"
+  delay: "{{ librenms_redis_aof_live_migration_delay | int }}"
+  until:
+    - librenms_redis_aof_live_ready.stdout is search('aof_enabled:1')
+    - librenms_redis_aof_live_ready.stdout is search('aof_rewrite_in_progress:0')
+    - librenms_redis_aof_live_ready.stdout is search('aof_last_bgrewrite_status:ok')
+  no_log: true
+  when:
+    - librenms_redis_aof_live_service_state.stdout | default('') == 'active'
+
 - name: Ensure Redis Sentinel config parent directory exists for managed systemd service
   file:
     path: "{{ librenms_redis_sentinel_conf_path_effective | dirname }}"
