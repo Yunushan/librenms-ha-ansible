@@ -67,6 +67,7 @@
   service:
     name: "{{ librenms_rrdcached_service_name }}"
     state: started
+    enabled: true
   delegate_to: "{{ librenms_maintenance_target }}"
   when:
     - librenms_manage_rrdcached | bool

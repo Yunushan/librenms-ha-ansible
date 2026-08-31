@@ -24,6 +24,8 @@ require_file_text() {
 }
 
 main() {
+    local rrdcached_exit_block
+
     require_file_text "${DEFAULTS}" \
         'librenms_maintenance_systemctl_timeout: 10'
     require_file_text "${DEFAULTS}" \
@@ -58,6 +60,16 @@ main() {
         'librenms_maintenance_action: hold'
     require_file_text "${EXIT_TASKS}" \
         'Resume target HA repair timers after maintenance'
+    require_file_text "${EXIT_TASKS}" \
+        'Start target RRDCacheD after maintenance'
+
+    rrdcached_exit_block="$(awk '
+        /- name: Start target RRDCacheD after maintenance/ { capture=1 }
+        capture { print }
+        capture && /run_once: true/ { exit }
+    ' "${EXIT_TASKS}")"
+    grep -Fq -- '    enabled: true' <<<"${rrdcached_exit_block}" || \
+        fail 'maintenance exit must enable managed RRDCacheD before strict status'
     require_file_text "${STATUS_DEFAULTS}" \
         'librenms-ha-startup-repair.service'
     require_file_text "${STATUS_DEFAULTS}" \
