@@ -1,5 +1,7 @@
 ---
 librenms_galera_sst_repair_confirm: false
+librenms_galera_sst_repair_peer_probe_retries: 6
+librenms_galera_sst_repair_peer_probe_delay: 5
 librenms_galera_sst_repair_retries: 96
 librenms_galera_sst_repair_delay: 10
 librenms_galera_sst_repair_galera_retries: 30

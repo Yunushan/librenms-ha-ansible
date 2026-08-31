@@ -31,41 +31,73 @@
       explicit confirmation. Set GALERA_SST_REPAIR_CONFIRM=true and
       GALERA_SST_REPAIR_LIMIT to exactly one failed joiner.
 
-- name: Probe Galera members before SST helper repair
+- name: Determine Galera peers for SST repair
+  ansible.builtin.set_fact:
+    librenms_galera_sst_repair_peer_nodes: >-
+      {{
+        librenms_galera_sst_repair_active_nodes
+        | reject('equalto', inventory_hostname)
+        | list
+      }}
+
+- name: Probe Galera peers before SST helper repair
   ansible.builtin.command:
     argv:
       - mysql
       - --protocol=socket
-      - "--socket={{ librenms_mariadb_socket }}"
+      - >-
+        --socket={{
+          hostvars[item].librenms_mariadb_socket
+          | default(librenms_mariadb_socket)
+        }}
       - -Nse
       - >-
         SHOW GLOBAL STATUS WHERE Variable_name IN
         ('wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment','wsrep_cluster_size');
-  loop: "{{ librenms_galera_sst_repair_active_nodes }}"
+  loop: "{{ librenms_galera_sst_repair_peer_nodes }}"
   delegate_to: "{{ item }}"
   register: librenms_galera_sst_repair_member_probes
   changed_when: false
   failed_when: false
+  until:
+    - >-
+      not (
+        librenms_galera_sst_repair_member_probes.unreachable
+        | default(false)
+        | bool
+      )
+    - (librenms_galera_sst_repair_member_probes.rc | default(1) | int) == 0
+    - >-
+      librenms_galera_sst_repair_member_probes.stdout | default('')
+      is search('wsrep_cluster_status[ \\t]+Primary')
+    - >-
+      librenms_galera_sst_repair_member_probes.stdout | default('')
+      is search('wsrep_ready[ \\t]+ON')
+    - >-
+      librenms_galera_sst_repair_member_probes.stdout | default('')
+      is search('wsrep_local_state_comment[ \\t]+Synced')
+  retries: "{{ librenms_galera_sst_repair_peer_probe_retries | int }}"
+  delay: "{{ librenms_galera_sst_repair_peer_probe_delay | int }}"
   ignore_unreachable: true
+
+- name: Initialize healthy Galera peers before SST helper repair
+  ansible.builtin.set_fact:
+    librenms_galera_sst_repair_healthy_peers: []
+    librenms_galera_sst_repair_required_peers: >-
+      {{ ((librenms_galera_sst_repair_active_nodes | length) // 2) + 1 }}
 
 - name: Record healthy Galera peers before SST helper repair
   ansible.builtin.set_fact:
     librenms_galera_sst_repair_healthy_peers: >-
-      {{
-        librenms_galera_sst_repair_member_probes.results | default([])
-        | selectattr('item', 'defined')
-        | rejectattr('item', 'equalto', inventory_hostname)
-        | selectattr('rc', 'defined')
-        | selectattr('rc', 'equalto', 0)
-        | selectattr('stdout', 'defined')
-        | selectattr('stdout', 'search', 'wsrep_cluster_status[ \\t]+Primary')
-        | selectattr('stdout', 'search', 'wsrep_ready[ \\t]+ON')
-        | selectattr('stdout', 'search', 'wsrep_local_state_comment[ \\t]+Synced')
-        | map(attribute='item')
-        | list
-      }}
-    librenms_galera_sst_repair_required_peers: >-
-      {{ ((librenms_galera_sst_repair_active_nodes | length) // 2) + 1 }}
+      {{ librenms_galera_sst_repair_healthy_peers + [item.item] }}
+  loop: "{{ librenms_galera_sst_repair_member_probes.results | default([]) }}"
+  when:
+    - item.item is defined
+    - not (item.unreachable | default(false) | bool)
+    - (item.rc | default(1) | int) == 0
+    - item.stdout | default('') is search('wsrep_cluster_status[ \\t]+Primary')
+    - item.stdout | default('') is search('wsrep_ready[ \\t]+ON')
+    - item.stdout | default('') is search('wsrep_local_state_comment[ \\t]+Synced')
 
 - name: Require a healthy Primary quorum before SST helper repair
   ansible.builtin.assert:
@@ -78,6 +110,20 @@
       Healthy peers: {{ librenms_galera_sst_repair_healthy_peers }}
       Required peers: {{ librenms_galera_sst_repair_required_peers }}
       Refusing to touch the failed member. This playbook never bootstraps Galera.
+
+      Peer probe results:
+      {% for probe in librenms_galera_sst_repair_member_probes.results | default([]) %}
+      - host={{ probe.item | default('unknown') }}
+        unreachable={{ probe.unreachable | default(false) }}
+        rc={{ probe.rc | default('not-run') }}
+        stdout={{ probe.stdout | default('') | trim | replace('\n', ' | ') }}
+        stderr={{
+          probe.stderr
+          | default(probe.msg | default(''))
+          | trim
+          | replace('\n', ' | ')
+        }}
+      {% endfor %}
 
 - name: Reconcile the configured Galera SST helper
   ansible.builtin.include_role:
