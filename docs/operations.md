@@ -296,9 +296,11 @@ make status-strict PLAYBOOK_FLAGS=--ask-become-pass
 
 The maintenance hold stops application and HA self-repair units again on the
 excluded node. Session repair checks the surviving Sentinel quorum, enables AOF
-live and serially without restarting Redis, persists that runtime setting, and
-deploys the Laravel session probe only to active web nodes. Full HAProxy and
-cluster convergence still waits until the third member can rejoin.
+live and serially without restarting Redis, and accepts the encrypted inventory
+`APP_KEY` only when it matches at least one active web node. It reconciles the
+active web nodes one at a time, clears stale Laravel configuration, reloads
+PHP-FPM, and verifies the resulting key fingerprint. Full HAProxy and cluster
+convergence still waits until the third member can rejoin.
 
 During serialized Galera convergence, the node-drain helper gives active
 LibreNMS workers `librenms_galera_web_drain_unit_stop_timeout` seconds to stop

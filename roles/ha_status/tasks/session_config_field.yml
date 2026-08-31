@@ -1,0 +1,48 @@
+---
+- name: Initialize session parity values for current field
+  ansible.builtin.set_fact:
+    librenms_status_session_config_field_values: []
+  run_once: true
+
+- name: Collect session parity values for current field
+  ansible.builtin.set_fact:
+    librenms_status_session_config_field_values: >-
+      {{
+        librenms_status_session_config_field_values
+        + [
+            hostvars[librenms_status_session_config_web_node]
+            .librenms_status_session_config_probe.stdout_lines
+            | default([])
+            | select(
+                'match',
+                '^' ~ librenms_status_session_config_field ~ '='
+              )
+            | first
+            | default(librenms_status_session_config_field ~ '=missing')
+          ]
+      }}
+  loop: "{{ librenms_status_active_web_nodes }}"
+  loop_control:
+    loop_var: librenms_status_session_config_web_node
+  when:
+    - >-
+      (
+        hostvars[librenms_status_session_config_web_node]
+        .librenms_status_session_config_probe.rc
+        | default(1)
+        | int
+      ) == 0
+  run_once: true
+
+- name: Record session parity drift for current field
+  ansible.builtin.set_fact:
+    librenms_status_session_config_drift_fields: >-
+      {{
+        librenms_status_session_config_drift_fields
+        + [librenms_status_session_config_field]
+      }}
+  when:
+    - >-
+      (librenms_status_session_config_field_values | unique | list | length)
+      > 1
+  run_once: true

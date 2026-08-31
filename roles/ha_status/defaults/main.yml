@@ -11,6 +11,20 @@ librenms_status_session_probe_enabled: >-
 librenms_status_session_probe_timeout: 20
 librenms_status_session_expected_driver: redis
 librenms_status_session_expected_connection: sentinel_session
+librenms_status_session_parity_fields:
+  - driver
+  - connection
+  - cookie
+  - session_domain
+  - session_path
+  - session_secure
+  - session_http_only
+  - session_same_site
+  - session_lifetime
+  - app_key_sha256
+  - sentinel_hosts_sha256
+  - sentinel_service
+  - session_database
 librenms_status_session_durability_required: true
 librenms_status_dispatcher_db_probe_enabled: true
 librenms_status_unit_drift_enabled: true

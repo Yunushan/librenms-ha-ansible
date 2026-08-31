@@ -18,6 +18,94 @@
       not weaken the normal three-member production topology guard.
   run_once: true
 
+- name: Validate configured APP_KEY repair authority
+  ansible.builtin.assert:
+    that:
+      - (librenms_session_repair_app_key_effective | length) >= 32
+      - "'CHANGE_ME' not in librenms_session_repair_app_key_effective"
+    fail_msg: >-
+      Session repair requires the existing production APP_KEY from encrypted
+      inventory. It never generates or rotates an application key.
+  run_once: true
+
+- name: Inspect active web APP_KEY fingerprints
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - |-
+        $lines = @file($argv[1], FILE_IGNORE_NEW_LINES);
+        if ($lines === false) {
+            exit(2);
+        }
+        $values = [];
+        foreach ($lines as $line) {
+            if (str_starts_with($line, 'APP_KEY=')) {
+                $values[] = substr($line, 8);
+            }
+        }
+        if (count($values) !== 1) {
+            exit(3);
+        }
+        $value = trim($values[0]);
+        if (
+            strlen($value) >= 2
+            && (
+                ($value[0] === '"' && $value[-1] === '"')
+                || ($value[0] === "'" && $value[-1] === "'")
+            )
+        ) {
+            $value = substr($value, 1, -1);
+        }
+        if ($value === '' || str_contains($value, 'CHANGE_ME')) {
+            exit(4);
+        }
+        echo hash('sha256', $value);
+      - "{{ librenms_session_repair_env_path }}"
+  register: librenms_session_repair_live_app_key_probe
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: inventory_hostname in librenms_session_repair_active_web_nodes
+
+- name: Confirm active web APP_KEY fingerprints are readable
+  ansible.builtin.assert:
+    that:
+      - librenms_session_repair_live_app_key_probe.rc == 0
+      - >-
+        (librenms_session_repair_live_app_key_probe.stdout | trim)
+        is match('^[a-f0-9]{64}$')
+    fail_msg: >-
+      {{ inventory_hostname }} does not have exactly one safe APP_KEY in
+      {{ librenms_session_repair_env_path }}. No session configuration was
+      changed.
+  when: inventory_hostname in librenms_session_repair_active_web_nodes
+
+- name: Collect active web APP_KEY fingerprints
+  ansible.builtin.set_fact:
+    librenms_session_repair_live_app_key_hashes: >-
+      {{
+        librenms_session_repair_active_web_nodes
+        | map('extract', hostvars, 'librenms_session_repair_live_app_key_probe')
+        | map(attribute='stdout')
+        | map('trim')
+        | list
+      }}
+  no_log: true
+  run_once: true
+
+- name: Anchor configured APP_KEY to an active web node
+  ansible.builtin.assert:
+    that:
+      - >-
+        (librenms_session_repair_app_key_effective | hash('sha256'))
+        in librenms_session_repair_live_app_key_hashes
+    fail_msg: >-
+      The configured inventory APP_KEY does not match any active web node.
+      Refusing to rotate every browser session implicitly. Restore the
+      established production key in encrypted inventory before retrying.
+  run_once: true
+
 - name: Verify active Redis service before session repair
   ansible.builtin.command:
     argv:

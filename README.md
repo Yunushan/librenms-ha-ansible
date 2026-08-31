@@ -1184,6 +1184,12 @@ make session-repair-ask-become-pass SESSION_REPAIR_CONFIRM=true
 make status-strict PLAYBOOK_FLAGS=--ask-become-pass
 ```
 
+The guarded repair accepts the encrypted inventory `APP_KEY` only when its
+fingerprint already matches at least one active web node. It then reconciles
+the other active web nodes serially, clears stale Laravel configuration, and
+reloads PHP-FPM one node at a time. It never generates or rotates `APP_KEY`,
+and nodes in `maintenance_nodes` remain untouched.
+
 The repair verifies Sentinel quorum first, enables and persists AOF one Redis
 member at a time without a Redis restart, and verifies the effective Laravel
 session driver on each active web node. It does not bootstrap Galera, alter the

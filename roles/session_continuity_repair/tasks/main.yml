@@ -31,4 +31,6 @@
 
 - name: Deploy LibreNMS session continuity probe
   ansible.builtin.include_tasks: web.yml
-  when: librenms_session_repair_action == 'web'
+  when:
+    - librenms_session_repair_action == 'web'
+    - inventory_hostname in librenms_session_repair_active_web_nodes

@@ -14,3 +14,49 @@ librenms_session_repair_active_redis_nodes: >-
 librenms_session_repair_min_web_nodes: 2
 librenms_session_repair_aof_retries: 60
 librenms_session_repair_aof_delay: 2
+librenms_session_repair_env_path: "{{ librenms_install_dir }}/.env"
+librenms_session_repair_app_key_effective: >-
+  {{
+    librenms_app_key
+    if librenms_app_key.startswith('base64:')
+    else
+    (
+      'base64:' ~ librenms_app_key
+      if (librenms_app_key | regex_search('^[A-Za-z0-9+/]{43}=$'))
+      else librenms_app_key
+    )
+  }}
+librenms_session_repair_app_url_effective: >-
+  {{
+    librenms_app_url
+    if librenms_app_url | length > 0
+    else
+    (
+      ('https' if librenms_haproxy_tls_enabled | bool else 'http')
+      ~ '://'
+      ~ (
+        librenms_fqdn
+        if (
+          librenms_fqdn | length > 0
+          and librenms_fqdn != librenms_default_fqdn_placeholder
+        )
+        else
+        (
+          librenms_vip_ip
+          if librenms_vip_enabled | bool and librenms_vip_ip | length > 0
+          else inventory_hostname
+        )
+      )
+    )
+  }}
+librenms_session_repair_secure_cookie_effective: >-
+  {{
+    (librenms_session_secure_cookie | bool)
+    if (librenms_session_secure_cookie | string | length > 0)
+    else (
+      (librenms_session_repair_app_url_effective | regex_search('^https://'))
+      is not none
+    )
+  }}
+librenms_session_repair_php_fpm_retries: 12
+librenms_session_repair_php_fpm_delay: 5

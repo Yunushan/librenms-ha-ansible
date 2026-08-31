@@ -33,10 +33,16 @@ main() {
         'librenms_session_repair_confirm: false'
     require_file_text "${MAIN_TASKS}" \
         "inventory_hostname not in groups.get('maintenance_nodes', [])"
+    require_file_text "${MAIN_TASKS}" \
+        'inventory_hostname in librenms_session_repair_active_web_nodes'
     require_file_text "${PREFLIGHT_TASKS}" \
         '>= (librenms_redis_quorum | int)'
     require_file_text "${PREFLIGHT_TASKS}" 'SENTINEL'
     require_file_text "${PREFLIGHT_TASKS}" 'CKQUORUM'
+    require_file_text "${PREFLIGHT_TASKS}" \
+        'The configured inventory APP_KEY does not match any active web node.'
+    require_file_text "${PREFLIGHT_TASKS}" \
+        "librenms_session_repair_app_key_effective | hash('sha256')"
     require_file_text "${REDIS_TASKS}" \
         'Enable AOF against the live Redis session dataset'
     require_file_text "${REDIS_TASKS}" 'CONFIG'
@@ -44,6 +50,15 @@ main() {
     require_file_text "${REDIS_TASKS}" 'aof_last_write_status:ok'
     require_file_text "${WEB_TASKS}" \
         'Deploy LibreNMS shared-session health probe'
+    require_file_text "${WEB_TASKS}" 'Reconcile anchored LibreNMS APP_KEY'
+    require_file_text "${WEB_TASKS}" 'regexp: ^APP_KEY='
+    require_file_text "${WEB_TASKS}" 'config:clear'
+    require_file_text "${WEB_TASKS}" 'config:cache'
+    require_file_text "${WEB_TASKS}" \
+        'librenms_session_repair_config_cache.stat.exists | bool'
+    require_file_text "${WEB_TASKS}" 'reload-or-restart'
+    require_file_text "${WEB_TASKS}" \
+        'Confirm PHP-FPM lifecycle is managed by this project'
     require_file_text "${WEB_TASKS}" \
         "'connection=sentinel_session'"
     require_file_text "${MAKEFILE}" 'session-repair-ask-become-pass:'

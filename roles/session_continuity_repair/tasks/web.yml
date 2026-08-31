@@ -1,4 +1,136 @@
 ---
+- name: Confirm PHP-FPM lifecycle is managed by this project
+  ansible.builtin.assert:
+    that:
+      - librenms_manage_php_fpm | bool
+    fail_msg: >-
+      Session repair requires this project to manage PHP-FPM so it can reload
+      the web runtime after reconciling Laravel configuration.
+
+- name: Reconcile anchored LibreNMS APP_KEY
+  ansible.builtin.lineinfile:
+    path: "{{ librenms_session_repair_env_path }}"
+    regexp: ^APP_KEY=
+    line: "APP_KEY={{ librenms_session_repair_app_key_effective }}"
+    state: present
+  no_log: true
+
+- name: Reconcile managed LibreNMS session settings
+  ansible.builtin.lineinfile:
+    path: "{{ librenms_session_repair_env_path }}"
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - regexp: ^SESSION_DRIVER=
+      line: SESSION_DRIVER=redis
+    - regexp: ^SESSION_CONNECTION=
+      line: SESSION_CONNECTION=sentinel_session
+    - regexp: ^SESSION_SECURE_COOKIE=
+      line: >-
+        SESSION_SECURE_COOKIE={{
+          librenms_session_repair_secure_cookie_effective
+          | bool
+          | ternary('true', 'false')
+        }}
+    - regexp: ^REDIS_SENTINEL_SERVICE=
+      line: "REDIS_SENTINEL_SERVICE={{ librenms_redis_sentinel_service }}"
+    - regexp: ^REDIS_SESSION_DB=
+      line: "REDIS_SESSION_DB={{ librenms_redis_session_db }}"
+  loop_control:
+    label: "{{ item.regexp }}"
+
+- name: Inspect existing Laravel configuration cache
+  ansible.builtin.stat:
+    path: "{{ librenms_install_dir }}/bootstrap/cache/config.php"
+  register: librenms_session_repair_config_cache
+
+- name: Clear stale Laravel configuration cache
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - 60s
+      - php
+      - artisan
+      - config:clear
+      - --no-ansi
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+
+- name: Rebuild previously enabled Laravel configuration cache
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - 60s
+      - php
+      - artisan
+      - config:cache
+      - --no-ansi
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: true
+  when: librenms_session_repair_config_cache.stat.exists | bool
+
+- name: Detect active PHP version on Debian-family web nodes
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;"
+  register: librenms_session_repair_php_version
+  changed_when: false
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Determine active PHP-FPM service
+  ansible.builtin.set_fact:
+    librenms_session_repair_php_fpm_service_effective: >-
+      {{
+        'php' ~ (librenms_session_repair_php_version.stdout | trim) ~ '-fpm'
+        if ansible_facts.os_family == 'Debian'
+        else librenms_php_fpm_service_name
+      }}
+
+- name: Validate active PHP-FPM service selection
+  ansible.builtin.assert:
+    that:
+      - librenms_session_repair_php_fpm_service_effective | length > 0
+    fail_msg: >-
+      Could not determine the active PHP-FPM service on
+      {{ inventory_hostname }}.
+
+- name: Reload PHP-FPM after session configuration repair
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reload-or-restart
+      - "{{ librenms_session_repair_php_fpm_service_effective }}"
+  changed_when: true
+  when: ansible_facts.service_mgr == 'systemd'
+
+- name: Restart PHP-FPM without systemd after session configuration repair
+  ansible.builtin.service:
+    name: "{{ librenms_session_repair_php_fpm_service_effective }}"
+    state: restarted
+  when: ansible_facts.service_mgr != 'systemd'
+
+- name: Wait for repaired PHP-FPM service
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ librenms_session_repair_php_fpm_service_effective }}"
+  register: librenms_session_repair_php_fpm_state
+  changed_when: false
+  retries: "{{ librenms_session_repair_php_fpm_retries | int }}"
+  delay: "{{ librenms_session_repair_php_fpm_delay | int }}"
+  until: (librenms_session_repair_php_fpm_state.stdout | trim) == 'active'
+  when: ansible_facts.service_mgr == 'systemd'
+
 - name: Deploy LibreNMS shared-session health probe
   ansible.builtin.template:
     src: >-
@@ -36,6 +168,12 @@
       - "'driver=redis' in librenms_session_repair_web_config.stdout_lines"
       - >-
         'connection=sentinel_session'
+        in librenms_session_repair_web_config.stdout_lines
+      - >-
+        (
+          'app_key_sha256='
+          ~ (librenms_session_repair_app_key_effective | hash('sha256'))
+        )
         in librenms_session_repair_web_config.stdout_lines
     fail_msg: |-
       {{ inventory_hostname }} still has an unsafe LibreNMS session runtime.

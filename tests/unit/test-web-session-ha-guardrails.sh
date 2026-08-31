@@ -88,5 +88,7 @@ require_contains "${STATUS_TASKS}" 'aof_last_write_status:ok' \
     'Strict status must reject a live Redis AOF write failure.'
 require_contains "${STATUS_TASKS}" 'LibreNMS web nodes do not share one APP_KEY and session configuration.' \
     'Strict status must reject application-key or session-config drift.'
+require_contains "${STATUS_TASKS}" 'librenms_status_session_config_drift_fields' \
+    'Strict status must identify the exact session fields that differ.'
 
 printf 'Web-session HA guardrail test passed.\n'

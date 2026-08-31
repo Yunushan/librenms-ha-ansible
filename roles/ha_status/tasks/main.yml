@@ -853,6 +853,7 @@
     librenms_status_redis_known_masters: []
     librenms_status_redis_aof_probe_rcs: {}
     librenms_status_session_config_signatures: []
+    librenms_status_session_config_drift_fields: []
   run_once: true
 
 - name: Collect live Redis session durability results
@@ -884,6 +885,16 @@
   when:
     - librenms_status_session_probe_enabled | bool
     - (hostvars[item].librenms_status_session_config_probe.rc | default(1) | int) == 0
+  run_once: true
+
+- name: Identify differing LibreNMS runtime session fields
+  ansible.builtin.include_tasks: session_config_field.yml
+  loop: "{{ librenms_status_session_parity_fields }}"
+  loop_control:
+    loop_var: librenms_status_session_config_field
+  when:
+    - librenms_status_session_probe_enabled | bool
+    - librenms_status_active_web_nodes | length > 1
   run_once: true
 
 - name: Record unavailable LibreNMS runtime session configuration
@@ -943,7 +954,16 @@
     librenms_status_degraded_reasons: >-
       {{
         librenms_status_degraded_reasons
-        + ['LibreNMS web nodes do not share one APP_KEY and session configuration.']
+        + [
+            'LibreNMS web nodes do not share one APP_KEY and session configuration. '
+            ~ 'Differing fields: '
+            ~ (
+              librenms_status_session_config_drift_fields
+              | default(['unclassified_probe_output'], true)
+              | join(', ')
+            )
+            ~ '.'
+          ]
       }}
   when:
     - librenms_status_session_probe_enabled | bool
