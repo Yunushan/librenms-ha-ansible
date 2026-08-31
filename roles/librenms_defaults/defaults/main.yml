@@ -548,6 +548,15 @@ librenms_galera_sst_helper_manage_permissions: true
 librenms_galera_sst_helper_owner: root
 librenms_galera_sst_helper_group: root
 librenms_galera_sst_helper_mode: "0755"
+# Debian and Ubuntu MariaDB 11.8 enable a mariadbd AppArmor profile that does
+# not permit packaged shell-based Galera SST helpers. Keep the daemon profile
+# enforcing, but allow the exact package-owned helper to execute with a
+# scrubbed environment through the profile's supported local include.
+librenms_galera_sst_helper_manage_apparmor: >-
+  {{ ansible_facts.os_family == 'Debian' }}
+librenms_galera_sst_helper_apparmor_profile_path: /etc/apparmor.d/mariadbd
+librenms_galera_sst_helper_apparmor_local_path: /etc/apparmor.d/local/mariadbd
+librenms_galera_sst_helper_apparmor_exec_mode: Ux
 librenms_galera_pc_recovery: true
 # Retain enough write-set history for routine rolling convergence and staged
 # LTS upgrades to use IST. Size this from the site's peak write rate and the

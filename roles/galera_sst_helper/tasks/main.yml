@@ -3,10 +3,23 @@
   ansible.builtin.assert:
     that:
       - librenms_galera_sst_method | string | trim is match('^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
-      - librenms_galera_sst_helper_path | string | trim is match('^/[^\\n\\r]+$')
+      - librenms_galera_sst_helper_path | string | trim is match('^/[a-zA-Z0-9_./+\\-]+$')
+      - >-
+        librenms_galera_sst_helper_apparmor_profile_path
+        | string
+        | trim
+        is match('^/etc/apparmor\\.d/[a-zA-Z0-9_.-]+$')
+      - >-
+        librenms_galera_sst_helper_apparmor_local_path
+        | string
+        | trim
+        is match('^/etc/apparmor\\.d/local/[a-zA-Z0-9_.-]+$')
+      - librenms_galera_sst_helper_apparmor_exec_mode in ['Ux', 'ux']
     fail_msg: >-
-      The Galera SST method or helper path is invalid. Configure a simple SST
-      method name and an absolute helper path before database convergence.
+      The Galera SST method, helper path, or AppArmor policy setting is invalid.
+      Configure a simple method name, an absolute package-helper path, supported
+      AppArmor profile/local paths, and an approved execution mode before
+      database convergence.
 
 - name: Inspect the configured Galera SST helper
   ansible.builtin.stat:
@@ -86,3 +99,93 @@
       {{ librenms_galera_sst_helper_path }} is on a noexec filesystem. Galera
       cannot run the configured SST helper until the host mount policy is
       corrected.
+
+- name: Inspect the MariaDB AppArmor profile
+  ansible.builtin.stat:
+    path: "{{ librenms_galera_sst_helper_apparmor_profile_path }}"
+    follow: true
+  register: librenms_galera_sst_helper_apparmor_profile
+  when: librenms_galera_sst_helper_manage_apparmor | bool
+
+- name: Read the MariaDB AppArmor profile
+  ansible.builtin.slurp:
+    path: "{{ librenms_galera_sst_helper_apparmor_profile_path }}"
+  register: librenms_galera_sst_helper_apparmor_profile_content
+  when:
+    - librenms_galera_sst_helper_manage_apparmor | bool
+    - librenms_galera_sst_helper_apparmor_profile.stat.exists | default(false)
+
+- name: Require the MariaDB AppArmor local override include
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          'include if exists <'
+          ~ (
+            librenms_galera_sst_helper_apparmor_local_path
+            | regex_replace('^/etc/apparmor.d/', '')
+          )
+          ~ '>'
+        ) in (
+          librenms_galera_sst_helper_apparmor_profile_content.content
+          | b64decode
+        )
+    fail_msg: >-
+      The installed MariaDB AppArmor profile does not include the configured
+      local policy path. Refusing to edit the vendor profile directly. Set the
+      AppArmor profile and local paths to a supported include pair, or update
+      the MariaDB package before retrying Galera SST repair.
+  when:
+    - librenms_galera_sst_helper_manage_apparmor | bool
+    - librenms_galera_sst_helper_apparmor_profile.stat.exists | default(false)
+
+- name: Ensure the MariaDB AppArmor local override directory exists
+  ansible.builtin.file:
+    path: "{{ librenms_galera_sst_helper_apparmor_local_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - librenms_galera_sst_helper_manage_apparmor | bool
+    - librenms_galera_sst_helper_apparmor_profile.stat.exists | default(false)
+
+- name: Permit the package-owned Galera SST helper through AppArmor
+  ansible.builtin.blockinfile:
+    path: "{{ librenms_galera_sst_helper_apparmor_local_path }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED LIBRENMS GALERA SST"
+    block: |
+      /{,usr/}bin/{bash,dash,sh} ix,
+      {{ librenms_galera_sst_helper_path }} {{ librenms_galera_sst_helper_apparmor_exec_mode }},
+  register: librenms_galera_sst_helper_apparmor_local
+  when:
+    - librenms_galera_sst_helper_manage_apparmor | bool
+    - librenms_galera_sst_helper_apparmor_profile.stat.exists | default(false)
+
+- name: Check whether AppArmor is enabled
+  ansible.builtin.command:
+    argv:
+      - aa-status
+      - --enabled
+  register: librenms_galera_sst_helper_apparmor_enabled
+  changed_when: false
+  failed_when: false
+  when:
+    - librenms_galera_sst_helper_manage_apparmor | bool
+    - librenms_galera_sst_helper_apparmor_profile.stat.exists | default(false)
+
+- name: Validate and reload the enforcing MariaDB AppArmor profile
+  ansible.builtin.command:
+    argv:
+      - apparmor_parser
+      - -r
+      - "{{ librenms_galera_sst_helper_apparmor_profile_path }}"
+  changed_when: librenms_galera_sst_helper_apparmor_local.changed
+  when:
+    - librenms_galera_sst_helper_manage_apparmor | bool
+    - librenms_galera_sst_helper_apparmor_profile.stat.exists | default(false)
+    - (librenms_galera_sst_helper_apparmor_enabled.rc | default(1) | int) == 0

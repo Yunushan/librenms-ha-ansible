@@ -27,9 +27,16 @@ require_text() {
 main() {
     require_text "${DEFAULTS}" 'librenms_galera_sst_helper_path:'
     require_text "${DEFAULTS}" 'librenms_galera_sst_helper_mode: "0755"'
+    require_text "${DEFAULTS}" 'librenms_galera_sst_helper_apparmor_profile_path: /etc/apparmor.d/mariadbd'
+    require_text "${DEFAULTS}" 'librenms_galera_sst_helper_apparmor_local_path: /etc/apparmor.d/local/mariadbd'
+    require_text "${DEFAULTS}" 'librenms_galera_sst_helper_apparmor_exec_mode: Ux'
     require_text "${HELPER_TASKS}" 'Reconcile package-owned Galera SST helper permissions'
     require_text "${HELPER_TASKS}" 'Verify the Galera SST helper is executable'
     require_text "${HELPER_TASKS}" 'Reject a noexec Galera SST helper filesystem'
+    require_text "${HELPER_TASKS}" 'Require the MariaDB AppArmor local override include'
+    require_text "${HELPER_TASKS}" 'Permit the package-owned Galera SST helper through AppArmor'
+    require_text "${HELPER_TASKS}" '/{,usr/}bin/{bash,dash,sh} ix,'
+    require_text "${HELPER_TASKS}" 'Validate and reload the enforcing MariaDB AppArmor profile'
     require_text "${REPAIR_TASKS}" 'Require a healthy Primary quorum before SST helper repair'
     require_text "${REPAIR_TASKS}" 'ansible_play_hosts_all | length == 1'
     require_text "${REPAIR_TASKS}" 'librenms_galera_sst_repair_peer_nodes'
@@ -48,6 +55,11 @@ main() {
     if grep -Eq -- 'galera_new_cluster|--wsrep-new-cluster|safe_to_bootstrap|grastate\.dat|rm -rf' \
         "${REPAIR_TASKS}"; then
         fail 'SST helper repair must not contain bootstrap or destructive datadir operations'
+    fi
+
+    if grep -Eq -- 'aa-complain|disable.*apparmor|apparmor_parser.*--remove' \
+        "${HELPER_TASKS}"; then
+        fail 'SST helper repair must not disable or weaken the MariaDB AppArmor profile globally'
     fi
 
     printf 'Galera SST helper guardrail test passed.\n'

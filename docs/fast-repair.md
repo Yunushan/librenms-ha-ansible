@@ -188,11 +188,21 @@ make galera-sst-repair-ask-become-pass \
 The playbook first requires exactly one target and independently verifies a
 Primary/Synced quorum on the other database nodes. It then restores the
 package-owned SST helper's executable metadata, rejects a `noexec` filesystem,
-queues a normal MariaDB start, and waits up to 16 minutes for an IST or SST and
-the final `Primary`, `Synced`, and `wsrep_ready=ON` state. It never bootstraps
-Galera, changes recovered positions, or deletes the MariaDB datadir. If the
-helper remains blocked, the failure includes path, kernel, AppArmor, SELinux,
-service, and journal evidence.
+reconciles the Debian/Ubuntu MariaDB AppArmor local policy when that profile is
+installed, queues a normal MariaDB start, and waits up to 16 minutes for an IST
+or SST and the final `Primary`, `Synced`, and `wsrep_ready=ON` state. It never
+bootstraps Galera, changes recovered positions, or deletes the MariaDB datadir.
+If the helper remains blocked, the failure includes path, kernel, AppArmor,
+SELinux, service, and journal evidence.
+
+MariaDB 11.8's Debian/Ubuntu AppArmor profile does not currently permit the
+packaged shell-based Galera SST helpers. The managed local policy keeps
+`mariadbd` in enforce mode, permits its shell interpreter to inherit the
+profile, and permits only the configured root-owned SST helper to execute
+unconfined with a scrubbed environment (`Ux`). This is narrower than disabling
+or putting the complete MariaDB profile into complain mode, but the helper is
+outside AppArmor confinement while it performs SST. Keep MariaDB security
+updates current and do not change the helper's root ownership or `0755` mode.
 
 The RRD permission helper fixes the shared mount root during ordinary startup.
 It does not recursively walk the complete RRD tree unless
