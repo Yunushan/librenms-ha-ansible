@@ -133,11 +133,12 @@ stuck service state.
 
 If the diagnostics also show `Starting rrdcached.service - LSB`, deploy the
 native foreground systemd drop-in before rebooting the affected node. On
-Debian-family hosts that ship `rrdcached.socket`, it also deploys the matching
-socket drop-in because the distribution service ignores command-line socket
-declarations while socket activation is enabled. This bounded playbook reloads
-systemd and validates the drop-ins; it does not start, stop, or restart the
-daemon:
+Debian-family hosts that ship `rrdcached.socket`, the normal role convergence
+deliberately masks that optional socket unit and lets the foreground service
+own both the Unix socket and the node-local TCP listener. This avoids the
+distribution socket-activation path, which ignores command-line socket
+declarations while it is active. The repair playbook reloads systemd and
+validates the service drop-in; it does not start, stop, or restart the daemon:
 
 ```sh
 make rrdcached-unit-repair-ask-become-pass \
@@ -145,12 +146,23 @@ make rrdcached-unit-repair-ask-become-pass \
   RRDCACHED_UNIT_REPAIR_LIMIT=lnms1
 ```
 
-During the controlled restart window, activate the new socket definition first,
-then restart the daemon:
+During the controlled restart window, stop and mask socket activation before
+starting the foreground daemon:
 
 ```sh
-sudo systemctl restart rrdcached.socket
-sudo systemctl restart rrdcached.service
+sudo systemctl stop rrdcached.service
+sudo systemctl disable --now rrdcached.socket
+sudo systemctl mask rrdcached.socket
+sudo systemctl daemon-reload
+sudo systemctl reset-failed rrdcached.service
+sudo systemctl start rrdcached.service
+```
+
+Verify both listeners before returning the node to service:
+
+```sh
+systemctl is-active --quiet rrdcached.service
+ss -H -ltn | grep -E '10\.2\.7\.140:42217[[:space:]]'
 ```
 
 If a subsequent fast repair still reports the old process in state `D` or `Z`,

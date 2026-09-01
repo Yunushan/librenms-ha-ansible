@@ -1133,6 +1133,8 @@ librenms_rrdcached_systemd_override_dir: >-
   /etc/systemd/system/{{ librenms_rrdcached_service_name }}.service.d
 librenms_rrdcached_systemd_override_path: >-
   {{ librenms_rrdcached_systemd_override_dir }}/librenms-ha.conf
+# Retain this path only so convergence can remove the socket drop-in created by
+# older releases. The foreground service owns the Unix and node TCP listeners.
 librenms_rrdcached_socket_systemd_override_dir: >-
   /etc/systemd/system/{{ librenms_rrdcached_socket_unit_name }}.d
 librenms_rrdcached_socket_systemd_override_path: >-

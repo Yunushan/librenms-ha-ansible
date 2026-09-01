@@ -53,19 +53,6 @@
             else librenms_rrdcached_network_bind_address
           }}
 
-    - name: Inspect the distribution RRDCacheD socket activation unit
-      ansible.builtin.command:
-        argv:
-          - systemctl
-          - show
-          - "{{ librenms_rrdcached_socket_unit_name }}"
-          - --property=LoadState
-          - --value
-      register: librenms_rrdcached_socket_unit_probe
-      changed_when: false
-      failed_when: false
-      when: librenms_rrdcached_runs_on_host | bool
-
     - name: Inspect the configured RRDCacheD daemon
       ansible.builtin.stat:
         path: "{{ librenms_rrdcached_daemon_path }}"
@@ -106,36 +93,12 @@
         mode: "0644"
       when: librenms_rrdcached_runs_on_host | bool
 
-    - name: Ensure the RRDCacheD socket systemd drop-in directory exists
+    - name: Remove the obsolete RRDCacheD socket systemd drop-in
       ansible.builtin.file:
-        path: "{{ librenms_rrdcached_socket_systemd_override_dir }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-      when:
-        - librenms_rrdcached_runs_on_host | bool
-        - >-
-          (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
-          in ['loaded', 'masked']
-
-    - name: Deploy the RRDCacheD socket systemd drop-in
-      ansible.builtin.template:
-        src: >-
-          {{
-            playbook_dir
-            ~ '/../roles/librenms_app/templates/'
-            ~ 'rrdcached.socket.systemd-override.conf.j2'
-          }}
-        dest: "{{ librenms_rrdcached_socket_systemd_override_path }}"
-        owner: root
-        group: root
-        mode: "0644"
-      when:
-        - librenms_rrdcached_runs_on_host | bool
-        - >-
-          (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
-          in ['loaded', 'masked']
+        path: "{{ librenms_rrdcached_socket_systemd_override_path }}"
+        state: absent
+      register: librenms_rrdcached_socket_override_removed
+      when: librenms_rrdcached_runs_on_host | bool
 
     - name: Reload systemd after the RRDCacheD drop-in deployment
       ansible.builtin.systemd_service:
@@ -147,16 +110,6 @@
         src: "{{ librenms_rrdcached_systemd_override_path }}"
       register: librenms_rrdcached_unit_dropin
       when: librenms_rrdcached_runs_on_host | bool
-
-    - name: Read back the deployed RRDCacheD socket systemd drop-in
-      ansible.builtin.slurp:
-        src: "{{ librenms_rrdcached_socket_systemd_override_path }}"
-      register: librenms_rrdcached_socket_unit_dropin
-      when:
-        - librenms_rrdcached_runs_on_host | bool
-        - >-
-          (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
-          in ['loaded', 'masked']
 
     - name: Read the effective RRDCacheD systemd properties
       ansible.builtin.command:
@@ -197,34 +150,6 @@
           - >-
             librenms_rrdcached_daemon_path
             in librenms_rrdcached_unit_properties.stdout
-          - >-
-            (
-              (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
-              not in ['loaded', 'masked']
-            )
-            or (
-              (
-                'ListenStream=' ~ librenms_rrdcached_socket
-              ) in (
-                librenms_rrdcached_socket_unit_dropin.content
-                | default('')
-                | b64decode
-              ).splitlines()
-            )
-          - >-
-            (not (librenms_rrdcached_network_enabled | bool))
-            or (
-              (
-                'ListenStream='
-                ~ librenms_rrdcached_network_bind_address_effective
-                ~ ':'
-                ~ (librenms_rrdcached_bind_port | string)
-              ) in (
-                librenms_rrdcached_socket_unit_dropin.content
-                | default('')
-                | b64decode
-              ).splitlines()
-            )
         fail_msg: |-
           systemd did not load the expected native RRDCacheD drop-in.
 
@@ -237,19 +162,13 @@
             | default('')
             | b64decode
           }}
-
-          Deployed socket drop-in:
-          {{
-            librenms_rrdcached_socket_unit_dropin.content
-            | default('')
-            | b64decode
-          }}
       when: librenms_rrdcached_runs_on_host | bool
 
     - name: Report non-disruptive RRDCacheD unit repair result
       ansible.builtin.debug:
         msg: >-
-          The native foreground RRDCacheD service and socket drop-ins are
-          installed on {{ inventory_hostname }}. The service was not started, stopped, or restarted
-          by this playbook.
+          The native foreground RRDCacheD service drop-in is installed on
+          {{ inventory_hostname }}. The service was not started, stopped, or restarted
+          by this playbook. During the controlled restart, stop and mask
+          {{ librenms_rrdcached_socket_unit_name }} before starting the service.
       when: librenms_rrdcached_runs_on_host | bool

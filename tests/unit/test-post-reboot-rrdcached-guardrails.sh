@@ -8,7 +8,6 @@ readonly DEFAULTS="${ROOT_DIR}/roles/librenms_defaults/defaults/main.yml"
 readonly HA_STATUS_TASKS="${ROOT_DIR}/roles/ha_status/tasks/main.yml"
 readonly STARTUP_REPAIR_TEMPLATE="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-startup-repair.sh.j2"
 readonly RRDCACHED_OVERRIDE="${ROOT_DIR}/roles/librenms_app/templates/rrdcached.systemd-override.conf.j2"
-readonly RRDCACHED_SOCKET_OVERRIDE="${ROOT_DIR}/roles/librenms_app/templates/rrdcached.socket.systemd-override.conf.j2"
 
 fail() {
     printf 'Post-reboot RRDCacheD guardrail test failed: %s\n' "$1" >&2
@@ -94,9 +93,7 @@ main() {
     require_file_text "$RRDCACHED_OVERRIDE" 'ExecStop='
     require_file_text "$RRDCACHED_OVERRIDE" 'StartLimitIntervalSec=300'
     require_file_text "$RRDCACHED_OVERRIDE" 'StartLimitBurst=6'
-    require_file_text "$RRDCACHED_SOCKET_OVERRIDE" 'ListenStream='
-    require_file_text "$RRDCACHED_SOCKET_OVERRIDE" 'ListenStream={{ librenms_rrdcached_socket }}'
-    require_file_text "$RRDCACHED_SOCKET_OVERRIDE" 'ListenStream={{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}'
+    require_file_text "$RRDCACHED_OVERRIDE" '-l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}'
     require_file_text "$DEFAULTS" 'librenms_gluster_mount_attempt_timeout: 30'
     require_file_text "$HA_STATUS_TASKS" \
         '--mountpoint {{ (librenms_install_dir ~ '\''/rrd'\'') | quote }}'

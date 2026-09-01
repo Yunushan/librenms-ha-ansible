@@ -2075,46 +2075,40 @@
     - librenms_manage_rrdcached | bool
     - librenms_manage_rrdcached_systemd_override | bool
 
-- name: Unmask rrdcached socket activation on eligible nodes
+- name: Stop and disable distribution rrdcached socket activation
   ansible.builtin.systemd_service:
     name: "{{ librenms_rrdcached_socket_unit_name }}"
-    masked: false
+    state: stopped
+    enabled: false
+  register: librenms_rrdcached_socket_activation_stop
   when:
     - librenms_manage_rrdcached | bool
     - librenms_manage_rrdcached_systemd_override | bool
-    - librenms_rrdcached_runs_on_host | bool
-    - (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim) == 'masked'
+    - >-
+      (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
+      == 'loaded'
 
-- name: Ensure rrdcached socket systemd override directory exists
-  file:
-    path: "{{ librenms_rrdcached_socket_systemd_override_dir }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
+- name: Mask distribution rrdcached socket activation
+  ansible.builtin.systemd_service:
+    name: "{{ librenms_rrdcached_socket_unit_name }}"
+    masked: true
+  register: librenms_rrdcached_socket_activation_mask
   when:
     - librenms_manage_rrdcached | bool
     - librenms_manage_rrdcached_systemd_override | bool
-    - librenms_rrdcached_runs_on_host | bool
     - >-
       (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
       in ['loaded', 'masked']
 
-- name: Deploy rrdcached socket systemd override
-  template:
-    src: rrdcached.socket.systemd-override.conf.j2
-    dest: "{{ librenms_rrdcached_socket_systemd_override_path }}"
-    owner: root
-    group: root
-    mode: "0644"
-  register: librenms_rrdcached_socket_systemd_override_deploy
+- name: Remove obsolete rrdcached socket systemd override
+  ansible.builtin.file:
+    path: "{{ librenms_rrdcached_socket_systemd_override_path }}"
+    state: absent
+  register: librenms_rrdcached_socket_override_removed
   when:
     - librenms_manage_rrdcached | bool
     - librenms_manage_rrdcached_systemd_override | bool
     - librenms_rrdcached_runs_on_host | bool
-    - >-
-      (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
-      in ['loaded', 'masked']
 
 - name: Deploy rrdcached systemd override
   template:
@@ -2130,20 +2124,6 @@
     - librenms_manage_rrdcached_systemd_override | bool
     - librenms_rrdcached_runs_on_host | bool
 
-- name: Disable rrdcached socket activation on ineligible nodes
-  ansible.builtin.systemd_service:
-    name: "{{ librenms_rrdcached_socket_unit_name }}"
-    state: stopped
-    enabled: false
-    masked: true
-  when:
-    - librenms_manage_rrdcached | bool
-    - librenms_manage_rrdcached_systemd_override | bool
-    - not (librenms_rrdcached_runs_on_host | bool)
-    - >-
-      (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
-      in ['loaded', 'masked']
-
 - name: Reload systemd after rrdcached override change
   systemd:
     daemon_reload: true
@@ -2153,35 +2133,9 @@
     - librenms_rrdcached_runs_on_host | bool
     - >-
       (librenms_rrdcached_systemd_override_deploy.changed | default(false))
-      or (
-        librenms_rrdcached_socket_systemd_override_deploy.changed
-        | default(false)
-      )
-
-- name: Enable and start rrdcached socket activation
-  ansible.builtin.systemd_service:
-    name: "{{ librenms_rrdcached_socket_unit_name }}"
-    state: started
-    enabled: true
-  when:
-    - librenms_manage_rrdcached | bool
-    - librenms_manage_rrdcached_systemd_override | bool
-    - librenms_rrdcached_runs_on_host | bool
-    - >-
-      (librenms_rrdcached_socket_unit_probe.stdout | default('') | trim)
-      in ['loaded', 'masked']
-
-- name: Restart rrdcached socket after managed configuration changes
-  ansible.builtin.systemd_service:
-    name: "{{ librenms_rrdcached_socket_unit_name }}"
-    state: restarted
-  when:
-    - librenms_manage_rrdcached | bool
-    - librenms_manage_rrdcached_systemd_override | bool
-    - librenms_rrdcached_runs_on_host | bool
-    - >-
-      (librenms_rrdcached_socket_systemd_override_deploy.changed
-      | default(false))
+      or (librenms_rrdcached_socket_activation_stop.changed | default(false))
+      or (librenms_rrdcached_socket_activation_mask.changed | default(false))
+      or (librenms_rrdcached_socket_override_removed.changed | default(false))
 
 - name: Enable and start rrdcached on eligible nodes
   service:
@@ -2202,10 +2156,9 @@
     - >-
       (librenms_rrdcached_defaults_deploy.changed | default(false))
       or (librenms_rrdcached_systemd_override_deploy.changed | default(false))
-      or (
-        librenms_rrdcached_socket_systemd_override_deploy.changed
-        | default(false)
-      )
+      or (librenms_rrdcached_socket_activation_stop.changed | default(false))
+      or (librenms_rrdcached_socket_activation_mask.changed | default(false))
+      or (librenms_rrdcached_socket_override_removed.changed | default(false))
       or (librenms_identity_account_changed | default(false) | bool)
 
 - name: Check for wildcard rrdcached TCP listener in VIP mode
