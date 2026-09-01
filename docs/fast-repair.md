@@ -132,14 +132,25 @@ required; deleting its PID file or starting a second daemon does not repair the
 stuck service state.
 
 If the diagnostics also show `Starting rrdcached.service - LSB`, deploy the
-native foreground systemd drop-in before rebooting the affected node. This
-bounded playbook reloads systemd and validates the effective unit properties;
-it does not start, stop, or restart the daemon:
+native foreground systemd drop-in before rebooting the affected node. On
+Debian-family hosts that ship `rrdcached.socket`, it also deploys the matching
+socket drop-in because the distribution service ignores command-line socket
+declarations while socket activation is enabled. This bounded playbook reloads
+systemd and validates the drop-ins; it does not start, stop, or restart the
+daemon:
 
 ```sh
 make rrdcached-unit-repair-ask-become-pass \
   RRDCACHED_UNIT_REPAIR_CONFIRM=true \
   RRDCACHED_UNIT_REPAIR_LIMIT=lnms1
+```
+
+During the controlled restart window, activate the new socket definition first,
+then restart the daemon:
+
+```sh
+sudo systemctl restart rrdcached.socket
+sudo systemctl restart rrdcached.service
 ```
 
 If a subsequent fast repair still reports the old process in state `D` or `Z`,

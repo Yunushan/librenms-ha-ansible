@@ -1127,11 +1127,16 @@ librenms_rrdcached_write_threads: 4
 librenms_rrdcached_journal_path: /var/lib/rrdcached/journal
 librenms_rrdcached_default_config_path: /etc/default/rrdcached
 librenms_rrdcached_service_name: rrdcached
+librenms_rrdcached_socket_unit_name: "{{ librenms_rrdcached_service_name }}.socket"
 librenms_manage_rrdcached_systemd_override: "{{ ansible_facts.service_mgr == 'systemd' }}"
 librenms_rrdcached_systemd_override_dir: >-
   /etc/systemd/system/{{ librenms_rrdcached_service_name }}.service.d
 librenms_rrdcached_systemd_override_path: >-
   {{ librenms_rrdcached_systemd_override_dir }}/librenms-ha.conf
+librenms_rrdcached_socket_systemd_override_dir: >-
+  /etc/systemd/system/{{ librenms_rrdcached_socket_unit_name }}.d
+librenms_rrdcached_socket_systemd_override_path: >-
+  {{ librenms_rrdcached_socket_systemd_override_dir }}/librenms-ha.conf
 librenms_rrdcached_base_path: >-
   {{
     librenms_gluster_mountpoint
