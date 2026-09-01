@@ -10,6 +10,7 @@ DISPATCHER_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-dispatcher-
 RRD_PERMISSION_HELPER="${ROOT_DIR}/roles/librenms_app/templates/librenms-ha-rrd-permission-repair.sh.j2"
 RRDCACHED_UNIT_PLAYBOOK="${ROOT_DIR}/playbooks/rrdcached-unit-repair.yml"
 RRDCACHED_OVERRIDE="${ROOT_DIR}/roles/librenms_app/templates/rrdcached.systemd-override.conf.j2"
+RRDCACHED_DEFAULTS="${ROOT_DIR}/roles/librenms_app/templates/rrdcached.default.j2"
 MAKEFILE="${ROOT_DIR}/Makefile"
 FAST_REPAIR_DOC="${ROOT_DIR}/docs/fast-repair.md"
 TEST_ROOT="$(mktemp -d)"
@@ -126,6 +127,8 @@ grep -q '{% if librenms_rrd_permission_repair_recursive | bool %}' "${RRD_PERMIS
 grep -q 'sys.exit(1)' "${DISPATCHER_HELPER}"
 grep -q 'Refreshed local dispatcher registration' "${DISPATCHER_HELPER}"
 grep -q '^RemainAfterExit=no$' "${RRDCACHED_OVERRIDE}"
+grep -q -- '-l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}' "${RRDCACHED_OVERRIDE}"
+grep -q -- 'NETWORK_OPTIONS="-l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}"' "${RRDCACHED_DEFAULTS}"
 grep -q 'librenms_rrdcached_unit_repair_confirm' "${RRDCACHED_UNIT_PLAYBOOK}"
 grep -q 'librenms_manage_rrdcached_systemd_override' "${RRDCACHED_UNIT_PLAYBOOK}"
 grep -q 'rrdcached.systemd-override.conf.j2' "${RRDCACHED_UNIT_PLAYBOOK}"
@@ -139,6 +142,16 @@ grep -q 'RRDCACHED_UNIT_REPAIR_CONFIRM=true' "${FAST_REPAIR_DOC}"
 
 if grep -Eq '^After=.*\{%.*%\}[[:space:]]*$' "${RRDCACHED_OVERRIDE}"; then
     echo "RRDCacheD After= must not use an end-of-line Jinja block that trims its newline" >&2
+    exit 1
+fi
+
+if grep -Eq '^[[:space:]]*-L[[:space:]]*\\$' "${RRDCACHED_OVERRIDE}"; then
+    echo "RRDCacheD must not combine the default listener (-L) with the explicit network listener" >&2
+    exit 1
+fi
+
+if grep -q -- 'NETWORK_OPTIONS="-L ' "${RRDCACHED_DEFAULTS}"; then
+    echo "RRDCacheD defaults must not combine the default listener (-L) with the explicit network listener" >&2
     exit 1
 fi
 

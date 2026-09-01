@@ -12,7 +12,7 @@ DAEMON_GROUP={{ librenms_group }}
 DAEMON_USER={{ librenms_user }}
 BASE_OPTIONS="-B -F -R"
 {% if librenms_rrdcached_network_enabled | bool %}
-NETWORK_OPTIONS="-L -l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}"
+NETWORK_OPTIONS="-l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}"
 {% else %}
 NETWORK_OPTIONS=""
 {% endif %}

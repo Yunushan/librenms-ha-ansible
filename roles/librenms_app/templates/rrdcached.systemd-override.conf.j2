@@ -32,7 +32,6 @@ ExecStart={{ librenms_rrdcached_daemon_path }} \
   -s {{ librenms_group }} \
   -m {{ librenms_rrdcached_socket_mode }} \
   -l unix:{{ librenms_rrdcached_socket }}{% if librenms_rrdcached_network_enabled | bool %} \
-  -L \
   -l {{ librenms_rrdcached_network_bind_address_effective }}:{{ librenms_rrdcached_bind_port }}{% endif %} \
   -U {{ librenms_user }} \
   -G {{ librenms_group }}
