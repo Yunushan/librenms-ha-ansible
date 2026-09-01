@@ -62,6 +62,8 @@ main() {
         'Resume target HA repair timers after maintenance'
     require_file_text "${EXIT_TASKS}" \
         'Start target RRDCacheD after maintenance'
+    require_file_text "${EXIT_TASKS}" \
+        'systemctl enable "$unit"'
 
     rrdcached_exit_block="$(awk '
         /- name: Start target RRDCacheD after maintenance/ { capture=1 }

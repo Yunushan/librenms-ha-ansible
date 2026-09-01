@@ -102,6 +102,9 @@
       librenms.service
     do
       if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        if [ "$unit" = librenms-scheduler.timer ]; then
+          systemctl enable "$unit"
+        fi
         systemctl start "$unit"
       fi
     done
