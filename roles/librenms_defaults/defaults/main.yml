@@ -17,6 +17,10 @@ librenms_supported_python_versions:
   - "3.12"
   - "3.13"
   - "3.14"
+# Python 3.15 requires ansible-core 2.22 on both the controller and target.
+# Keep it opt-in until the pinned controller toolchain moves to that release.
+librenms_python_315_preview_enabled: false
+librenms_python_315_min_ansible_core_version: "2.22.0"
 librenms_supported_nginx_series:
   - "1.18"
   - "1.20"
@@ -126,6 +130,10 @@ librenms_os_upgrade_supported_transitions:
       - "10"
 librenms_managed_python_root: /opt/librenms-ha-ansible/python
 librenms_managed_python_binary: "{{ librenms_managed_python_root }}/bin/python"
+# Leave empty to use the distribution's supported python3 interpreter. Set an
+# absolute, preinstalled interpreter path such as /usr/bin/python3.15 only
+# after the Python 3.15 Ansible compatibility contract is satisfied.
+librenms_managed_python_system_binary: ""
 librenms_runtime_python_executable: "{{ librenms_managed_python_binary }}"
 librenms_managed_python_pymysql_version: "1.1.2"
 librenms_managed_python_dotenv_version: "1.0.1"

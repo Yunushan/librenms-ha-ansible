@@ -47,6 +47,20 @@ def pinned_python_requirement(content: str, package: str) -> str | None:
     return match.group(1) if match else None
 
 
+def controller_python_for_ansible_core(version: str | None) -> str | None:
+    """Return the controller Python required by the pinned core release line."""
+
+    if version is None:
+        return None
+
+    match = re.fullmatch(r"(\d+)\.(\d+)\.\d+", version)
+    if match is None:
+        return None
+
+    core_release = (int(match.group(1)), int(match.group(2)))
+    return "3.13" if core_release >= (2, 22) else "3.12"
+
+
 def main() -> int:
     failures: list[str] = []
     failures += require(
@@ -1028,9 +1042,21 @@ def main() -> int:
         failures.append("Docker development image must install the hash-locked CI toolchain")
     if "&& python -m pip check" not in dockerfile:
         failures.append("Docker development image must verify installed Python dependencies")
-    if not re.search(r"(?m)^FROM python:3\.12-slim@sha256:[0-9a-f]{64}\r?$", dockerfile):
+    expected_controller_python = controller_python_for_ansible_core(
+        ci_tool_versions.get("ansible-core")
+    )
+    if expected_controller_python is None:
         failures.append(
-            "Docker development image must use the approved Python 3.12 slim base image with a SHA-256 digest"
+            "CI toolchain must pin ansible-core to a full numeric version so the controller Python contract can be checked"
+        )
+    elif not re.search(
+        rf"(?m)^FROM python:{re.escape(expected_controller_python)}-slim@sha256:[0-9a-f]{{64}}\r?$",
+        dockerfile,
+    ):
+        failures.append(
+            "Docker development image must use the Python "
+            f"{expected_controller_python} slim base image required by the pinned "
+            "ansible-core release, with a SHA-256 digest"
         )
 
     pre_commit_config = read(".pre-commit-config.yaml")

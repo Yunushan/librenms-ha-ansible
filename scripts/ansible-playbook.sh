@@ -58,6 +58,24 @@ if [ "${ansible_core_major}" -lt "${minimum_ansible_core_major}" ] \
     fail "ansible-core ${minimum_ansible_core_version}+ is required (found ${ansible_core_version}). Run 'make controller-bootstrap' or use the pinned controller image."
 fi
 
+controller_python_version="$(
+    "${python_bin}" -c \
+        'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+)"
+if [ "${controller_python_version}" = "3.15" ] \
+    && { [ "${ansible_core_major}" -lt 2 ] \
+        || { [ "${ansible_core_major}" -eq 2 ] \
+            && [ "${ansible_core_minor}" -lt 22 ]; }; }; then
+    fail "Python 3.15 requires ansible-core 2.22.0 or newer; found ${ansible_core_version}."
+fi
+
+if [ "${controller_python_version}" = "3.12" ] \
+    && { [ "${ansible_core_major}" -gt 2 ] \
+        || { [ "${ansible_core_major}" -eq 2 ] \
+            && [ "${ansible_core_minor}" -ge 22 ]; }; }; then
+    fail "ansible-core ${ansible_core_version} requires controller Python 3.13 through 3.15; found ${controller_python_version}."
+fi
+
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${repo_root}/ansible.cfg}"
 if [ -n "${ANSIBLE_COLLECTIONS_PATH:-}" ]; then
     export ANSIBLE_COLLECTIONS_PATH="${collections_path}:${ANSIBLE_COLLECTIONS_PATH}"

@@ -693,7 +693,16 @@ make controller-bootstrap
 
 The bootstrap creates `.ansible/controller-venv` from the hash-locked
 `requirements-ci.txt` file. The current pin is ansible-core 2.21.3; ansible-core
-2.20 or newer is required because Ubuntu 26.04 managed hosts use Python 3.14.
+2.20 or newer is required for the Ubuntu 26.04 managed-host runtime matrix,
+which supports Python 3.14 by default. Python 3.15 is preview-only and requires
+ansible-core 2.22 or newer on both controller and target; keep the preview flag
+disabled until that pinned toolchain is available.
+The managed runtime follows the distribution's `python3` by default. A reviewed
+preinstalled interpreter can be selected with
+`librenms_managed_python_system_binary` when the Python 3.15 preview contract is
+enabled. The existing managed virtual environment must use the same Python
+series; rebuild it during planned maintenance if the selected interpreter
+changes.
 The repository launcher automatically uses this virtual environment when it is
 present.
 

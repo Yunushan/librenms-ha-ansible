@@ -84,11 +84,33 @@
         | default('', true)
       }}
 
+- name: Validate Python 3.15 Ansible compatibility contract
+  ansible.builtin.assert:
+    that:
+      - >-
+        librenms_runtime_python_series != '3.15'
+        or librenms_python_315_preview_enabled | bool
+      - >-
+        librenms_runtime_python_series != '3.15'
+        or ansible_version.full is version(librenms_python_315_min_ansible_core_version, '>=')
+    fail_msg: >-
+      Python 3.15 is preview-only for this repository and requires
+      ansible-core {{ librenms_python_315_min_ansible_core_version }} or newer
+      on the controller. Set librenms_python_315_preview_enabled=true only
+      after upgrading the pinned controller toolchain and validating the
+      target runtime. Detected Python: {{ librenms_runtime_python_series }};
+      detected ansible-core: {{ ansible_version.full }}.
+
 - name: Validate supported Python runtime
   ansible.builtin.assert:
     that:
       - librenms_runtime_python_version_command.rc == 0
-      - librenms_runtime_python_series in librenms_supported_python_versions
+      - >-
+        librenms_runtime_python_series in librenms_supported_python_versions
+        or (
+          librenms_runtime_python_series == '3.15'
+          and librenms_python_315_preview_enabled | bool
+        )
     fail_msg: >-
       Python 3 runtime is unavailable or unsupported on {{ inventory_hostname }}.
       Checked: {{ librenms_runtime_python_executable }}.

@@ -2,6 +2,11 @@
 librenms_mode: standalone
 librenms_install_profile: full
 ansible_python_interpreter: /opt/librenms-ha-ansible/python/bin/python
+# Python 3.15 is preview-only until the controller uses ansible-core 2.22+.
+# After that toolchain upgrade, set these to a reviewed preinstalled interpreter
+# before bootstrapping the managed runtime:
+# librenms_python_315_preview_enabled: true
+# librenms_managed_python_system_binary: /usr/bin/python3.15
 
 librenms_fqdn: librenms.example.com
 librenms_timezone: Etc/UTC

@@ -119,7 +119,17 @@ source is intentionally empty in the repository, so a RHEL deployment fails
 closed before mounting until the export and fixed UID/GID mapping are supplied.
 
 The controller requires ansible-core 2.20 or newer. Ubuntu 26.04 uses Python
-3.14 on the managed host, whose target support starts with ansible-core 2.20.
+3.14 on the managed host by default. Python 3.15 is preview-only: it requires
+ansible-core 2.22 or newer on both controller and target, plus the explicit
+`librenms_python_315_preview_enabled` flag. The repository's pinned 2.21.3
+toolchain therefore does not declare Python 3.15 production support yet. This
+follows the upstream [ansible-core support matrix](https://docs.ansible.com/projects/ansible-core/devel/reference_appendices/release_and_maintenance.html),
+which places Python 3.15 target support in the 2.22 release line.
+When that contract is available, set `librenms_managed_python_system_binary` to
+the reviewed absolute path of the preinstalled Python 3.15 interpreter before
+the managed virtual environment is first bootstrapped. If the existing managed
+virtual environment was created with another Python series, rebuild it during
+planned maintenance before rerunning the bootstrap.
 Run `make controller-bootstrap` to install the repository's hash-locked
 ansible-core 2.21.3 toolchain under `.ansible/controller-venv`; Make targets
 automatically select it.
@@ -148,7 +158,7 @@ vendor-supported repository before running the playbook.
 | --- | --- | --- | --- |
 | nginx | 1.18 through 1.31 | 1.31.x | `nginx -v` during common convergence; the HAProxy web integration uses nginx 1.31.3. |
 | PHP | 8.2 through 8.5 | 8.5 | Ubuntu 24.04/26.04 can select 8.4 or 8.5 with `librenms_ubuntu_php_version_override`; RHEL-family 8/9 require an explicitly reviewed Remi stream for those versions. The selected PHP CLI runtime and matching PHP-FPM service are checked on managed web nodes. |
-| Python | 3.9 through 3.14 | 3.14 | EL8 is bootstrapped onto managed Python 3.11; all target hosts receive the pinned LibreNMS runtime set (`PyMySQL`, `python-dotenv`, `redis`, `setuptools`, `psutil`, and `command_runner`); CI also installs the pinned controller toolchain on Python 3.14. |
+| Python | 3.9 through 3.14 | 3.14 | EL8 is bootstrapped onto managed Python 3.11; all target hosts receive the pinned LibreNMS runtime set (`PyMySQL`, `python-dotenv`, `redis`, `setuptools`, `psutil`, and `command_runner`); CI installs the pinned controller toolchain on Python 3.14. Python 3.15 remains preview-only pending ansible-core 2.22. |
 | Laravel | 12 and 13 | 13 | The resolved `laravel/framework` version is read from the installed Composer autoloader. |
 | RRDtool | 1.7 through 1.10 | 1.10.x | The installed `rrdtool --version` series is checked before service configuration. |
 

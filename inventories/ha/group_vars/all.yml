@@ -5,6 +5,11 @@ librenms_install_profile: full
 # inventory also makes later status, backup, and recovery playbooks work on
 # RHEL 8, whose platform Python is too old for the pinned ansible-core release.
 ansible_python_interpreter: /opt/librenms-ha-ansible/python/bin/python
+# Python 3.15 is preview-only until the controller uses ansible-core 2.22+.
+# After that toolchain upgrade, set these to a reviewed preinstalled interpreter
+# before bootstrapping the managed runtime:
+# librenms_python_315_preview_enabled: true
+# librenms_managed_python_system_binary: /usr/bin/python3.15
 # Enable only after completing the production values below and before running
 # playbooks/production-readiness.yml. This makes the readiness gate require
 # TLS and the explicit source-restricted host firewall policy.

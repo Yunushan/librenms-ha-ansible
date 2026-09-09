@@ -40,7 +40,13 @@ fi
 grep -A1 -F -- '- name: community.general' "${collection_requirements}" \
     | grep -Eq 'version:[[:space:]]*11\.4\.8[[:space:]]*$'
 grep -Eq '^ansible-core==2\.21\.3[[:space:]\\]*$' "${controller_requirements}"
-grep -Fq 'Python 3.12 through 3.14 is required' "${controller_bootstrap}"
+grep -Fq 'Python 3.12 through 3.15 is required' "${controller_bootstrap}"
+grep -Fq 'sys.version_info[:2] <= (3, 15)' "${controller_bootstrap}"
+grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' "${controller_bootstrap}"
+grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' "${launcher}"
+grep -Fq 'requires controller Python 3.13 through 3.15' "${controller_bootstrap}"
+grep -Fq 'requires controller Python 3.13 through 3.15' "${launcher}"
+grep -Fq 'controller_python_for_ansible_core' "${repo_root}/scripts/ci-production-safety-check.py"
 grep -Fq -- '--require-hashes' "${controller_bootstrap}"
 grep -Fq 'ensure_controller_pip' "${controller_bootstrap}"
 grep -Fq -- '-m ensurepip --upgrade' "${controller_bootstrap}"
@@ -49,7 +55,7 @@ grep -Fq 'apt install python${controller_python_version}-venv' "${controller_boo
 repair_venv="${temporary_dir}/controller-venv-without-pip"
 empty_requirements="${temporary_dir}/empty-requirements.txt"
 repair_output="${temporary_dir}/controller-repair.out"
-: > "${empty_requirements}"
+printf 'ansible-core==2.21.3\n' > "${empty_requirements}"
 # The controller bootstrap script intentionally targets the Linux venv layout
 # (${venv_path}/bin/*). Use a small POSIX-shaped fixture so this test also runs
 # from Git Bash on Windows, whose real venv layout is ${venv_path}/Scripts/*.
@@ -99,6 +105,29 @@ LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${empty_requirements}" \
 grep -Fq 'Controller virtual environment is missing pip; attempting repair with ensurepip.' \
     "${repair_output}"
 "${repair_venv}/bin/python" -m pip --version >/dev/null
+
+python_315="${temporary_dir}/python-3.15"
+python_315_bootstrap_output="${temporary_dir}/python-315-bootstrap.out"
+cat > "${python_315}" <<'EOF'
+#!/usr/bin/env bash
+printf '3.15\n'
+EOF
+chmod +x "${python_315}"
+
+set +e
+PYTHON_BIN="${python_315}" \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/unused-controller-venv" \
+LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${controller_requirements}" \
+    "${controller_bootstrap}" >"${python_315_bootstrap_output}" 2>&1
+bootstrap_315_rc=$?
+set -e
+
+if [ "${bootstrap_315_rc}" -eq 0 ]; then
+    echo "Expected controller bootstrap to reject Python 3.15 with ansible-core 2.21.3." >&2
+    exit 1
+fi
+grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' \
+    "${python_315_bootstrap_output}"
 
 # Force the launcher through its system-command fallback for the fake command
 # assertions below, even when the checkout already has a controller venv.
@@ -154,6 +183,75 @@ EOF
 
 chmod +x "${fake_bin}/ansible-galaxy" "${fake_bin}/ansible-playbook"
 export CALL_LOG="${call_log}"
+
+launcher_315_output="${temporary_dir}/python-315-launcher.out"
+set +e
+PYTHON_BIN="${python_315}" \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/missing-controller-venv-315" \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml \
+    >"${launcher_315_output}" 2>&1
+launcher_315_rc=$?
+set -e
+
+if [ "${launcher_315_rc}" -eq 0 ]; then
+    echo "Expected the launcher to reject Python 3.15 with ansible-core 2.21.3." >&2
+    exit 1
+fi
+grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' \
+    "${launcher_315_output}"
+
+python_312="${temporary_dir}/python-3.12"
+python_312_bootstrap_output="${temporary_dir}/python-312-bootstrap.out"
+future_requirements="${temporary_dir}/future-requirements.txt"
+cat > "${python_312}" <<'EOF'
+#!/usr/bin/env bash
+printf '3.12\n'
+EOF
+chmod +x "${python_312}"
+printf 'ansible-core==2.22.0\n' > "${future_requirements}"
+
+set +e
+PYTHON_BIN="${python_312}" \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/unused-controller-venv-312" \
+LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${future_requirements}" \
+    "${controller_bootstrap}" >"${python_312_bootstrap_output}" 2>&1
+bootstrap_312_rc=$?
+set -e
+
+if [ "${bootstrap_312_rc}" -eq 0 ]; then
+    echo "Expected controller bootstrap to reject Python 3.12 with ansible-core 2.22.0." >&2
+    exit 1
+fi
+grep -Fq 'requires controller Python 3.13 through 3.15' \
+    "${python_312_bootstrap_output}"
+
+launcher_312_output="${temporary_dir}/python-312-launcher.out"
+: > "${call_log}"
+set +e
+PYTHON_BIN="${python_312}" \
+FAKE_ANSIBLE_CORE_VERSION=2.22.0 \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/missing-controller-venv-312" \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml \
+    >"${launcher_312_output}" 2>&1
+launcher_312_rc=$?
+set -e
+
+if [ "${launcher_312_rc}" -eq 0 ]; then
+    echo "Expected the launcher to reject Python 3.12 with ansible-core 2.22.0." >&2
+    exit 1
+fi
+grep -Fq 'requires controller Python 3.13 through 3.15' \
+    "${launcher_312_output}"
+if [ -s "${call_log}" ]; then
+    echo "The launcher performed work after rejecting an unsupported controller Python." >&2
+    exit 1
+fi
 
 PATH="${fake_bin}:${PATH}" \
 LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \

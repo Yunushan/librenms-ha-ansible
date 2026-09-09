@@ -38,8 +38,38 @@ controller_python_version="$(
         'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
 )"
 if ! "${bootstrap_python}" -c \
-    'import sys; raise SystemExit(not ((3, 12) <= sys.version_info[:2] <= (3, 14)))'; then
-    fail "Python 3.12 through 3.14 is required to bootstrap the controller; found ${controller_python_version}."
+    'import sys; raise SystemExit(not ((3, 12) <= sys.version_info[:2] <= (3, 15)))'; then
+    fail "Python 3.12 through 3.15 is required to bootstrap the controller; found ${controller_python_version}."
+fi
+
+controller_ansible_core_version="$(
+    sed -n -E 's/^ansible-core==([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "${requirements_file}" \
+        | sed -n '1p'
+)"
+[ -n "${controller_ansible_core_version}" ] || \
+    fail "Pinned controller requirements must contain an exact ansible-core version."
+
+controller_core_major="${controller_ansible_core_version%%.*}"
+controller_core_remainder="${controller_ansible_core_version#*.}"
+controller_core_minor="${controller_core_remainder%%.*}"
+case "${controller_core_major}:${controller_core_minor}" in
+    *[!0-9:]*|'')
+        fail "Invalid pinned ansible-core version: ${controller_ansible_core_version}"
+        ;;
+esac
+
+if [ "${controller_python_version}" = "3.15" ] \
+    && { [ "${controller_core_major}" -lt 2 ] \
+        || { [ "${controller_core_major}" -eq 2 ] \
+            && [ "${controller_core_minor}" -lt 22 ]; }; }; then
+    fail "Python 3.15 requires ansible-core 2.22.0 or newer; the pinned controller has ${controller_ansible_core_version}."
+fi
+
+if [ "${controller_python_version}" = "3.12" ] \
+    && { [ "${controller_core_major}" -gt 2 ] \
+        || { [ "${controller_core_major}" -eq 2 ] \
+            && [ "${controller_core_minor}" -ge 22 ]; }; }; then
+    fail "ansible-core ${controller_ansible_core_version} requires controller Python 3.13 through 3.15; found ${controller_python_version}."
 fi
 
 if [ ! -x "${venv_path}/bin/python" ]; then

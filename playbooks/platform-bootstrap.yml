@@ -19,6 +19,12 @@
       {{ librenms_managed_python_psutil_version | default('7.0.0') }}
     librenms_platform_command_runner_version: >-
       {{ librenms_managed_python_command_runner_version | default('1.7.6') }}
+    librenms_platform_python_315_preview_enabled: >-
+      {{ librenms_python_315_preview_enabled | default(false) | bool }}
+    librenms_platform_python_315_min_ansible_core_version: >-
+      {{ librenms_python_315_min_ansible_core_version | default('2.22.0') }}
+    librenms_platform_python_system_binary: >-
+      {{ librenms_managed_python_system_binary | default('') | string | trim }}
   tasks:
     - name: Install and prepare the managed target Python runtime
       ansible.builtin.raw: |
@@ -41,6 +47,7 @@
         os_major="${os_version%%.*}"
         target_python=""
         ansible_python=""
+        requested_target_python={{ librenms_platform_python_system_binary | quote }}
 
         run_apt_with_lock_retry() {
           max_attempts={{ librenms_managed_python_apt_lock_retries | default(60) | int }}
@@ -73,27 +80,36 @@
           done
         }
 
-        case "${os_id}:${os_like}" in
-          ubuntu:*|debian:*)
-            target_python=/usr/bin/python3
-            ansible_python="${python_bin}"
-            ;;
-          rhel:*|rocky:*|almalinux:*|centos:*|*:*rhel*|*:*fedora*)
-            if [ "${os_major}" = "8" ]; then
-              target_python=/usr/bin/python3.11
-            else
-              target_python=/usr/bin/python3
-            fi
-            # ansible-core 2.21 requires Python 3.9 or newer on targets. RHEL 8
-            # keeps its DNF bindings in platform-python, so the role uses the
-            # native dnf CLI for package transactions after this bootstrap.
-            ansible_python="${python_bin}"
-            ;;
-          *)
-            echo "Unsupported platform for managed Python: ${PRETTY_NAME:-${os_id}}" >&2
+        if [ -n "${requested_target_python}" ]; then
+          target_python="${requested_target_python}"
+          if [ ! -x "${target_python}" ]; then
+            echo "Requested managed Python interpreter is not executable: ${target_python}" >&2
             exit 1
-            ;;
-        esac
+          fi
+          ansible_python="${python_bin}"
+        else
+          case "${os_id}:${os_like}" in
+            ubuntu:*|debian:*)
+              target_python=/usr/bin/python3
+              ansible_python="${python_bin}"
+              ;;
+            rhel:*|rocky:*|almalinux:*|centos:*|*:*rhel*|*:*fedora*)
+              if [ "${os_major}" = "8" ]; then
+                target_python=/usr/bin/python3.11
+              else
+                target_python=/usr/bin/python3
+              fi
+              # ansible-core 2.21 requires Python 3.9 or newer on targets. RHEL 8
+              # keeps its DNF bindings in platform-python, so the role uses the
+              # native dnf CLI for package transactions after this bootstrap.
+              ansible_python="${python_bin}"
+              ;;
+            *)
+              echo "Unsupported platform for managed Python: ${PRETTY_NAME:-${os_id}}" >&2
+              exit 1
+              ;;
+          esac
+        fi
 
         if [ ! -x "${python_bin}" ]; then
           case "${os_id}:${os_like}" in
@@ -157,12 +173,51 @@
           exit 1
         fi
 
+        managed_python_version=$("${python_bin}" --version 2>&1 \
+          | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+        if [ -z "${managed_python_version}" ]; then
+          echo "Unable to determine the managed Python version" >&2
+          exit 1
+        fi
+
+        target_python_version=$("${target_python}" --version 2>&1 \
+          | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+        if [ -z "${target_python_version}" ]; then
+          echo "Unable to determine the selected system Python version: ${target_python}" >&2
+          exit 1
+        fi
+        if [ "${managed_python_version}" != "${target_python_version}" ]; then
+          echo "Managed Python ${python_bin} uses ${managed_python_version}, but the selected system interpreter ${target_python} is ${target_python_version}" >&2
+          echo "Recreate ${root} during planned maintenance before changing the managed Python series" >&2
+          exit 1
+        fi
+
+        echo "LIBRENMS_MANAGED_PYTHON_SERIES=${managed_python_version}"
         echo "LIBRENMS_ANSIBLE_PYTHON=${ansible_python}"
         echo "LIBRENMS_BOOTSTRAP_CHANGED=${changed}"
       register: librenms_platform_python_bootstrap
       changed_when: >-
         'LIBRENMS_BOOTSTRAP_CHANGED=1'
         in (librenms_platform_python_bootstrap.stdout | default(''))
+
+    - name: Guard Python 3.15 target support before switching interpreter
+      ansible.builtin.assert:
+        that:
+          - >-
+            'LIBRENMS_MANAGED_PYTHON_SERIES=3.15'
+            not in (librenms_platform_python_bootstrap.stdout | default(''))
+            or librenms_platform_python_315_preview_enabled | bool
+          - >-
+            'LIBRENMS_MANAGED_PYTHON_SERIES=3.15'
+            not in (librenms_platform_python_bootstrap.stdout | default(''))
+            or ansible_version.full
+            is version(librenms_platform_python_315_min_ansible_core_version, '>=')
+      fail_msg: >-
+        Python 3.15 targets require ansible-core
+        {{ librenms_platform_python_315_min_ansible_core_version }} or newer and the
+        explicit preview flag. Current controller ansible-core is
+        {{ ansible_version.full }}. Refusing to switch the target interpreter
+        before the controller compatibility contract is met.
 
     - name: Read the supported Ansible target interpreter
       ansible.builtin.set_fact:

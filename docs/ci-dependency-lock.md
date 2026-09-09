@@ -10,12 +10,18 @@ lock that is missing hashes or no longer matches the direct pins.
 
 ## Refreshing the lock
 
-Use a disposable Python 3.12 virtual environment, review the resulting diff,
-then run the full quality gate. The dedicated CI compatibility job also
-installs this lock on Python 3.14, so a refresh must remain installable on both
-controller runtimes:
+For the current ansible-core 2.21.x pin, use a disposable Python 3.12 virtual
+environment, review the resulting diff, then run the full quality gate. Once
+the pin moves to ansible-core 2.22 or newer, generate the lock with Python
+3.13 because that release line drops controller Python 3.12. The lock checker
+derives this requirement from the direct ansible-core pin. The dedicated CI
+compatibility job installs the current lock on Python 3.14. Python 3.15
+validation must be enabled only after the lock moves to an ansible-core
+release that officially supports Python 3.15:
 
 ```bash
+# Use python3.12 for the current ansible-core 2.21.x pin. For ansible-core
+# 2.22 or newer, use python3.13 here because controller Python 3.12 is dropped.
 python3.12 -m venv .venv-lock
 . .venv-lock/bin/activate
 python -m pip install --upgrade pip pip-tools
