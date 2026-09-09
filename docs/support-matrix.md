@@ -121,7 +121,7 @@ closed before mounting until the export and fixed UID/GID mapping are supplied.
 The controller requires ansible-core 2.20 or newer. Ubuntu 26.04 uses Python
 3.14 on the managed host, whose target support starts with ansible-core 2.20.
 Run `make controller-bootstrap` to install the repository's hash-locked
-ansible-core 2.21.2 toolchain under `.ansible/controller-venv`; Make targets
+ansible-core 2.21.3 toolchain under `.ansible/controller-venv`; Make targets
 automatically select it.
 
 RHEL-family 8, 9, and 10 cannot use this repository's in-node Gluster server

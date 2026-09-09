@@ -39,7 +39,7 @@ fi
 
 grep -A1 -F -- '- name: community.general' "${collection_requirements}" \
     | grep -Eq 'version:[[:space:]]*11\.4\.8[[:space:]]*$'
-grep -Eq '^ansible-core==2\.21\.2[[:space:]\\]*$' "${controller_requirements}"
+grep -Eq '^ansible-core==2\.21\.3[[:space:]\\]*$' "${controller_requirements}"
 grep -Fq 'Python 3.12 through 3.14 is required' "${controller_bootstrap}"
 grep -Fq -- '--require-hashes' "${controller_bootstrap}"
 grep -Fq 'ensure_controller_pip' "${controller_bootstrap}"
@@ -87,7 +87,7 @@ EOF
 chmod +x "${repair_venv}/bin/python"
 cat > "${repair_venv}/bin/ansible-playbook" <<'EOF'
 #!/usr/bin/env bash
-printf 'ansible-playbook [core 2.21.2]\n'
+printf 'ansible-playbook [core 2.21.3]\n'
 EOF
 chmod +x "${repair_venv}/bin/ansible-playbook"
 
@@ -141,7 +141,7 @@ EOF
 cat > "${fake_bin}/ansible-playbook" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then
-    printf 'ansible-playbook [core %s]\n' "${FAKE_ANSIBLE_CORE_VERSION:-2.21.2}"
+    printf 'ansible-playbook [core %s]\n' "${FAKE_ANSIBLE_CORE_VERSION:-2.21.3}"
     exit 0
 fi
 

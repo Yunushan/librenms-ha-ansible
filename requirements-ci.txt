@@ -8,16 +8,16 @@ ansible-compat==26.6.0 \
     --hash=sha256:739c4d10c791000c4b353f5e725e9ebafb6384dbeb00b94c7c8ac3ee2c172337 \
     --hash=sha256:ad00d3cff84a961165a7dd90f175fd9a4584e2e602e9d8af2062ce7c479dd350
     # via ansible-lint
-ansible-core==2.21.2 \
-    --hash=sha256:c6139e662eda1bfb5af16029f12afa5edfc7f95f8cd44281b1bdb434a6d9dc70 \
-    --hash=sha256:c7d696c717da03109a32a569a5fe57925812a86734344eab775cba169bf57cf8
+ansible-core==2.21.3 \
+    --hash=sha256:4194fbd82273cbacfd06d86d74d2d7168c3c4b8426c03e93562cd7217f811ae1 \
+    --hash=sha256:9e7dd367f7dc5d5e9fc5ae1baf8af9c4edc09e916a73a40108a3f32e3ad93f10
     # via
     #   -r requirements-ci.in
     #   ansible-compat
     #   ansible-lint
-ansible-lint==26.6.0 \
-    --hash=sha256:162939615eae3b59f38bd829542642b586ccee17eefb0df8718ea4b092eee222 \
-    --hash=sha256:790d08ff6ee56525244677411c90a17b374245d3913bc6a462b5d913ece6d615
+ansible-lint==26.8.0 \
+    --hash=sha256:65cb5efab1ffaedbe23af0fff241a8834294f8ac80a8c838c2143024afc103a4 \
+    --hash=sha256:94e58501cc7fafaa505dd9daea3bddb4affa6e8efe8217323c06d7194a312f57
     # via -r requirements-ci.in
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309 \

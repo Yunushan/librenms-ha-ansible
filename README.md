@@ -692,7 +692,7 @@ make controller-bootstrap
 ```
 
 The bootstrap creates `.ansible/controller-venv` from the hash-locked
-`requirements-ci.txt` file. The current pin is ansible-core 2.21.2; ansible-core
+`requirements-ci.txt` file. The current pin is ansible-core 2.21.3; ansible-core
 2.20 or newer is required because Ubuntu 26.04 managed hosts use Python 3.14.
 The repository launcher automatically uses this virtual environment when it is
 present.
