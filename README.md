@@ -694,13 +694,39 @@ make controller-bootstrap
 The bootstrap creates `.ansible/controller-venv` from the hash-locked
 `requirements-ci.txt` file. The current pin is ansible-core 2.21.3; ansible-core
 2.20 or newer is required for the Ubuntu 26.04 managed-host runtime matrix,
-which supports Python 3.14 by default. Python 3.15 is preview-only and requires
-ansible-core 2.22 or newer on both controller and target; keep the preview flag
-disabled until that pinned toolchain is available.
+which supports Python 3.14 by default. The current pinned toolchain does not
+provide production support for Python 3.15. That support activates only after
+the pinned ansible-core is upgraded to a stable 2.22 or newer release on both
+controller and target. Keep the preview flag disabled for pre-release builds
+unless the compatibility test is being run.
+
+For a temporary controller-only compatibility test with a recognized 2.22
+pre-release, opt in explicitly while bootstrapping the controller:
+
+```bash
+LIBRENMS_PYTHON_315_PREVIEW_ENABLED=true make controller-bootstrap
+```
+
+The managed-host preview also requires
+`librenms_python_315_preview_enabled: true` and a reviewed
+`librenms_managed_python_system_binary` value in inventory. Do not use that
+preview path for production changes.
+
+After the stable ansible-core 2.22+ pin is released and validated, select the
+controller interpreter explicitly when rebuilding the environment and running
+ local gates:
+
+```bash
+PYTHON_BIN=/usr/bin/python3.15 make controller-bootstrap
+PYTHON_BIN=/usr/bin/python3.15 make ci
+```
+
+The current 2.21.3 lock intentionally rejects those commands on Python 3.15.
+
 The managed runtime follows the distribution's `python3` by default. A reviewed
 preinstalled interpreter can be selected with
-`librenms_managed_python_system_binary` when the Python 3.15 preview contract is
-enabled. The existing managed virtual environment must use the same Python
+`librenms_managed_python_system_binary` when selecting a reviewed Python 3.15
+interpreter. The existing managed virtual environment must use the same Python
 series; rebuild it during planned maintenance if the selected interpreter
 changes.
 The repository launcher automatically uses this virtual environment when it is
@@ -748,6 +774,20 @@ Build the image:
 ```bash
 docker compose build ansible
 ```
+
+The Dockerfile keeps the controller base image immutable and exposes
+`CONTROLLER_PYTHON_BASE_IMAGE` as a build argument. After the repository pin
+moves to stable ansible-core 2.22 or newer, update that default to a reviewed
+Python 3.13 or Python 3.15 slim digest, then rebuild:
+
+```bash
+docker compose build \
+  --build-arg CONTROLLER_PYTHON_BASE_IMAGE=python:3.15-slim@sha256:<reviewed-digest> \
+  ansible
+```
+
+Do not use a Python 3.15 image with the current ansible-core 2.21.3 pin; the
+launcher and runtime guardrails reject that combination.
 
 Run lint inside Docker:
 

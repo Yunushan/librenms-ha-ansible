@@ -17,8 +17,9 @@ librenms_supported_python_versions:
   - "3.12"
   - "3.13"
   - "3.14"
-# Python 3.15 requires ansible-core 2.22 on both the controller and target.
-# Keep it opt-in until the pinned controller toolchain moves to that release.
+  - "3.15"
+# Python 3.15 is supported with stable ansible-core 2.22+ on both the
+# controller and target. Pre-release 2.22 builds remain explicitly opt-in.
 librenms_python_315_preview_enabled: false
 librenms_python_315_min_ansible_core_version: "2.22.0"
 librenms_supported_nginx_series:

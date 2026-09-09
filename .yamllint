@@ -2,6 +2,7 @@
 extends: default
 ignore: |
   .ansible/
+  tmp/
   lib/
   charts/librenms-ha/templates/
 

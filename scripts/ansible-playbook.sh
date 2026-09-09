@@ -62,11 +62,31 @@ controller_python_version="$(
     "${python_bin}" -c \
         'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
 )"
+python_315_preview_enabled="${LIBRENMS_PYTHON_315_PREVIEW_ENABLED:-false}"
 if [ "${controller_python_version}" = "3.15" ] \
     && { [ "${ansible_core_major}" -lt 2 ] \
         || { [ "${ansible_core_major}" -eq 2 ] \
             && [ "${ansible_core_minor}" -lt 22 ]; }; }; then
     fail "Python 3.15 requires ansible-core 2.22.0 or newer; found ${ansible_core_version}."
+fi
+
+if [ "${controller_python_version}" = "3.15" ]; then
+    case "${python_315_preview_enabled}" in
+        true|false)
+            ;;
+        *)
+            fail "LIBRENMS_PYTHON_315_PREVIEW_ENABLED must be true or false."
+            ;;
+    esac
+
+    if printf '%s\n' "${ansible_core_version}" \
+        | grep -Eq '([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)$'; then
+        if [ "${python_315_preview_enabled}" != "true" ] \
+            || ! printf '%s\n' "${ansible_core_version}" \
+                | grep -Eq '^2[.]22[.][0-9]+([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)$'; then
+            fail "Python 3.15 requires stable ansible-core 2.22.0 or newer; pre-release 2.22 builds require LIBRENMS_PYTHON_315_PREVIEW_ENABLED=true (found ${ansible_core_version})."
+        fi
+    fi
 fi
 
 if [ "${controller_python_version}" = "3.12" ] \

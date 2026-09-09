@@ -46,6 +46,8 @@ grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' "${controller_boots
 grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' "${launcher}"
 grep -Fq 'requires controller Python 3.13 through 3.15' "${controller_bootstrap}"
 grep -Fq 'requires controller Python 3.13 through 3.15' "${launcher}"
+grep -Fq 'LIBRENMS_PYTHON_315_PREVIEW_ENABLED' "${launcher}"
+grep -Fq 'CONTROLLER_PYTHON_BASE_IMAGE' "${repo_root}/Dockerfile"
 grep -Fq 'controller_python_for_ansible_core' "${repo_root}/scripts/ci-production-safety-check.py"
 grep -Fq -- '--require-hashes' "${controller_bootstrap}"
 grep -Fq 'ensure_controller_pip' "${controller_bootstrap}"
@@ -87,6 +89,11 @@ if [ "${1:-}" = "-m" ] && [ "${2:-}" = "ensurepip" ]; then
     exit 0
 fi
 
+if [ "${1:-}" = "-c" ]; then
+    printf '%s\n' "${FAKE_PYTHON_VERSION:-3.14}"
+    exit 0
+fi
+
 printf 'Unexpected fake controller Python invocation: %s\n' "$*" >&2
 exit 1
 EOF
@@ -108,11 +115,35 @@ grep -Fq 'Controller virtual environment is missing pip; attempting repair with 
 
 python_315="${temporary_dir}/python-3.15"
 python_315_bootstrap_output="${temporary_dir}/python-315-bootstrap.out"
+python_315_dev_requirements="${temporary_dir}/python-315-dev-requirements.txt"
+python_315_dev_bootstrap_output="${temporary_dir}/python-315-dev-bootstrap.out"
+python_315_mismatch_venv="${temporary_dir}/controller-venv-python-mismatch"
+python_315_mismatch_requirements="${temporary_dir}/python-315-mismatch-requirements.txt"
+python_315_mismatch_output="${temporary_dir}/python-315-mismatch.out"
 cat > "${python_315}" <<'EOF'
 #!/usr/bin/env bash
 printf '3.15\n'
 EOF
 chmod +x "${python_315}"
+
+mkdir -p "${python_315_mismatch_venv}/bin"
+cp "${repair_venv}/bin/python" "${python_315_mismatch_venv}/bin/python"
+chmod +x "${python_315_mismatch_venv}/bin/python"
+printf 'ansible-core==2.22.0\n' > "${python_315_mismatch_requirements}"
+set +e
+PYTHON_BIN="${python_315}" \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${python_315_mismatch_venv}" \
+LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${python_315_mismatch_requirements}" \
+    "${controller_bootstrap}" >"${python_315_mismatch_output}" 2>&1
+bootstrap_315_mismatch_rc=$?
+set -e
+
+if [ "${bootstrap_315_mismatch_rc}" -eq 0 ]; then
+    echo "Expected controller bootstrap to reject a mismatched existing Python virtual environment." >&2
+    exit 1
+fi
+grep -Fq 'uses Python 3.14, but the selected bootstrap interpreter is Python 3.15' \
+    "${python_315_mismatch_output}"
 
 set +e
 PYTHON_BIN="${python_315}" \
@@ -128,6 +159,22 @@ if [ "${bootstrap_315_rc}" -eq 0 ]; then
 fi
 grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' \
     "${python_315_bootstrap_output}"
+
+printf 'ansible-core==2.22.0.dev0\n' > "${python_315_dev_requirements}"
+set +e
+PYTHON_BIN="${python_315}" \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/unused-controller-venv-315-dev" \
+LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${python_315_dev_requirements}" \
+    "${controller_bootstrap}" >"${python_315_dev_bootstrap_output}" 2>&1
+bootstrap_315_dev_rc=$?
+set -e
+
+if [ "${bootstrap_315_dev_rc}" -eq 0 ]; then
+    echo "Expected controller bootstrap to reject an unapproved Python 3.15 development toolchain." >&2
+    exit 1
+fi
+grep -Fq 'pre-release 2.22 builds require LIBRENMS_PYTHON_315_PREVIEW_ENABLED=true' \
+    "${python_315_dev_bootstrap_output}"
 
 # Force the launcher through its system-command fallback for the fake command
 # assertions below, even when the checkout already has a controller venv.
@@ -202,6 +249,56 @@ if [ "${launcher_315_rc}" -eq 0 ]; then
 fi
 grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' \
     "${launcher_315_output}"
+
+launcher_315_future_output="${temporary_dir}/python-315-future-launcher.out"
+: > "${call_log}"
+PYTHON_BIN="${python_315}" \
+FAKE_ANSIBLE_CORE_VERSION=2.22.0 \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/missing-controller-venv-315-future" \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml --check \
+    >"${launcher_315_future_output}" 2>&1
+grep -Fq 'playbook' "${call_log}"
+
+launcher_315_dev_output="${temporary_dir}/python-315-dev-launcher.out"
+: > "${call_log}"
+set +e
+PYTHON_BIN="${python_315}" \
+FAKE_ANSIBLE_CORE_VERSION=2.22.0.dev0 \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/missing-controller-venv-315-dev" \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml \
+    >"${launcher_315_dev_output}" 2>&1
+launcher_315_dev_rc=$?
+set -e
+
+if [ "${launcher_315_dev_rc}" -eq 0 ]; then
+    echo "Expected the launcher to reject a Python 3.15 development controller by default." >&2
+    exit 1
+fi
+grep -Fq 'pre-release 2.22 builds require LIBRENMS_PYTHON_315_PREVIEW_ENABLED=true' \
+    "${launcher_315_dev_output}"
+if grep -Fq 'playbook' "${call_log}"; then
+    echo "The launcher started a playbook with an unapproved Python 3.15 pre-release controller." >&2
+    exit 1
+fi
+
+launcher_315_preview_output="${temporary_dir}/python-315-preview-launcher.out"
+: > "${call_log}"
+LIBRENMS_PYTHON_315_PREVIEW_ENABLED=true \
+PYTHON_BIN="${python_315}" \
+FAKE_ANSIBLE_CORE_VERSION=2.22.0.dev0 \
+LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/missing-controller-venv-315-preview" \
+LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
+ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
+ANSIBLE_PLAYBOOK_BIN="${fake_bin}/ansible-playbook" \
+    "${launcher}" -i inventories/ha/hosts.yml playbooks/site.yml \
+    >"${launcher_315_preview_output}" 2>&1
+grep -Fq 'playbook' "${call_log}"
 
 python_312="${temporary_dir}/python-3.12"
 python_312_bootstrap_output="${temporary_dir}/python-312-bootstrap.out"

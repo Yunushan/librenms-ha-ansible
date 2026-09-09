@@ -65,6 +65,21 @@ def main() -> int:
     failures: list[str] = []
     failures += require(
         "Makefile",
+        "PYTHON_BIN ?= python3",
+        "Repository Python checks must expose an explicit interpreter selector",
+    )
+    failures += require(
+        "Makefile",
+        'PYTHON_BIN="$(PYTHON_BIN)" bash scripts/bootstrap-controller.sh',
+        "Controller bootstrap must honor the selected Python interpreter",
+    )
+    failures += require(
+        "Makefile",
+        "$(PYTHON_BIN) scripts/ci-python-smoke.py",
+        "Repository Python checks must honor the selected Python interpreter",
+    )
+    failures += require(
+        "Makefile",
         "site-ask-become-pass:",
         "Interactive site convergence must remain available for password-based sudo",
     )
@@ -910,10 +925,49 @@ def main() -> int:
         failures.append("Lint workflow must install the hash-locked CI toolchain")
     if "python -m pip check" not in lint_workflow:
         failures.append("Lint workflow must verify installed Python dependencies")
+    if (
+        "id: python-315-controller" not in lint_workflow
+        or "python-version: \"3.15\"" not in lint_workflow
+        or "steps.python-315-controller.outputs.enabled" not in lint_workflow
+        or "Verify the Python 3.15 controller" not in lint_workflow
+        or "          yamllint ." not in lint_workflow
+        or "          ansible-lint" not in lint_workflow
+    ):
+        failures.append(
+            "Lint workflow must gate the complete Python 3.15 controller toolchain on ansible-core 2.22+"
+        )
+    managed_runtime_smoke = read("tests/platform/managed-runtime-smoke.sh")
+    if (
+        "LIBRENMS_PYTHON_315_PREVIEW_ENABLED" not in managed_runtime_smoke
+        or "case \"${PYTHON_315_PREVIEW_ENABLED}\" in" not in managed_runtime_smoke
+        or "librenms_python_315_preview_enabled=true" not in managed_runtime_smoke
+    ):
+        failures.append(
+            "Python 3.15 managed-runtime smoke must require an explicit preview opt-in"
+        )
+    if (
+        "id: controller-python" not in lint_workflow
+        or "requirements-ci.in" not in lint_workflow
+        or 'python-version: "${{ steps.controller-python.outputs.version }}"'
+        not in lint_workflow
+    ):
+        failures.append(
+            "Lint workflow must derive its controller Python from pinned ansible-core"
+        )
     if "controller-image:" not in lint_workflow:
         failures.append("Lint workflow must build the Ansible controller image")
     if "docker compose run --rm --no-deps ansible make ci" not in lint_workflow:
         failures.append("Lint workflow must run quality gates inside the controller image")
+    if (
+        "id: python-315" not in lint_workflow
+        or "Exercise Python 3.15 managed-runtime compatibility" not in lint_workflow
+        or "python:3.15-slim 3.15 python-315" not in lint_workflow
+        or "steps.python-315.outputs.enabled" not in lint_workflow
+        or "LIBRENMS_PYTHON_315_PREVIEW_ENABLED: false" not in lint_workflow
+    ):
+        failures.append(
+            "Controller-image CI must gate a Python 3.15 managed-runtime smoke test on ansible-core 2.22+"
+        )
     if "helm-chart:" not in lint_workflow:
         failures.append("Lint workflow must run the Helm chart production gate")
     if not re.search(r"azure/setup-helm@[0-9a-f]{40}(?:\s+#\s+v\S+)?", lint_workflow):
@@ -970,6 +1024,13 @@ def main() -> int:
     if "protection/required_pull_request_reviews" not in github_governance_check:
         failures.append(
             "GitHub governance check must query the authoritative review-protection endpoint"
+        )
+    if (
+        "required_checks_for_ci_toolchain" not in github_governance_check
+        or 'required_checks.add("python-315-controller")' not in github_governance_check
+    ):
+        failures.append(
+            "GitHub governance check must require the Python 3.15 controller check when stable ansible-core 2.22+ is pinned"
         )
     if (
         '["gh", "auth", "token", "--hostname", "github.com"]'
@@ -1049,14 +1110,19 @@ def main() -> int:
         failures.append(
             "CI toolchain must pin ansible-core to a full numeric version so the controller Python contract can be checked"
         )
+    elif "FROM ${CONTROLLER_PYTHON_BASE_IMAGE}" not in dockerfile:
+        failures.append(
+            "Docker development image must select its base image through "
+            "CONTROLLER_PYTHON_BASE_IMAGE"
+        )
     elif not re.search(
-        rf"(?m)^FROM python:{re.escape(expected_controller_python)}-slim@sha256:[0-9a-f]{{64}}\r?$",
+        rf"(?m)^ARG CONTROLLER_PYTHON_BASE_IMAGE=python:{re.escape(expected_controller_python)}-slim@sha256:[0-9a-f]{{64}}\r?$",
         dockerfile,
     ):
         failures.append(
             "Docker development image must use the Python "
             f"{expected_controller_python} slim base image required by the pinned "
-            "ansible-core release, with a SHA-256 digest"
+            "ansible-core release by default, with a SHA-256 digest"
         )
 
     pre_commit_config = read(".pre-commit-config.yaml")

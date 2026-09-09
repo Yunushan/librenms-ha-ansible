@@ -5,7 +5,7 @@ After={{ librenms_galera_readiness_agent_socket_unit }} mariadb.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 {{ librenms_galera_readiness_agent_server_path }}
+ExecStart={{ librenms_runtime_python_executable }} {{ librenms_galera_readiness_agent_server_path }}
 Restart=on-failure
 RestartSec=1s
 TimeoutStopSec={{ librenms_galera_readiness_agent_service_timeout }}

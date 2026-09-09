@@ -7,6 +7,7 @@ readonly SERVER_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-rea
 readonly SERVICE_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent.service.j2"
 readonly SOCKET_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent.socket.j2"
 readonly RESET_TEMPLATE="${ROOT_DIR}/roles/galera/templates/librenms-galera-readiness-agent-reset.sh.j2"
+readonly PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 assert_output() {
     local expected="$1"
@@ -82,11 +83,11 @@ EOF
         -e 's@{{ (librenms_galera_readiness_agent_query_timeout | int) + 1 }}@3@' \
         -e 's@{{ librenms_galera_readiness_agent_refresh_interval | int }}@1@' \
         "${SERVER_TEMPLATE}" >"${rendered_server}"
-    python3 -m py_compile "${rendered_server}"
-    if python3 -c 'import os; raise SystemExit(0 if os.name == "nt" else 1)'; then
+    "${PYTHON_BIN}" -m py_compile "${rendered_server}"
+    if "${PYTHON_BIN}" -c 'import os; raise SystemExit(0 if os.name == "nt" else 1)'; then
         printf 'Skipping systemd socket-activation process integration on Windows; static checks continue.\n'
     else
-        python3 - "${rendered_server}" <<'PY'
+        "${PYTHON_BIN}" - "${rendered_server}" <<'PY'
 import os
 import socket
 import subprocess
@@ -159,8 +160,12 @@ if process.returncode not in (0, -15):
 PY
     fi
 
-    grep -Fq 'ExecStart=/usr/bin/python3 {{ librenms_galera_readiness_agent_server_path }}' "${SERVICE_TEMPLATE}" || {
+    grep -Fq 'ExecStart={{ librenms_runtime_python_executable }} {{ librenms_galera_readiness_agent_server_path }}' "${SERVICE_TEMPLATE}" || {
         printf 'Readiness-agent service must run the persistent socket server.\n' >&2
+        return 1
+    }
+    grep -Fq '#!{{ librenms_runtime_python_executable }}' "${SERVER_TEMPLATE}" || {
+        printf 'Readiness-agent server must use the managed Python runtime.\n' >&2
         return 1
     }
     grep -Fq 'KillMode=control-group' "${SERVICE_TEMPLATE}" || {

@@ -18,9 +18,3 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 3
-    ignore:
-      # The controller image is intentionally pinned to Python 3.12. Python
-      # 3.14 compatibility is exercised by the dedicated CI runtime job; Python
-      # 3.15 remains disabled until the pinned ansible-core supports it.
-      - dependency-name: python
-        versions: [">= 3.13"]

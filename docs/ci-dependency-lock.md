@@ -19,10 +19,21 @@ compatibility job installs the current lock on Python 3.14. Python 3.15
 validation must be enabled only after the lock moves to an ansible-core
 release that officially supports Python 3.15:
 
+The controller-image workflow retains the existing Python 3.14 matrix today.
+After the direct ansible-core pin moves to 2.22 or newer, that same job also
+builds the controller image and runs `managed-runtime-smoke.sh` against the
+official `python:3.15-slim` image with `/usr/local/bin/python3.15` selected.
+The `python-315-controller` job also installs the lock on Python 3.15 and runs
+the repository smoke and Ansible syntax checks.
+
 ```bash
-# Use python3.12 for the current ansible-core 2.21.x pin. For ansible-core
-# 2.22 or newer, use python3.13 here because controller Python 3.12 is dropped.
-python3.12 -m venv .venv-lock
+# Use Python 3.12 for the current ansible-core 2.21.x pin. For ansible-core
+# 2.22 or newer, use Python 3.13 because controller Python 3.12 is dropped.
+lock_python=python3.12
+if grep -Eq '^ansible-core==2\\.(2[2-9]|[3-9][0-9])\\.' requirements-ci.in; then
+  lock_python=python3.13
+fi
+${lock_python} -m venv .venv-lock
 . .venv-lock/bin/activate
 python -m pip install --upgrade pip pip-tools
 pip-compile --generate-hashes --resolver=backtracking --strip-extras \

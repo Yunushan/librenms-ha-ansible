@@ -82,6 +82,64 @@ jobs:
       - name: Run Python 3.14 smoke checks
         run: python scripts/ci-python-smoke.py
 
+  python-315-controller:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Resolve Python 3.15 controller compatibility
+        id: python-315-controller
+        shell: bash
+        run: |
+          core_version="$({
+            sed -n -E 's/^ansible-core==([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' requirements-ci.in \
+              | sed -n '1p'
+          })"
+          core_major="${core_version%%.*}"
+          core_remainder="${core_version#*.}"
+          core_minor="${core_remainder%%.*}"
+          case "${core_major}:${core_minor}" in
+            ''|*[!0-9:]*|*:)
+              echo "Invalid pinned ansible-core version: ${core_version}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${core_major}" -gt 2 ] \
+            || { [ "${core_major}" -eq 2 ] && [ "${core_minor}" -ge 22 ]; }; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Set up Python 3.15
+        if: steps.python-315-controller.outputs.enabled == 'true'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.15"
+
+      - name: Install the pinned CI toolchain
+        if: steps.python-315-controller.outputs.enabled == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes --requirement requirements-ci.txt
+          python -m pip check
+
+      - name: Install Ansible collections
+        if: steps.python-315-controller.outputs.enabled == 'true'
+        run: ansible-galaxy collection install -r requirements.yml -p ~/.ansible/collections
+
+      - name: Verify the Python 3.15 controller
+        if: steps.python-315-controller.outputs.enabled == 'true'
+        run: |
+          ansible-playbook --version
+          python scripts/ci-python-smoke.py
+          python scripts/ci-ansible-syntax-check.py
+          yamllint .
+          ansible-lint
+
   ansible-lint:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -90,10 +148,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
+      - name: Resolve controller Python
+        id: controller-python
+        shell: bash
+        run: |
+          core_version="$({
+            sed -n -E 's/^ansible-core==([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' requirements-ci.in \
+              | sed -n '1p'
+          })"
+          core_major="${core_version%%.*}"
+          core_remainder="${core_version#*.}"
+          core_minor="${core_remainder%%.*}"
+          case "${core_major}:${core_minor}" in
+            ''|*[!0-9:]*|*:)
+              echo "Invalid pinned ansible-core version: ${core_version}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${core_major}" -gt 2 ] \
+            || { [ "${core_major}" -eq 2 ] && [ "${core_minor}" -ge 22 ]; }; then
+            python_version=3.13
+          else
+            python_version=3.12
+          fi
+          echo "version=${python_version}" >> "${GITHUB_OUTPUT}"
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: "3.12"
+          python-version: "${{ steps.controller-python.outputs.version }}"
 
       - name: Install tooling
         run: |
@@ -195,6 +278,37 @@ jobs:
           bash tests/platform/managed-runtime-smoke.sh almalinux:8 3.11 alma-8
           bash tests/platform/managed-runtime-smoke.sh almalinux:9 3.9 alma-9
           bash tests/platform/managed-runtime-smoke.sh almalinux:10 3.12 alma-10
+
+      - name: Resolve Python 3.15 compatibility smoke
+        id: python-315
+        shell: bash
+        run: |
+          core_version="$({
+            sed -n -E 's/^ansible-core==([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' requirements-ci.in \
+              | sed -n '1p'
+          })"
+          core_major="${core_version%%.*}"
+          core_remainder="${core_version#*.}"
+          core_minor="${core_remainder%%.*}"
+          case "${core_major}:${core_minor}" in
+            ''|*[!0-9:]*|*:)
+              echo "Invalid pinned ansible-core version: ${core_version}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${core_major}" -gt 2 ] \
+            || { [ "${core_major}" -eq 2 ] && [ "${core_minor}" -ge 22 ]; }; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Exercise Python 3.15 managed-runtime compatibility
+        if: steps.python-315.outputs.enabled == 'true'
+        env:
+          LIBRENMS_MANAGED_PYTHON_SYSTEM_BINARY: /usr/local/bin/python3.15
+          LIBRENMS_PYTHON_315_PREVIEW_ENABLED: false
+        run: bash tests/platform/managed-runtime-smoke.sh python:3.15-slim 3.15 python-315
 
   helm-chart:
     runs-on: ubuntu-24.04

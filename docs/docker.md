@@ -27,6 +27,22 @@ It does **not** change the existing Ansible playbooks into container-orchestrati
 docker compose build ansible
 ```
 
+The controller image selects its immutable base through the
+`CONTROLLER_PYTHON_BASE_IMAGE` build argument. The checked-in default matches
+the current ansible-core 2.21.3 toolchain and Python 3.12. Once the pinned
+toolchain is moved to stable ansible-core 2.22 or newer, use a reviewed Python
+3.13 or Python 3.15 slim digest:
+
+```bash
+docker compose build \
+  --build-arg CONTROLLER_PYTHON_BASE_IMAGE=python:3.15-slim@sha256:<reviewed-digest> \
+  ansible
+```
+
+The Python 3.15 image must not be paired with ansible-core 2.21.3. The
+repository launcher and managed-host guardrails reject that unsupported
+combination.
+
 ## Lint from Docker
 
 ```bash

@@ -37,13 +37,14 @@ controller_python_version="$(
     "${bootstrap_python}" -c \
         'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
 )"
+python_315_preview_enabled="${LIBRENMS_PYTHON_315_PREVIEW_ENABLED:-false}"
 if ! "${bootstrap_python}" -c \
     'import sys; raise SystemExit(not ((3, 12) <= sys.version_info[:2] <= (3, 15)))'; then
     fail "Python 3.12 through 3.15 is required to bootstrap the controller; found ${controller_python_version}."
 fi
 
 controller_ansible_core_version="$(
-    sed -n -E 's/^ansible-core==([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "${requirements_file}" \
+    sed -n -E 's/^ansible-core==([0-9]+\.[0-9]+\.[0-9]+([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)?).*/\1/p' "${requirements_file}" \
         | sed -n '1p'
 )"
 [ -n "${controller_ansible_core_version}" ] || \
@@ -65,6 +66,25 @@ if [ "${controller_python_version}" = "3.15" ] \
     fail "Python 3.15 requires ansible-core 2.22.0 or newer; the pinned controller has ${controller_ansible_core_version}."
 fi
 
+if [ "${controller_python_version}" = "3.15" ]; then
+    case "${python_315_preview_enabled}" in
+        true|false)
+            ;;
+        *)
+            fail "LIBRENMS_PYTHON_315_PREVIEW_ENABLED must be true or false."
+            ;;
+    esac
+
+    if printf '%s\n' "${controller_ansible_core_version}" \
+        | grep -Eq '([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)$'; then
+        if [ "${python_315_preview_enabled}" != "true" ] \
+            || ! printf '%s\n' "${controller_ansible_core_version}" \
+                | grep -Eq '^2[.]22[.][0-9]+([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)$'; then
+            fail "Python 3.15 requires stable ansible-core 2.22.0 or newer; pre-release 2.22 builds require LIBRENMS_PYTHON_315_PREVIEW_ENABLED=true (found ${controller_ansible_core_version})."
+        fi
+    fi
+fi
+
 if [ "${controller_python_version}" = "3.12" ] \
     && { [ "${controller_core_major}" -gt 2 ] \
         || { [ "${controller_core_major}" -eq 2 ] \
@@ -76,6 +96,16 @@ if [ ! -x "${venv_path}/bin/python" ]; then
     mkdir -p "$(dirname "${venv_path}")"
     "${bootstrap_python}" -m venv "${venv_path}" || \
         fail "Unable to create ${venv_path}; install the Python venv package and retry."
+fi
+
+controller_venv_python_version="$(
+    "${venv_path}/bin/python" -c \
+        'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+)"
+[ -n "${controller_venv_python_version}" ] || \
+    fail "Unable to determine the controller virtual environment Python version: ${venv_path}/bin/python"
+if [ "${controller_venv_python_version}" != "${controller_python_version}" ]; then
+    fail "Controller virtual environment ${venv_path} uses Python ${controller_venv_python_version}, but the selected bootstrap interpreter is Python ${controller_python_version}. Recreate the controller virtual environment before continuing."
 fi
 
 ensure_controller_pip

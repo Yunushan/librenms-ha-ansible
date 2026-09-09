@@ -29,6 +29,8 @@ require_text "$GOVERNANCE_SCRIPT" \
 require_text "$GOVERNANCE_SCRIPT" \
     'codeql_default_setup.get("state") != "configured"'
 require_text "$GOVERNANCE_SCRIPT" 'CodeQL default setup: '
+require_text "$GOVERNANCE_SCRIPT" 'required_checks_for_ci_toolchain'
+require_text "$GOVERNANCE_SCRIPT" 'required_checks.add("python-315-controller")'
 
 require_text "$SAFETY_SCRIPT" \
     'dependabot/alerts?state=open&per_page=1'

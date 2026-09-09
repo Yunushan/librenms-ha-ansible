@@ -187,7 +187,8 @@
           exit 1
         fi
         if [ "${managed_python_version}" != "${target_python_version}" ]; then
-          echo "Managed Python ${python_bin} uses ${managed_python_version}, but the selected system interpreter ${target_python} is ${target_python_version}" >&2
+          echo "Managed Python ${python_bin} uses ${managed_python_version}," >&2
+          echo "but selected system interpreter ${target_python} is ${target_python_version}" >&2
           echo "Recreate ${root} during planned maintenance before changing the managed Python series" >&2
           exit 1
         fi
@@ -200,24 +201,48 @@
         'LIBRENMS_BOOTSTRAP_CHANGED=1'
         in (librenms_platform_python_bootstrap.stdout | default(''))
 
+    - name: Determine Ansible core release state for Python 3.15
+      ansible.builtin.set_fact:
+        librenms_platform_python_315_ansible_core_prerelease: >-
+          {{
+            (
+              ansible_version.full
+              | regex_search('(?:[.]dev[0-9]+|a[0-9]+|b[0-9]+|rc[0-9]+)$')
+            ) is not none
+          }}
+        librenms_platform_python_315_ansible_core_22_prerelease: >-
+          {{
+            (
+              ansible_version.full
+              | regex_search('^2[.]22[.][0-9]+(?:[.]dev[0-9]+|a[0-9]+|b[0-9]+|rc[0-9]+)$')
+            ) is not none
+          }}
+      changed_when: false
+
     - name: Guard Python 3.15 target support before switching interpreter
       ansible.builtin.assert:
         that:
           - >-
             'LIBRENMS_MANAGED_PYTHON_SERIES=3.15'
             not in (librenms_platform_python_bootstrap.stdout | default(''))
-            or librenms_platform_python_315_preview_enabled | bool
-          - >-
-            'LIBRENMS_MANAGED_PYTHON_SERIES=3.15'
-            not in (librenms_platform_python_bootstrap.stdout | default(''))
-            or ansible_version.full
-            is version(librenms_platform_python_315_min_ansible_core_version, '>=')
-      fail_msg: >-
-        Python 3.15 targets require ansible-core
-        {{ librenms_platform_python_315_min_ansible_core_version }} or newer and the
-        explicit preview flag. Current controller ansible-core is
-        {{ ansible_version.full }}. Refusing to switch the target interpreter
-        before the controller compatibility contract is met.
+            or (
+              (
+                not librenms_platform_python_315_ansible_core_prerelease | bool
+                and ansible_version.full
+                is version(librenms_platform_python_315_min_ansible_core_version, '>=')
+              )
+              or (
+                librenms_platform_python_315_preview_enabled | bool
+                and librenms_platform_python_315_ansible_core_22_prerelease | bool
+              )
+            )
+        fail_msg: >-
+          Python 3.15 targets require stable ansible-core
+          {{ librenms_platform_python_315_min_ansible_core_version }} or newer.
+          A pre-release 2.22 build may be used only with the explicit preview
+          flag. Current controller ansible-core is {{ ansible_version.full }}.
+          Refusing to switch the target interpreter before the compatibility
+          contract is met.
 
     - name: Read the supported Ansible target interpreter
       ansible.builtin.set_fact:

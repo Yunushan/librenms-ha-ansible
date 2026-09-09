@@ -21,6 +21,7 @@ GALERA_RECOVER_TIE_BREAKER_ARG = $(if $(strip $(GALERA_RECOVER_TIE_BREAKER)),-e 
 PLAYBOOK_FLAGS ?=
 ANSIBLE_EXTRA_ARGS ?=
 ANSIBLE_PLAYBOOK ?= ./scripts/ansible-playbook.sh
+PYTHON_BIN ?= python3
 INTERACTIVE_BECOME_TIMEOUT ?= 120
 INTERACTIVE_BECOME_FORKS ?= 1
 FAST_REPAIR_CONFIRM ?= false
@@ -128,7 +129,7 @@ GARDENER_TIMEOUT ?= 120
 .PHONY: docker-ha docker-ha-ask-become-pass podman-ha podman-ha-ask-become-pass kubernetes k3s-app rke2-app microk8s-app okd-app kubespray-app kubeone-app gardener-app k3s k3s-ask-become-pass rke2 rke2-ask-become-pass microk8s microk8s-ask-become-pass kubespray kubeone gardener test-optional-platform-guardrails test-helm-chart
 
 controller-bootstrap:
-	bash scripts/bootstrap-controller.sh
+	PYTHON_BIN="$(PYTHON_BIN)" bash scripts/bootstrap-controller.sh
 
 install:
 	ansible-galaxy collection install -r requirements.yml
@@ -138,22 +139,22 @@ lint:
 	ansible-lint
 
 yaml-parse:
-	python3 scripts/ci-parse-yaml.py
+	$(PYTHON_BIN) scripts/ci-parse-yaml.py
 
 docs-check:
-	python3 scripts/ci-check-markdown-links.py
+	$(PYTHON_BIN) scripts/ci-check-markdown-links.py
 
 python-smoke:
-	python3 scripts/ci-python-smoke.py
+	$(PYTHON_BIN) scripts/ci-python-smoke.py
 
 syntax-check:
-	python3 scripts/ci-ansible-syntax-check.py
+	$(PYTHON_BIN) scripts/ci-ansible-syntax-check.py
 
 inventory-check:
-	python3 scripts/validate-inventory.py --inventory inventories/ha/hosts.yml --group-vars inventories/ha/group_vars/all.yml
+	$(PYTHON_BIN) scripts/validate-inventory.py --inventory inventories/ha/hosts.yml --group-vars inventories/ha/group_vars/all.yml
 
 github-governance-check:
-	python3 scripts/ci-github-governance-check.py --branch main
+	$(PYTHON_BIN) scripts/ci-github-governance-check.py --branch main
 
 ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-galera-sst-helper-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-web-session-ha-guardrails test-session-repair-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails
 

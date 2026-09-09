@@ -28,6 +28,7 @@ IGNORED_PARTS = {
     ".ansible",
     ".git",
     "__pycache__",
+    "tmp",
     ".venv",
     "bin",
     "include",
@@ -35,6 +36,7 @@ IGNORED_PARTS = {
     "lib64",
     "vendor",
 }
+IGNORED_PARTS_CASEFOLDED = {part.casefold() for part in IGNORED_PARTS}
 PLACEHOLDER_MARKERS = (
     "CHANGE_ME",
     "example",
@@ -104,7 +106,9 @@ def main() -> int:
     findings: list[str] = []
     for root, directories, filenames in walk(ROOT):
         directories[:] = [
-            directory for directory in directories if directory not in IGNORED_PARTS
+            directory
+            for directory in directories
+            if directory.casefold() not in IGNORED_PARTS_CASEFOLDED
         ]
         for filename in filenames:
             path = Path(root, filename)

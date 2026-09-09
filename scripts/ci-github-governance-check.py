@@ -43,6 +43,26 @@ REQUIRED_CHECKS = {
 GH_ENV: dict[str, str] | None = None
 
 
+def required_checks_for_ci_toolchain() -> set[str]:
+    """Add Python 3.15 governance only when stable-support CI is pinned."""
+
+    required_checks = set(REQUIRED_CHECKS)
+    requirements_file = ROOT / "requirements-ci.in"
+    try:
+        requirements = requirements_file.read_text(encoding="utf-8")
+    except OSError:
+        return required_checks
+
+    match = re.search(r"(?m)^ansible-core==(\d+)\.(\d+)\.(\d+)", requirements)
+    if match is None:
+        return required_checks
+
+    core_release = (int(match.group(1)), int(match.group(2)))
+    if core_release >= (2, 22):
+        required_checks.add("python-315-controller")
+    return required_checks
+
+
 def github_environment() -> dict[str, str]:
     """Make the authenticated gh session available to non-interactive calls."""
 
@@ -160,6 +180,7 @@ def main() -> int:
 
     try:
         repo = args.repo or remote_repository()
+        required_checks = required_checks_for_ci_toolchain()
         repository = run_gh_api(f"repos/{repo}")
         protection = run_gh_api(f"repos/{repo}/branches/{args.branch}/protection")
         reviews = run_gh_api(
@@ -211,7 +232,7 @@ def main() -> int:
             for context in required_status_checks.get("contexts", [])
             if isinstance(context, str)
         )
-        missing_checks = sorted(REQUIRED_CHECKS - configured_checks)
+        missing_checks = sorted(required_checks - configured_checks)
         if missing_checks:
             failures.append("main is missing required checks: " + ", ".join(missing_checks))
 
@@ -270,7 +291,7 @@ def main() -> int:
     print(f"Protected branch: {args.branch}")
     print(
         "Configured required checks: "
-        f"{len(REQUIRED_CHECKS & configured_checks)}/{len(REQUIRED_CHECKS)}"
+        f"{len(required_checks & configured_checks)}/{len(required_checks)}"
     )
     print(f"Repository-wide CODEOWNERS: {'yes' if codeowners_ok else 'no'}")
     print(

@@ -124,9 +124,10 @@ ruleset before declaring a release production-ready:
 
 - Require pull requests; do not permit direct production changes to `main`.
 - Require a green `lint` workflow, including `ansible-lint`,
-  `python-314-runtime`, every `platform-packages (...)` matrix job,
-  `controller-image`, `helm-chart`, `haproxy-web-failover`, `galera-failover`,
-  `docker-ha-galera-config`, and `redis-sentinel-failover`.
+  `python-314-runtime`, the conditional `python-315-controller` job after
+  stable ansible-core 2.22+ is pinned, every `platform-packages (...)` matrix
+  job, `controller-image`, `helm-chart`, `haproxy-web-failover`,
+  `galera-failover`, `docker-ha-galera-config`, and `redis-sentinel-failover`.
 - Require a green `dependency-review` workflow for pull requests.
 - Require at least one approving review from a maintainer other than the
   author when the repository has more than one maintainer.

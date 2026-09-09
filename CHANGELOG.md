@@ -4,9 +4,10 @@
 
 ### Added
 
-- Added a fail-closed Python 3.15 preview contract. It activates only with an
-  explicitly enabled preview flag and an ansible-core 2.22+ controller; the
-  current 2.21.3 production toolchain continues to support Python 3.14.
+- Added a fail-closed Python 3.15 compatibility contract. Stable ansible-core
+  2.22+ enables Python 3.15 on the controller and managed hosts; pre-release
+  2.22 builds require an explicit preview flag, while the current 2.21.3
+  production toolchain continues to support Python 3.14.
 - Added fail-closed optional platform lifecycle guards: k3s and RKE2 server
   bootstrap now require an explicitly named first host and endpoint/token-based
   joins, while MicroK8s primary bootstrap is restricted to one named host.
