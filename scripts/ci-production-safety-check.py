@@ -864,6 +864,13 @@ def main() -> int:
             failures.append(f"requirements.yml must pin {collection_name}")
 
     lint_workflow = read(".github/workflows/lint.yml")
+    if not re.search(
+        r"(?ms)^\"on\":\s*\n\s+push:\s*\n\s+branches:\s*\n\s+- main\s*\n\s+pull_request:",
+        lint_workflow,
+    ):
+        failures.append(
+            "Lint workflow push trigger must be limited to the protected main branch"
+        )
     for action_name in ("actions/checkout", "actions/setup-python"):
         if not re.search(
             rf"{re.escape(action_name)}@[0-9a-f]{{40}}(?:\s+#\s+v\S+)?",
