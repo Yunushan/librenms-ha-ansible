@@ -18,7 +18,7 @@ jobs:
   platform-package-matrix:
     name: platform-packages (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

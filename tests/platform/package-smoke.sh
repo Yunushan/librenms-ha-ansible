@@ -83,13 +83,21 @@ get_mariadb_series() {
         head -n 1
 }
 
+apt_get() {
+    apt-get \
+        -o Acquire::Retries=3 \
+        -o Acquire::http::Timeout=30 \
+        -o Acquire::https::Timeout=30 \
+        "$@"
+}
+
 apt_update_retry() {
     local max_attempts="${APT_UPDATE_RETRY_ATTEMPTS:-4}"
     local retry_delay="${APT_UPDATE_RETRY_DELAY_SECONDS:-5}"
     local attempt
 
     for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-        if apt-get -o Acquire::Retries=3 update -q; then
+        if apt_get update -q; then
             return 0
         fi
 
@@ -136,7 +144,7 @@ configure_ondrej_php_repository() {
     local expected_fingerprint=B8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6
     local actual_fingerprint
 
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg
+    apt_get install -y --no-install-recommends ca-certificates curl gnupg
     install -d -m 0755 /etc/apt/keyrings
     rm -f /etc/apt/sources.list.d/*ondrej*php* \
         /etc/apt/trusted.gpg.d/ondrej-ubuntu-php.gpg
@@ -213,7 +221,7 @@ case "${ID}" in
                 php-mysql php-snmp php-xml php-zip
             )
         fi
-        apt-get install -y --no-install-recommends \
+        apt_get install -y --no-install-recommends \
             acl bash-completion ca-certificates chrony curl firewalld fping \
             galera-4 git glusterfs-client glusterfs-server graphviz haproxy \
             imagemagick keepalived lsb-release mariadb-client mariadb-server \

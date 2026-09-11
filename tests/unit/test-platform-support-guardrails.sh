@@ -105,6 +105,42 @@ if invalid_plays:
 PY
 }
 
+validate_workflow_timeout() {
+    local job_name="$1"
+    local expected_timeout="$2"
+
+    "$PYTHON_BIN" - "$WORKFLOW_FILE" "$job_name" "$expected_timeout" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import yaml
+
+
+workflow = Path(sys.argv[1])
+job_name = sys.argv[2]
+expected_timeout = int(sys.argv[3])
+
+try:
+    document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+except (OSError, yaml.YAMLError) as exc:
+    print(f"Unable to parse {workflow}: {exc}", file=sys.stderr)
+    raise SystemExit(1) from exc
+
+jobs = document.get("jobs", {}) if isinstance(document, dict) else {}
+job = jobs.get(job_name, {}) if isinstance(jobs, dict) else {}
+actual_timeout = job.get("timeout-minutes") if isinstance(job, dict) else None
+if actual_timeout != expected_timeout:
+    print(
+        f"{workflow} job {job_name!r} must use timeout-minutes: "
+        f"{expected_timeout}; found {actual_timeout!r}.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+}
+
 require_text "$DEFAULTS_FILE" '"26": "26.04"'
 require_text "$DEFAULTS_FILE" '"8": "8.10"'
 require_text "$DEFAULTS_FILE" '"9": "9.4"'
@@ -123,8 +159,11 @@ require_text "$PACKAGE_SMOKE_FILE" 'dnf_retry() {'
 require_text "$PACKAGE_SMOKE_FILE" 'dnf --setopt=retries=10 --setopt=timeout=30 "$@"'
 require_text "$PACKAGE_SMOKE_FILE" 'dnf clean expire-cache'
 require_text "$PACKAGE_SMOKE_FILE" 'dnf_retry -y --setopt=install_weak_deps=False install'
+require_text "$PACKAGE_SMOKE_FILE" 'apt_get() {'
 require_text "$PACKAGE_SMOKE_FILE" 'apt_update_retry() {'
-require_text "$PACKAGE_SMOKE_FILE" 'apt-get -o Acquire::Retries=3 update -q'
+require_text "$PACKAGE_SMOKE_FILE" '-o Acquire::http::Timeout=30'
+require_text "$PACKAGE_SMOKE_FILE" '-o Acquire::https::Timeout=30'
+require_text "$PACKAGE_SMOKE_FILE" 'if apt_get update -q; then'
 require_text "$PACKAGE_SMOKE_FILE" 'rm -rf /var/lib/apt/lists/*'
 require_text "$DEFAULTS_FILE" 'RedHat: primary'
 require_text "$DEFAULTS_FILE" '"Red Hat Enterprise Linux": primary'
@@ -348,7 +387,8 @@ require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.access.redhat.com/*'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.redhat.io/*'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -q'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'dnf --setopt=retries=10 --setopt=timeout=30 -y --setopt=install_weak_deps=False install'
-require_text "$WORKFLOW_FILE" '    timeout-minutes: 90'
+validate_workflow_timeout platform-package-matrix 45
+validate_workflow_timeout controller-image 90
 require_text "$WORKFLOW_FILE" 'name: ubuntu-22.04'
 require_text "$WORKFLOW_FILE" 'name: ubuntu-24.04'
 require_text "$WORKFLOW_FILE" 'name: ubuntu-26.04'
