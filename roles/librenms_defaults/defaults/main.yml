@@ -18,8 +18,8 @@ librenms_supported_python_versions:
   - "3.13"
   - "3.14"
   - "3.15"
-# Python 3.15 is supported with stable ansible-core 2.22+ on both the
-# controller and target. Pre-release 2.22 builds remain explicitly opt-in.
+# Python 3.15 target interpreters are supported when the controller uses stable
+# ansible-core 2.22+. Pre-release 2.22 builds remain explicitly opt-in.
 librenms_python_315_preview_enabled: false
 librenms_python_315_min_ansible_core_version: "2.22.0"
 librenms_supported_nginx_series:
@@ -445,6 +445,32 @@ librenms_default_fqdn_placeholder: librenms.example.com
 librenms_app_url: ""
 librenms_session_secure_cookie: ""
 librenms_app_key: CHANGE_ME
+
+# Optional, read-only AI assistant plugin. It is deliberately disabled until
+# an operator supplies an allowlist of providers and models. API credentials
+# are rendered only into the root-managed server-side configuration file.
+librenms_ai_assistant_enabled: false
+librenms_ai_assistant_plugin_name: librenms-ai-assistant
+librenms_ai_assistant_package_name: librenms/ai-assistant
+librenms_ai_assistant_package_version: "1.0.0"
+librenms_ai_assistant_source_dir: /opt/librenms-local-plugins/librenms-ai-assistant
+librenms_ai_assistant_config_dir: /etc/librenms-ai-assistant
+librenms_ai_assistant_config_path: "{{ librenms_ai_assistant_config_dir }}/config.json"
+librenms_ai_assistant_authorization: global-read
+librenms_ai_assistant_context_enabled: true
+librenms_ai_assistant_device_overview_enabled: true
+librenms_ai_assistant_max_messages: 12
+librenms_ai_assistant_max_prompt_chars: 6000
+librenms_ai_assistant_max_output_tokens: 1200
+librenms_ai_assistant_max_response_bytes: 2097152
+librenms_ai_assistant_timeout: 60
+librenms_ai_assistant_connect_timeout: 5
+librenms_ai_assistant_navigation_limit: 4
+librenms_ai_assistant_system_prompt: >-
+  Help the operator understand LibreNMS monitoring data and navigate the
+  read-only web interface. State uncertainty, never claim to have changed the
+  system, and never request passwords, API keys, SNMP secrets, or credentials.
+librenms_ai_assistant_providers: []
 librenms_manage_session_health_probe: >-
   {{ librenms_mode == 'ha' and librenms_redis_mode == 'sentinel' }}
 librenms_session_health_probe_path: /usr/local/sbin/librenms-session-health

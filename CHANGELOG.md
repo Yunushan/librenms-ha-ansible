@@ -4,10 +4,20 @@
 
 ### Added
 
+- Added an opt-in LibreNMS v2 AI assistant plugin with authenticated and
+  CSRF-protected chat routes, strict provider/model allowlists, root-managed
+  credentials, bounded read-only monitoring context, and same-origin
+  navigation suggestions.
+- Added OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages
+  adapters so operators can select local inference servers or hosted APIs
+  without exposing provider credentials to browsers.
 - Added a fail-closed Python 3.15 compatibility contract. Stable ansible-core
-  2.22+ enables Python 3.15 on the controller and managed hosts; pre-release
-  2.22 builds require an explicit preview flag, while the current 2.21.3
-  production toolchain continues to support Python 3.14.
+  2.22+ enables Python 3.15 on the controller and managed-host runtime;
+  pre-release 2.22 builds require an explicit preview flag, while the current
+  2.21.3 production toolchain continues to support Python 3.14.
+- Added selected-interpreter venv checks: Debian and Ubuntu bootstrap the
+  matching `pythonX.Y-venv` package when available, while custom and
+  RHEL-family interpreters fail clearly unless `venv` and `ensurepip` exist.
 - Added fail-closed optional platform lifecycle guards: k3s and RKE2 server
   bootstrap now require an explicitly named first host and endpoint/token-based
   joins, while MicroK8s primary bootstrap is restricted to one named host.

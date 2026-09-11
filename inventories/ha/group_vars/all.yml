@@ -25,6 +25,44 @@ librenms_timezone: Etc/UTC
 
 librenms_app_key: CHANGE_ME_USE_GENERATE_SECRETS
 
+# Optional read-only AI assistant. Every active web node must be able to reach
+# each configured endpoint. Keep hosted API keys in an encrypted vault file.
+# See docs/ai-assistant.md for hosted providers and more local servers.
+# librenms_ai_assistant_enabled: true
+# librenms_ai_assistant_providers:
+#   - id: ollama
+#     label: Local Ollama
+#     driver: openai_compatible
+#     base_url: http://127.0.0.1:11434/v1
+#     local: true
+#     auth: none
+#     verify_tls: false
+#     context_enabled: true
+#     default_model: llama3.2
+#     models:
+#       - id: llama3.2
+#         label: Llama 3.2
+#         efforts:
+#           - none
+#           - low
+#           - medium
+#           - high
+#         default_effort: none
+#   - id: hosted-openai
+#     label: Hosted OpenAI
+#     driver: openai_responses
+#     base_url: https://api.openai.com/v1
+#     auth: bearer
+#     api_key: "{{ vault_librenms_ai_openai_api_key }}"
+#     verify_tls: true
+#     context_enabled: false
+#     default_model: REPLACE_WITH_APPROVED_MODEL_ID
+#     models:
+#       - id: REPLACE_WITH_APPROVED_MODEL_ID
+#         label: Approved hosted model
+#         efforts: [none, low, medium, high]
+#         default_effort: medium
+
 # Production readiness checks this encrypted vault file by default. For secrets
 # injected by AWX or another external system, set the source to external and
 # document the provider plus credential reference instead.

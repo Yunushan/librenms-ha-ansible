@@ -1,0 +1,22 @@
+{{
+  {
+    'version': 1,
+    'authorization': librenms_ai_assistant_authorization,
+    'context': {
+      'enabled': librenms_ai_assistant_context_enabled | bool,
+      'device_overview_enabled': librenms_ai_assistant_device_overview_enabled | bool
+    },
+    'limits': {
+      'max_messages': librenms_ai_assistant_max_messages | int,
+      'max_prompt_chars': librenms_ai_assistant_max_prompt_chars | int,
+      'max_output_tokens': librenms_ai_assistant_max_output_tokens | int,
+      'max_response_bytes': librenms_ai_assistant_max_response_bytes | int,
+      'timeout': librenms_ai_assistant_timeout | int,
+      'connect_timeout': librenms_ai_assistant_connect_timeout | int,
+      'navigation_limit': librenms_ai_assistant_navigation_limit | int
+    },
+    'system_prompt': librenms_ai_assistant_system_prompt,
+    'providers': librenms_ai_assistant_providers
+  }
+  | to_nice_json
+}}

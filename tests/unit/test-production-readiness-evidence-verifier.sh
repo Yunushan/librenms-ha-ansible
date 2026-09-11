@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFIER="$REPO_ROOT/roles/production_readiness/files/librenms-production-readiness-evidence-verify.py"
+python_bin="${PYTHON_BIN:-python3}"
 TEST_DIR="$(mktemp -d)"
 APP_KEY="test-readiness-evidence-key-that-is-long-enough"
 SOURCE_REVISION="0123456789abcdef0123456789abcdef01234567"
@@ -16,6 +17,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+command -v "$python_bin" >/dev/null 2>&1 || {
+  echo "Python interpreter not found: $python_bin" >&2
+  exit 1
+}
+
 require_file() {
   if [ ! -f "$1" ]; then
     echo "Missing required file: $1" >&2
@@ -25,7 +31,7 @@ require_file() {
 
 write_hmac_sidecar() {
   local evidence_path="${1:-$EVIDENCE}"
-  python3 - "$evidence_path" "$evidence_path.hmac" "$APP_KEY" <<'PY'
+  "$python_bin" - "$evidence_path" "$evidence_path.hmac" "$APP_KEY" <<'PY'
 import hashlib
 import hmac
 import pathlib
@@ -47,23 +53,23 @@ printf '%s  %s\n' \
   "$(basename "$EVIDENCE")" > "$EVIDENCE.sha256"
 write_hmac_sidecar
 
-python3 "$VERIFIER" --evidence "$EVIDENCE" --source-revision "$SOURCE_REVISION" \
+"$python_bin" "$VERIFIER" --evidence "$EVIDENCE" --source-revision "$SOURCE_REVISION" \
   --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" --max-age-seconds 86400 \
   --app-env "$TEST_DIR/.env" >/dev/null
-printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" \
   --max-age-seconds 86400 --app-key-stdin >/dev/null
 
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --max-age-seconds 86400 --app-key-stdin >/dev/null 2>&1; then
   echo "Verifier accepted evidence without expected deployment identity" >&2
   exit 1
 fi
 
 STANDALONE_EVIDENCE="$TEST_DIR/production-readiness-standalone.json"
-python3 - "$EVIDENCE" "$STANDALONE_EVIDENCE" <<'PY'
+"$python_bin" - "$EVIDENCE" "$STANDALONE_EVIDENCE" <<'PY'
 import json
 import pathlib
 import sys
@@ -79,7 +85,7 @@ printf '%s  %s\n' \
   "$(sha256sum "$STANDALONE_EVIDENCE" | awk '{print $1}')" \
   "$(basename "$STANDALONE_EVIDENCE")" > "$STANDALONE_EVIDENCE.sha256"
 write_hmac_sidecar "$STANDALONE_EVIDENCE"
-printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$STANDALONE_EVIDENCE" \
+printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$STANDALONE_EVIDENCE" \
   --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" \
   --max-age-seconds 86400 --app-key-stdin >/dev/null
@@ -87,7 +93,7 @@ printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$STANDALONE_EVIDENCE" \
 LINK_EVIDENCE="$TEST_DIR/production-readiness-link.json"
 if ln -s "$EVIDENCE" "$LINK_EVIDENCE" 2>/dev/null && \
   ln -s "$EVIDENCE.sha256" "$LINK_EVIDENCE.sha256" 2>/dev/null; then
-  if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$LINK_EVIDENCE" \
+  if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$LINK_EVIDENCE" \
     --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
     --inventory-fingerprint "$INVENTORY_FINGERPRINT" \
     --max-age-seconds 86400 --app-key-stdin >/dev/null 2>&1; then
@@ -96,7 +102,7 @@ if ln -s "$EVIDENCE" "$LINK_EVIDENCE" 2>/dev/null && \
   fi
 fi
 
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "fedcba9876543210fedcba9876543210fedcba98" \
   --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" --max-age-seconds 86400 \
@@ -105,7 +111,7 @@ if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
   exit 1
 fi
 
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "$SOURCE_REVISION" \
   --automation-revision "$SOURCE_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" --max-age-seconds 86400 \
@@ -114,7 +120,7 @@ if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
   exit 1
 fi
 
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "$SOURCE_REVISION" \
   --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" \
@@ -123,7 +129,7 @@ if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
   exit 1
 fi
 
-python3 - "$EVIDENCE" <<'PY'
+"$python_bin" - "$EVIDENCE" <<'PY'
 import json
 import pathlib
 import sys
@@ -137,7 +143,7 @@ printf '%s  %s\n' \
   "$(sha256sum "$EVIDENCE" | awk '{print $1}')" \
   "$(basename "$EVIDENCE")" > "$EVIDENCE.sha256"
 write_hmac_sidecar
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" --app-key-stdin >/dev/null 2>&1; then
   echo "Verifier accepted an inactive node in an HA evidence record" >&2
@@ -146,7 +152,7 @@ fi
 
 STALE_EVIDENCE="$TEST_DIR/production-readiness-stale.json"
 cp "$EVIDENCE" "$STALE_EVIDENCE"
-python3 - "$STALE_EVIDENCE" <<'PY'
+"$python_bin" - "$STALE_EVIDENCE" <<'PY'
 from datetime import datetime, timedelta, timezone
 import json
 import pathlib
@@ -163,7 +169,7 @@ printf '%s  %s\n' \
   "$(sha256sum "$STALE_EVIDENCE" | awk '{print $1}')" \
   "$(basename "$STALE_EVIDENCE")" > "$STALE_EVIDENCE.sha256"
 write_hmac_sidecar "$STALE_EVIDENCE"
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$STALE_EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$STALE_EVIDENCE" \
   --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" \
   --max-age-seconds 86400 --app-key-stdin >/dev/null 2>&1; then
@@ -176,7 +182,7 @@ printf '%s  %s\n' \
   "$(sha256sum "$EVIDENCE" | awk '{print $1}')" \
   "$(basename "$EVIDENCE")" > "$EVIDENCE.sha256"
 write_hmac_sidecar
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" --app-key-stdin >/dev/null 2>&1; then
   echo "Verifier accepted a non-passing evidence record" >&2
@@ -188,7 +194,7 @@ printf '%s  %s\n' \
   "$(sha256sum "$EVIDENCE" | awk '{print $1}')" \
   "$(basename "$EVIDENCE")" > "$EVIDENCE.sha256"
 write_hmac_sidecar
-if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if printf '%s' "$APP_KEY" | "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" --app-key-stdin >/dev/null 2>&1; then
   echo "Verifier accepted an unsupported evidence schema" >&2
@@ -196,7 +202,7 @@ if printf '%s' "$APP_KEY" | python3 "$VERIFIER" --evidence "$EVIDENCE" \
 fi
 
 printf '%064d  %s\n' 0 "$(basename "$EVIDENCE")" > "$EVIDENCE.hmac"
-if python3 "$VERIFIER" --evidence "$EVIDENCE" \
+if "$python_bin" "$VERIFIER" --evidence "$EVIDENCE" \
   --source-revision "$SOURCE_REVISION" --automation-revision "$AUTOMATION_REVISION" \
   --inventory-fingerprint "$INVENTORY_FINGERPRINT" \
   --app-env "$TEST_DIR/.env" >/dev/null 2>&1; then

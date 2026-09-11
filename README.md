@@ -86,6 +86,8 @@ This repository gives you one Ansible project that can deploy:
 - optional VIP and load-balancer layer
 - optional HAProxy HTTPS listener with wildcard PEM or Let's Encrypt certificates
 - optional local SNMP agent management
+- optional read-only AI assistant plugin for allowlisted local or hosted models;
+  see [docs/ai-assistant.md](docs/ai-assistant.md)
 - support for SNMP **v1**, **v2c**, and **v3**
 - automatic self-monitoring for LibreNMS cluster nodes, with a one-variable opt out
 - optional experimental Dockerized HA example bundle for operators who prefer containerized service layers
@@ -696,8 +698,10 @@ The bootstrap creates `.ansible/controller-venv` from the hash-locked
 2.20 or newer is required for the Ubuntu 26.04 managed-host runtime matrix,
 which supports Python 3.14 by default. The current pinned toolchain does not
 provide production support for Python 3.15. That support activates only after
-the pinned ansible-core is upgraded to a stable 2.22 or newer release on both
-controller and target. Keep the preview flag disabled for pre-release builds
+the controller's pinned ansible-core is upgraded to a stable 2.22 or newer
+release and the target runtime is validated. Managed hosts receive the
+selected Python runtime and helper libraries; ansible-core is not installed
+on them. Keep the preview flag disabled for pre-release builds
 unless the compatibility test is being run.
 
 For a temporary controller-only compatibility test with a recognized 2.22
@@ -728,7 +732,10 @@ preinstalled interpreter can be selected with
 `librenms_managed_python_system_binary` when selecting a reviewed Python 3.15
 interpreter. The existing managed virtual environment must use the same Python
 series; rebuild it during planned maintenance if the selected interpreter
-changes.
+changes. On Debian or Ubuntu, the bootstrap installs the matching
+`pythonX.Y-venv` package when the selected interpreter exposes no `venv` or
+`ensurepip` module. A custom or RHEL-family interpreter must provide those
+modules itself.
 The repository launcher automatically uses this virtual environment when it is
 present.
 

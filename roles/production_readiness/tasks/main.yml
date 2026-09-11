@@ -1351,7 +1351,7 @@
 - name: Verify VIP TLS certificate with its configured SNI hostname
   command:
     argv:
-      - python3
+      - "{{ librenms_runtime_python_executable }}"
       - -c
       - >-
         import os, socket, ssl; raw = socket.create_connection(
@@ -1994,7 +1994,7 @@
 - name: Calculate authenticated production readiness evidence digest
   command:
     argv:
-      - python3
+      - "{{ ansible_playbook_python }}"
       - -c
       - >-
         import hashlib, hmac, pathlib, sys; evidence = pathlib.Path(sys.argv[1]);
@@ -2046,7 +2046,7 @@
 - name: Recalculate authenticated production readiness evidence digest after write
   command:
     argv:
-      - python3
+      - "{{ ansible_playbook_python }}"
       - -c
       - >-
         import hashlib, hmac, pathlib, sys; evidence = pathlib.Path(sys.argv[1]);
@@ -2139,6 +2139,7 @@
 - name: Verify generated production readiness evidence with controller verifier
   command:
     argv:
+      - "{{ ansible_playbook_python }}"
       - "{{ librenms_production_readiness_evidence_verifier_path }}"
       - --evidence
       - "{{ librenms_production_readiness_evidence.dest }}"

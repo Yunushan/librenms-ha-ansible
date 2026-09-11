@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ci_ansible_version import parse_ansible_core_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_CHECKS = {
@@ -53,12 +55,12 @@ def required_checks_for_ci_toolchain() -> set[str]:
     except OSError:
         return required_checks
 
-    match = re.search(r"(?m)^ansible-core==(\d+)\.(\d+)\.(\d+)", requirements)
+    match = re.search(r"(?m)^ansible-core==([^\s\\]+)", requirements)
     if match is None:
         return required_checks
 
-    core_release = (int(match.group(1)), int(match.group(2)))
-    if core_release >= (2, 22):
+    parsed = parse_ansible_core_version(match.group(1))
+    if parsed is not None and parsed.stable and parsed.release >= (2, 22):
         required_checks.add("python-315-controller")
     return required_checks
 

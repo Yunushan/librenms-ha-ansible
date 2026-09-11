@@ -3037,6 +3037,7 @@
     owner: root
     group: root
     mode: "0750"
+    validate: "{{ librenms_runtime_python_executable }} -m py_compile %s"
   no_log: true
   when:
     - librenms_manage_dispatcher | bool

@@ -119,8 +119,10 @@ source is intentionally empty in the repository, so a RHEL deployment fails
 closed before mounting until the export and fixed UID/GID mapping are supplied.
 
 The controller requires ansible-core 2.20 or newer. Ubuntu 26.04 uses Python
-3.14 on the managed host by default. Python 3.15 is supported when stable
-ansible-core 2.22 or newer is installed on both controller and target. A
+3.14 on the managed host by default. Python 3.15 target interpreters are
+supported when the controller uses stable ansible-core 2.22 or newer. The
+managed host receives the selected Python runtime and pinned helper libraries;
+ansible-core is not installed on the target. A
 pre-release 2.22 build is accepted only with the explicit
 `librenms_python_315_preview_enabled` flag. The repository's pinned 2.21.3
 toolchain therefore does not declare Python 3.15 production support yet. This
@@ -130,7 +132,9 @@ Set `librenms_managed_python_system_binary` to the reviewed absolute path of
 the preinstalled Python 3.15 interpreter before the managed virtual environment
 is first bootstrapped. If the existing managed virtual environment was created
 with another Python series, rebuild it during planned maintenance before
-rerunning the bootstrap.
+rerunning the bootstrap. Debian and Ubuntu can install the matching
+`pythonX.Y-venv` package automatically; custom and RHEL-family interpreters
+must already provide both `venv` and `ensurepip`.
 The Make targets accept `PYTHON_BIN`, so after stable ansible-core 2.22+ is
 validated the controller can be rebuilt and checked explicitly with
 `PYTHON_BIN=/usr/bin/python3.15 make controller-bootstrap` and

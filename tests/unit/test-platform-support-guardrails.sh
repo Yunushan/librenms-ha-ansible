@@ -24,6 +24,7 @@ STARTUP_REPAIR_SERVICE_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-ha-
 BACKUP_SERVICE_FILE="$ROOT_DIR/roles/librenms_app/templates/librenms-backup.service.j2"
 RRDCACHED_OVERRIDE_FILE="$ROOT_DIR/roles/librenms_app/templates/rrdcached.systemd-override.conf.j2"
 PRODUCTION_READINESS_FILE="$ROOT_DIR/roles/production_readiness/tasks/main.yml"
+PRODUCTION_READINESS_VERIFIER_TEST="$ROOT_DIR/tests/unit/test-production-readiness-evidence-verifier.sh"
 SYSLOG_FILE="$ROOT_DIR/roles/librenms_syslog/tasks/main.yml"
 SYSLOG_TEMPLATE="$ROOT_DIR/roles/librenms_syslog/templates/rsyslog-librenms.conf.j2"
 EXTERNAL_RRD_FILE="$ROOT_DIR/roles/external_rrd/tasks/main.yml"
@@ -103,6 +104,27 @@ require_text "$RUNTIME_SUPPORT_FILE" 'Require a primary distribution for product
 require_text "$RUNTIME_SUPPORT_FILE" 'Production profile'
 require_text "$RUNTIME_SUPPORT_FILE" 'primary production target for this repository'
 require_text "$RUNTIME_SUPPORT_FILE" 'librenms_runtime_python_executable'
+require_text "$LIBRENMS_APP_FILE" 'src: librenms-dispatcher-ha-recover.py.j2'
+require_text "$LIBRENMS_APP_FILE" 'validate: "{{ librenms_runtime_python_executable }} -m py_compile %s"'
+require_text "$PRODUCTION_READINESS_FILE" '      - "{{ librenms_runtime_python_executable }}"'
+require_text "$PRODUCTION_READINESS_FILE" '      - "{{ ansible_playbook_python }}"'
+require_text "$PRODUCTION_READINESS_VERIFIER_TEST" 'python_bin="${PYTHON_BIN:-python3}"'
+require_text "$PRODUCTION_READINESS_VERIFIER_TEST" '"$python_bin" "$VERIFIER"'
+if grep -Eq '^[[:space:]]+- python3$' "$PRODUCTION_READINESS_FILE"; then
+    printf 'Production readiness Python commands must use the selected runtime explicitly.\n' >&2
+    exit 1
+fi
+if [ "$(grep -Fc '      - "{{ ansible_playbook_python }}"' "$PRODUCTION_READINESS_FILE")" -lt 3 ]; then
+    printf 'Controller-side production readiness helpers must use ansible_playbook_python.\n' >&2
+    exit 1
+fi
+require_text "$ROOT_DIR/roles/librenms_app/templates/librenms-dispatcher-ha-recover.py.j2" '#!{{ librenms_runtime_python_executable }}'
+if grep -Fq 'librenms_managed_python_binary' \
+    "$ROOT_DIR/roles/librenms_app/templates/librenms-dispatcher-ha-recover.py.j2" \
+    "$ROOT_DIR/roles/librenms_app/tasks/redis_runtime_health.yml"; then
+    printf 'Generated Python runtime helpers must use librenms_runtime_python_executable.\n' >&2
+    exit 1
+fi
 require_text "$COMMON_TASKS_FILE" 'Validate production platform baseline before package changes'
 require_text "$COMMON_TASKS_FILE" 'librenms_platform_min_version'
 require_text "$REDHAT_VARS_FILE" "['valkey']"
@@ -199,7 +221,7 @@ require_text "$RHEL_PROFILE_FILE" 'librenms_uid: 60000'
 require_text "$RHEL_PROFILE_FILE" 'librenms_gid: 60000'
 require_text "$DEFAULTS_FILE" 'librenms_redhat_mariadb_stream: "10.11"'
 require_text "$SUPPORT_MATRIX_FILE" 'Python | 3.9 through 3.14; 3.15 with stable ansible-core 2.22+'
-require_text "$SUPPORT_MATRIX_FILE" 'Python 3.15 is supported when stable'
+require_text "$SUPPORT_MATRIX_FILE" 'Python 3.15 target interpreters are'
 require_text "$SUPPORT_MATRIX_FILE" 'ansible-core 2.22 or newer'
 require_text "$OPERATIONS_FILE" 'shared RRD filesystem'
 require_text "$OPERATIONS_FILE" 'NFS/NFSv4 RRD path'
@@ -266,6 +288,7 @@ require_text "$WORKFLOW_FILE" 'id: python-315-controller'
 require_text "$WORKFLOW_FILE" 'python-version: "3.15"'
 require_text "$WORKFLOW_FILE" 'Verify the Python 3.15 controller'
 require_text "$WORKFLOW_FILE" 'steps.python-315-controller.outputs.enabled'
+require_text "$WORKFLOW_FILE" 'steps.python-315-controller.outputs.preview'
 require_text "$WORKFLOW_FILE" '          yamllint .'
 require_text "$WORKFLOW_FILE" '          ansible-lint'
 require_text "$WORKFLOW_FILE" 'id: controller-python'
@@ -276,6 +299,11 @@ require_text "$BOOTSTRAP_FILE" 'librenms_platform_python_315_preview_enabled'
 require_text "$BOOTSTRAP_FILE" "librenms_python_315_preview_enabled | default(false)"
 require_text "$BOOTSTRAP_FILE" 'librenms_platform_python_system_binary'
 require_text "$BOOTSTRAP_FILE" 'requested_target_python'
+require_text "$BOOTSTRAP_FILE" 'controller_ansible_core={{ ansible_version.full | quote }}'
+require_text "$BOOTSTRAP_FILE" 'Refusing to create or switch to the Python 3.15 managed runtime'
+require_text "$BOOTSTRAP_FILE" 'import ensurepip, venv'
+require_text "$BOOTSTRAP_FILE" 'target_python_venv_package="python${target_python_version}-venv"'
+require_text "$BOOTSTRAP_FILE" 'lacks venv/ensurepip support'
 require_text "$BOOTSTRAP_FILE" 'selected system interpreter'
 require_text "$BOOTSTRAP_FILE" 'Recreate ${root}'
 require_text "$RUNTIME_SUPPORT_FILE" 'Validate Python 3.15 Ansible compatibility contract'
@@ -289,7 +317,7 @@ require_text "$WORKFLOW_FILE" 'id: python-315'
 require_text "$WORKFLOW_FILE" 'Exercise Python 3.15 managed-runtime compatibility'
 require_text "$WORKFLOW_FILE" 'python:3.15-slim 3.15 python-315'
 require_text "$WORKFLOW_FILE" 'steps.python-315.outputs.enabled'
-require_text "$WORKFLOW_FILE" 'LIBRENMS_PYTHON_315_PREVIEW_ENABLED: false'
+require_text "$WORKFLOW_FILE" 'steps.python-315.outputs.preview'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'python:*)'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'LIBRENMS_MANAGED_PYTHON_SYSTEM_BINARY'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'LIBRENMS_PYTHON_315_PREVIEW_ENABLED'

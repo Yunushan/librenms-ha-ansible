@@ -1,0 +1,269 @@
+---
+- name: Validate AI assistant deployment settings
+  ansible.builtin.assert:
+    that:
+      - librenms_ai_assistant_enabled | bool
+      - librenms_install_profile in ['full', 'web']
+      - librenms_ai_assistant_plugin_name == 'librenms-ai-assistant'
+      - librenms_ai_assistant_package_name == 'librenms/ai-assistant'
+      - librenms_ai_assistant_package_version == '1.0.0'
+      - librenms_ai_assistant_config_dir == '/etc/librenms-ai-assistant'
+      - librenms_ai_assistant_config_path == '/etc/librenms-ai-assistant/config.json'
+      - librenms_ai_assistant_authorization in ['global-read', 'admin']
+      - librenms_ai_assistant_max_messages | int >= 1
+      - librenms_ai_assistant_max_messages | int <= 30
+      - librenms_ai_assistant_max_prompt_chars | int >= 256
+      - librenms_ai_assistant_max_prompt_chars | int <= 20000
+      - librenms_ai_assistant_max_output_tokens | int >= 64
+      - librenms_ai_assistant_max_output_tokens | int <= 8192
+      - librenms_ai_assistant_max_response_bytes | int >= 65536
+      - librenms_ai_assistant_max_response_bytes | int <= 16777216
+      - librenms_ai_assistant_timeout | int >= 1
+      - librenms_ai_assistant_timeout | int <= 300
+      - librenms_ai_assistant_connect_timeout | int >= 1
+      - librenms_ai_assistant_connect_timeout | int <= librenms_ai_assistant_timeout | int
+      - librenms_ai_assistant_providers | length > 0
+      - >-
+        (librenms_ai_assistant_providers | map(attribute='id') | list | unique | length)
+        == (librenms_ai_assistant_providers | length)
+    fail_msg: >-
+      The AI assistant is opt-in and requires its bundled package identity,
+      protected configuration path, valid limits, and at least one uniquely
+      named, operator-allowlisted provider.
+
+- name: Validate configured AI assistant providers
+  ansible.builtin.include_tasks: validate_provider.yml
+  loop: "{{ librenms_ai_assistant_providers }}"
+  loop_control:
+    loop_var: ai_provider
+    label: "{{ ai_provider.id | default('invalid-provider') }}"
+  no_log: true
+
+- name: Check LibreNMS plugin command availability
+  ansible.builtin.stat:
+    path: "{{ librenms_install_dir }}/lnms"
+  register: librenms_ai_assistant_lnms
+
+- name: Require an installed LibreNMS application
+  ansible.builtin.assert:
+    that:
+      - librenms_ai_assistant_lnms.stat.exists
+      - librenms_ai_assistant_lnms.stat.executable
+    fail_msg: >-
+      Install LibreNMS with the librenms_app role before enabling the AI
+      assistant plugin.
+
+- name: Inspect AI assistant deployment targets
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ librenms_ai_assistant_source_dir }}"
+    - "{{ librenms_ai_assistant_config_dir }}"
+    - "{{ librenms_ai_assistant_config_path }}"
+  register: librenms_ai_assistant_deployment_targets
+
+- name: Refuse symlinked AI assistant deployment targets
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.exists | default(false) and item.stat.islnk | default(false))
+    fail_msg: >-
+      Refusing to deploy the AI assistant through symlinked path
+      {{ item.item }}.
+  loop: "{{ librenms_ai_assistant_deployment_targets.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Create AI assistant package directory
+  ansible.builtin.file:
+    path: "{{ librenms_ai_assistant_source_dir }}"
+    state: directory
+    owner: root
+    group: "{{ librenms_group }}"
+    mode: "0755"
+
+- name: Deploy AI assistant plugin package
+  ansible.builtin.copy:
+    src: plugin/
+    dest: "{{ librenms_ai_assistant_source_dir }}/"
+    owner: root
+    group: "{{ librenms_group }}"
+    directory_mode: "0755"
+    mode: preserve
+  register: librenms_ai_assistant_package
+
+- name: Create AI assistant configuration directory
+  ansible.builtin.file:
+    path: "{{ librenms_ai_assistant_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ librenms_group }}"
+    mode: "0750"
+
+- name: Render server-side AI assistant provider configuration
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ librenms_ai_assistant_config_path }}"
+    owner: root
+    group: "{{ librenms_group }}"
+    mode: "0640"
+  no_log: true
+
+- name: Inspect existing AI assistant Composer path repository
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - >-
+        $f='composer.json';
+        $d=is_file($f) ? json_decode(file_get_contents($f), true) : [];
+        $r=$d['repositories']['librenms-ai-assistant'] ?? [];
+        exit(($r['type'] ?? null) === 'path'
+        && ($r['url'] ?? null) === '{{ librenms_ai_assistant_source_dir }}'
+        && ($r['options']['symlink'] ?? null) === true ? 0 : 1);
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_ai_assistant_composer_repository
+  changed_when: false
+  failed_when: false
+
+- name: Configure AI assistant Composer path repository
+  ansible.builtin.command:
+    argv:
+      - ./scripts/composer_wrapper.php
+      - config
+      - --json
+      - repositories.librenms-ai-assistant
+      - >-
+        {{
+          {
+            'type': 'path',
+            'url': librenms_ai_assistant_source_dir,
+            'options': {'symlink': true}
+          }
+          | to_json
+        }}
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  environment:
+    COMPOSER_PROCESS_TIMEOUT: "{{ librenms_composer_process_timeout | string }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when: librenms_ai_assistant_composer_repository.rc != 0
+
+- name: Check whether the AI assistant package is registered
+  ansible.builtin.command:
+    argv:
+      - php
+      - -r
+      - >-
+        $v='{{ librenms_ai_assistant_package_version }}';
+        $pf='composer.plugins.json';
+        $rf='composer.json';
+        $p=is_file($pf) ? json_decode(file_get_contents($pf), true) : [];
+        $r=is_file($rf) ? json_decode(file_get_contents($rf), true) : [];
+        exit(($p['require']['{{ librenms_ai_assistant_package_name }}'] ?? null) === $v
+        && ($r['require']['{{ librenms_ai_assistant_package_name }}'] ?? null) === $v ? 0 : 1);
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_ai_assistant_registered
+  changed_when: false
+  failed_when: false
+
+- name: Register AI assistant package with LibreNMS
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "{{ librenms_composer_install_timeout | int }}s"
+      - ./lnms
+      - plugin:add
+      - "{{ librenms_ai_assistant_package_name }}"
+      - "{{ librenms_ai_assistant_package_version }}"
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  environment:
+    COMPOSER_PROCESS_TIMEOUT: "{{ librenms_composer_process_timeout | string }}"
+    COMPOSER_MEMORY_LIMIT: "-1"
+  become: true
+  become_user: "{{ librenms_user }}"
+  when: librenms_ai_assistant_registered.rc != 0
+
+- name: Refresh LibreNMS package discovery
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "{{ librenms_artisan_package_discover_timeout | int }}s"
+      - php
+      - artisan
+      - package:discover
+      - --ansi
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: false
+
+- name: Enable AI assistant plugin
+  ansible.builtin.command:
+    argv:
+      - ./lnms
+      - plugin:enable
+      - "{{ librenms_ai_assistant_plugin_name }}"
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: false
+
+- name: Clear LibreNMS route cache after plugin enablement
+  ansible.builtin.command:
+    argv:
+      - php
+      - artisan
+      - route:clear
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: false
+
+- name: Rebuild LibreNMS route cache with AI assistant routes
+  ansible.builtin.command:
+    argv:
+      - php
+      - artisan
+      - route:cache
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  changed_when: false
+
+- name: Verify authenticated AI assistant routes are registered
+  ansible.builtin.command:
+    argv:
+      - php
+      - artisan
+      - route:list
+      - --name=librenms-ai-assistant
+  args:
+    chdir: "{{ librenms_install_dir }}"
+  become: true
+  become_user: "{{ librenms_user }}"
+  register: librenms_ai_assistant_routes
+  changed_when: false
+  failed_when: >-
+    librenms_ai_assistant_routes.rc != 0
+    or 'librenms-ai-assistant.chat' not in librenms_ai_assistant_routes.stdout
+    or 'librenms-ai-assistant.index' not in librenms_ai_assistant_routes.stdout
+
+- name: Report AI assistant deployment result
+  ansible.builtin.debug:
+    msg: >-
+      LibreNMS AI assistant is installed on {{ inventory_hostname }} with
+      {{ librenms_ai_assistant_providers | length }} server-side provider(s).
+      Provider credentials were not exposed in task output.

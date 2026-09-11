@@ -15,9 +15,11 @@ environment, review the resulting diff, then run the full quality gate. Once
 the pin moves to ansible-core 2.22 or newer, generate the lock with Python
 3.13 because that release line drops controller Python 3.12. The lock checker
 derives this requirement from the direct ansible-core pin. The dedicated CI
-compatibility job installs the current lock on Python 3.14. Python 3.15
-validation must be enabled only after the lock moves to an ansible-core
-release that officially supports Python 3.15:
+compatibility job installs the current lock on Python 3.14. Production Python
+3.15 validation must be enabled only after the lock moves to an ansible-core
+release that officially supports Python 3.15. A recognized 2.22 pre-release
+can be exercised temporarily by opting into the repository's explicit preview
+flag; that path is not a production-support declaration:
 
 The controller-image workflow retains the existing Python 3.14 matrix today.
 After the direct ansible-core pin moves to 2.22 or newer, that same job also

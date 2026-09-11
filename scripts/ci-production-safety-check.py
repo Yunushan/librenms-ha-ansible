@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+from ci_ansible_version import controller_python_for_ansible_core
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,20 +47,6 @@ def pinned_python_requirement(content: str, package: str) -> str | None:
         flags=re.MULTILINE,
     )
     return match.group(1) if match else None
-
-
-def controller_python_for_ansible_core(version: str | None) -> str | None:
-    """Return the controller Python required by the pinned core release line."""
-
-    if version is None:
-        return None
-
-    match = re.fullmatch(r"(\d+)\.(\d+)\.\d+", version)
-    if match is None:
-        return None
-
-    core_release = (int(match.group(1)), int(match.group(2)))
-    return "3.13" if core_release >= (2, 22) else "3.12"
 
 
 def main() -> int:
@@ -929,6 +917,7 @@ def main() -> int:
         "id: python-315-controller" not in lint_workflow
         or "python-version: \"3.15\"" not in lint_workflow
         or "steps.python-315-controller.outputs.enabled" not in lint_workflow
+        or "steps.python-315-controller.outputs.preview" not in lint_workflow
         or "Verify the Python 3.15 controller" not in lint_workflow
         or "          yamllint ." not in lint_workflow
         or "          ansible-lint" not in lint_workflow
@@ -963,7 +952,7 @@ def main() -> int:
         or "Exercise Python 3.15 managed-runtime compatibility" not in lint_workflow
         or "python:3.15-slim 3.15 python-315" not in lint_workflow
         or "steps.python-315.outputs.enabled" not in lint_workflow
-        or "LIBRENMS_PYTHON_315_PREVIEW_ENABLED: false" not in lint_workflow
+        or "steps.python-315.outputs.preview" not in lint_workflow
     ):
         failures.append(
             "Controller-image CI must gate a Python 3.15 managed-runtime smoke test on ansible-core 2.22+"
@@ -1108,7 +1097,7 @@ def main() -> int:
     )
     if expected_controller_python is None:
         failures.append(
-            "CI toolchain must pin ansible-core to a full numeric version so the controller Python contract can be checked"
+            "CI toolchain must pin ansible-core to a valid exact version so the controller Python contract can be checked"
         )
     elif "FROM ${CONTROLLER_PYTHON_BASE_IMAGE}" not in dockerfile:
         failures.append(
@@ -1240,6 +1229,41 @@ def main() -> int:
         ".github/workflows/lint.yml",
         "make test-host-firewall-guardrails",
         "CI must run host-firewall guardrail tests",
+    )
+    failures += require(
+        "roles/librenms_defaults/defaults/main.yml",
+        "librenms_ai_assistant_enabled: false",
+        "The AI assistant must stay disabled until providers are reviewed",
+    )
+    failures += require(
+        "roles/librenms_ai_assistant/tasks/main.yml",
+        'mode: "0640"',
+        "AI provider credentials must remain in a restricted server-side file",
+    )
+    failures += require(
+        "roles/librenms_ai_assistant/tasks/main.yml",
+        "no_log: true",
+        "AI provider credentials must not appear in Ansible output",
+    )
+    failures += require(
+        "roles/librenms_ai_assistant/files/plugin/routes/web.php",
+        "Route::middleware(['web', 'auth'])",
+        "AI assistant routes must require an authenticated LibreNMS session",
+    )
+    failures += require(
+        "roles/librenms_ai_assistant/files/plugin/routes/web.php",
+        "throttle:10,1",
+        "AI provider requests must be rate limited",
+    )
+    failures += require(
+        "tests/unit/test-ai-assistant-guardrails.sh",
+        "AI assistant guardrail test passed",
+        "CI must test the AI assistant security boundary",
+    )
+    failures += require(
+        ".github/workflows/lint.yml",
+        "make test-ai-assistant-guardrails",
+        "CI must run AI assistant guardrail tests",
     )
 
     web_probe_recovery = app_tasks[

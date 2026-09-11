@@ -1,0 +1,93 @@
+---
+- name: Validate AI assistant provider definition
+  ansible.builtin.assert:
+    that:
+      - ai_provider.id is defined
+      - ai_provider.id is match('^[a-z][a-z0-9_-]{1,31}$')
+      - ai_provider.label is defined
+      - ai_provider.label | string | length > 0
+      - ai_provider.label | string | length <= 80
+      - ai_provider.description | default('') | string | length <= 240
+      - ai_provider.driver is defined
+      - ai_provider.driver in ['openai_compatible', 'openai_responses', 'anthropic']
+      - ai_provider.base_url is defined
+      - ai_provider.base_url is match('^https?://[^\s]+$')
+      - ai_provider.base_url | string | length <= 2048
+      - "'@' not in ai_provider.base_url"
+      - "'?' not in ai_provider.base_url"
+      - "'#' not in ai_provider.base_url"
+      - (ai_provider.local | default(false) | bool) or ai_provider.base_url is match('^https://')
+      - (ai_provider.local | default(false) | bool) or (ai_provider.verify_tls | default(true) | bool)
+      - (ai_provider.auth | default('bearer')) in ['none', 'bearer', 'x-api-key', 'api-key', 'custom']
+      - ((ai_provider.auth | default('bearer')) == 'none') or (ai_provider.api_key | default('') | string | length > 0)
+      - ai_provider.api_key | default('') | string | length <= 16384
+      - ai_provider.api_key | default('') is match('^[^\r\n]*$')
+      - ai_provider.models is defined
+      - ai_provider.models | length > 0
+      - >-
+        (ai_provider.models | map(attribute='id') | list | unique | length)
+        == (ai_provider.models | length)
+      - ai_provider.default_model is defined
+      - ai_provider.default_model in (ai_provider.models | map(attribute='id') | list)
+      - (ai_provider.endpoint | default('/')) is match('^/[^\s#]*$')
+      - ai_provider.endpoint | default('/') | string | length <= 1024
+      - (ai_provider.headers | default({})) is mapping
+      - ai_provider.headers | default({}) | length <= 20
+      - >-
+        (ai_provider.auth | default('bearer')) != 'custom'
+        or (ai_provider.auth_header | default('') is match('^[A-Za-z0-9-]+$'))
+      - >-
+        (ai_provider.auth | default('bearer')) != 'custom'
+        or (ai_provider.auth_header | default('') | lower)
+           not in ['host', 'content-length', 'connection', 'transfer-encoding']
+      - ai_provider.auth_prefix | default('') is match('^[^\r\n]*$')
+      - ai_provider.auth_prefix | default('') | string | length <= 256
+      - ai_provider.anthropic_version | default('2023-06-01') is match('^[^\r\n]+$')
+    fail_msg: >-
+      AI assistant provider definitions must use an allowlisted driver, a safe
+      server URL, explicit models, and server-side authentication. Remote
+      providers require HTTPS with certificate validation.
+  no_log: true
+
+- name: Validate AI assistant fixed provider headers
+  ansible.builtin.include_tasks: validate_header.yml
+  loop: "{{ (ai_provider.headers | default({})) | dict2items }}"
+  loop_control:
+    loop_var: ai_header
+    label: "{{ ai_header.key | default('invalid-header') }}"
+  no_log: true
+
+- name: Validate AI assistant model allowlist
+  ansible.builtin.assert:
+    that:
+      - ai_model.id is defined
+      - ai_model.id is match('^[^\r\n]{1,160}$')
+      - ai_model.label is defined
+      - ai_model.label | string | length > 0
+      - ai_model.label | string | length <= 100
+      - ai_model.efforts | default(['none']) | length > 0
+      - >-
+        (ai_model.efforts | default(['none']) | unique | length)
+        == (ai_model.efforts | default(['none']) | length)
+      - >-
+        (ai_model.efforts | default(['none'])
+        | difference(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']))
+        | length == 0
+      - >-
+        (ai_model.default_effort | default('none'))
+        in (ai_model.efforts | default(['none']))
+      - >-
+        (ai_model.token_parameter | default('max_tokens'))
+        in ['max_tokens', 'max_completion_tokens']
+      - ai_model.temperature is not defined or ai_model.temperature is number
+      - ai_model.temperature is not defined or ai_model.temperature | float >= 0
+      - ai_model.temperature is not defined or ai_model.temperature | float <= 2
+      - (ai_model.thinking_budgets | default({})) is mapping
+    fail_msg: >-
+      Each AI assistant model needs an id, a label, and an allowlist of valid
+      reasoning effort values.
+  loop: "{{ ai_provider.models }}"
+  loop_control:
+    loop_var: ai_model
+    label: "{{ ai_model.id | default('invalid-model') }}"
+  no_log: true

@@ -39,7 +39,13 @@ fi
 
 grep -A1 -F -- '- name: community.general' "${collection_requirements}" \
     | grep -Eq 'version:[[:space:]]*11\.4\.8[[:space:]]*$'
-grep -Eq '^ansible-core==2\.21\.3[[:space:]\\]*$' "${controller_requirements}"
+controller_core_version="$(
+    sed -n -E 's/^ansible-core==([0-9]+\.[0-9]+\.[0-9]+([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)?).*/\1/p' \
+        "${controller_requirements}" \
+        | sed -n '1p'
+)"
+[ -n "${controller_core_version}" ]
+grep -Fq "ansible-core==${controller_core_version}" "${controller_requirements}"
 grep -Fq 'Python 3.12 through 3.15 is required' "${controller_bootstrap}"
 grep -Fq 'sys.version_info[:2] <= (3, 15)' "${controller_bootstrap}"
 grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' "${controller_bootstrap}"
@@ -54,10 +60,27 @@ grep -Fq 'ensure_controller_pip' "${controller_bootstrap}"
 grep -Fq -- '-m ensurepip --upgrade' "${controller_bootstrap}"
 grep -Fq 'apt install python${controller_python_version}-venv' "${controller_bootstrap}"
 
+PYTHONPATH="${repo_root}/scripts${PYTHONPATH:+:${PYTHONPATH}}" \
+    "${python_bin}" - <<'PY'
+from ci_ansible_version import controller_python_for_ansible_core, parse_ansible_core_version
+
+stable = parse_ansible_core_version("2.22.0")
+release_candidate = parse_ansible_core_version("2.22.0rc1")
+development = parse_ansible_core_version("2.22.0.dev0")
+assert stable is not None and stable.stable and stable.release == (2, 22)
+assert release_candidate is not None and not release_candidate.stable
+assert development is not None and not development.stable
+assert controller_python_for_ansible_core("2.22.0rc1") == "3.13"
+assert parse_ansible_core_version("not-a-version") is None
+PY
+
 repair_venv="${temporary_dir}/controller-venv-without-pip"
 empty_requirements="${temporary_dir}/empty-requirements.txt"
 repair_output="${temporary_dir}/controller-repair.out"
-printf 'ansible-core==2.21.3\n' > "${empty_requirements}"
+# Keep a known pre-2.22 fixture so the Python 3.15 rejection remains covered
+# even after the repository's production pin moves to a newer core release.
+legacy_ansible_core_version="2.21.3"
+printf 'ansible-core==%s\n' "${legacy_ansible_core_version}" > "${empty_requirements}"
 # The controller bootstrap script intentionally targets the Linux venv layout
 # (${venv_path}/bin/*). Use a small POSIX-shaped fixture so this test also runs
 # from Git Bash on Windows, whose real venv layout is ${venv_path}/Scripts/*.
@@ -98,9 +121,9 @@ printf 'Unexpected fake controller Python invocation: %s\n' "$*" >&2
 exit 1
 EOF
 chmod +x "${repair_venv}/bin/python"
-cat > "${repair_venv}/bin/ansible-playbook" <<'EOF'
+cat > "${repair_venv}/bin/ansible-playbook" <<EOF
 #!/usr/bin/env bash
-printf 'ansible-playbook [core 2.21.3]\n'
+printf 'ansible-playbook [core ${legacy_ansible_core_version}]\n'
 EOF
 chmod +x "${repair_venv}/bin/ansible-playbook"
 
@@ -154,7 +177,7 @@ bootstrap_315_rc=$?
 set -e
 
 if [ "${bootstrap_315_rc}" -eq 0 ]; then
-    echo "Expected controller bootstrap to reject Python 3.15 with ansible-core 2.21.3." >&2
+    echo "Expected controller bootstrap to reject Python 3.15 with ansible-core ${legacy_ansible_core_version}." >&2
     exit 1
 fi
 grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' \
@@ -232,8 +255,10 @@ chmod +x "${fake_bin}/ansible-galaxy" "${fake_bin}/ansible-playbook"
 export CALL_LOG="${call_log}"
 
 launcher_315_output="${temporary_dir}/python-315-launcher.out"
+export FAKE_ANSIBLE_CORE_VERSION="${controller_core_version}"
 set +e
 PYTHON_BIN="${python_315}" \
+FAKE_ANSIBLE_CORE_VERSION="${legacy_ansible_core_version}" \
 LIBRENMS_ANSIBLE_CONTROLLER_VENV="${temporary_dir}/missing-controller-venv-315" \
 LIBRENMS_ANSIBLE_COLLECTIONS_PATH="${collections_path}" \
 ANSIBLE_GALAXY_BIN="${fake_bin}/ansible-galaxy" \
@@ -244,7 +269,7 @@ launcher_315_rc=$?
 set -e
 
 if [ "${launcher_315_rc}" -eq 0 ]; then
-    echo "Expected the launcher to reject Python 3.15 with ansible-core 2.21.3." >&2
+    echo "Expected the launcher to reject Python 3.15 with ansible-core ${legacy_ansible_core_version}." >&2
     exit 1
 fi
 grep -Fq 'Python 3.15 requires ansible-core 2.22.0 or newer' \

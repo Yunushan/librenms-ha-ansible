@@ -4,6 +4,7 @@
 .PHONY: test-galera-sst-helper-guardrails galera-sst-repair galera-sst-repair-ask-become-pass
 .PHONY: test-web-session-ha-guardrails
 .PHONY: test-session-repair-guardrails
+.PHONY: ai-assistant ai-assistant-ask-become-pass test-ai-assistant-guardrails
 
 SSH_DIR ?= $(HOME)/.ssh
 HA_INVENTORY ?= inventories/ha/hosts.yml
@@ -156,7 +157,7 @@ inventory-check:
 github-governance-check:
 	$(PYTHON_BIN) scripts/ci-github-governance-check.py --branch main
 
-ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-galera-sst-helper-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-web-session-ha-guardrails test-session-repair-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails
+ci: python-smoke lint syntax-check test-controller-collection-bootstrap test-galera-readiness test-galera-bootstrap-guardrails test-galera-sst-helper-guardrails test-mariadb-series-guardrails test-upgrade-selector-guardrails test-runtime-support-guardrails test-platform-support-guardrails test-redis-sentinel-consensus-guardrails test-daily-maintenance-guardrails test-runtime-web-health-guardrails test-web-session-ha-guardrails test-session-repair-guardrails test-outage-recovery-guardrails test-failover-recovery-guardrails test-load-balancer-rollout-guardrails test-production-readiness-evidence-guardrails test-production-readiness-evidence-verifier test-awx-status-schedule-guardrails test-host-firewall-guardrails test-gluster-rrd-mount-guardrails test-post-reboot-rrdcached-guardrails test-fast-repair-guardrails test-github-governance-guardrails test-optional-platform-guardrails test-ai-assistant-guardrails
 
 test-controller-collection-bootstrap:
 	bash tests/unit/test-controller-collection-bootstrap.sh
@@ -242,6 +243,9 @@ test-docker-ha-galera-config:
 test-optional-platform-guardrails:
 	bash tests/unit/test-optional-platform-guardrails.sh
 
+test-ai-assistant-guardrails:
+	bash tests/unit/test-ai-assistant-guardrails.sh
+
 test-helm-chart:
 	bash tests/unit/test-helm-chart.sh
 
@@ -277,6 +281,12 @@ site:
 
 site-ask-become-pass:
 	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/site.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks $(INTERACTIVE_BECOME_FORKS) $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+ai-assistant:
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/ai-assistant.yml $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
+
+ai-assistant-ask-become-pass:
+	$(ANSIBLE_PLAYBOOK) -i $(HA_INVENTORY) playbooks/ai-assistant.yml --ask-become-pass --timeout $(INTERACTIVE_BECOME_TIMEOUT) --forks 1 $(PLAYBOOK_FLAGS) $(ANSIBLE_EXTRA_ARGS)
 
 session-repair:
 	@test "$(SESSION_REPAIR_CONFIRM)" = "true" || (echo "Refusing session repair: set SESSION_REPAIR_CONFIRM=true" && exit 2)

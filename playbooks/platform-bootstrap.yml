@@ -48,6 +48,8 @@
         target_python=""
         ansible_python=""
         requested_target_python={{ librenms_platform_python_system_binary | quote }}
+        controller_ansible_core={{ ansible_version.full | quote }}
+        python_315_preview_enabled={{ librenms_platform_python_315_preview_enabled | bool | string | lower | quote }}
 
         run_apt_with_lock_retry() {
           max_attempts={{ librenms_managed_python_apt_lock_retries | default(60) | int }}
@@ -111,6 +113,7 @@
           esac
         fi
 
+        create_managed_python=0
         if [ ! -x "${python_bin}" ]; then
           case "${os_id}:${os_like}" in
             ubuntu:*|debian:*)
@@ -127,10 +130,109 @@
               fi
               ;;
           esac
+          create_managed_python=1
+        fi
 
+        if [ ! -x "${target_python}" ]; then
+          echo "Selected system Python interpreter is missing: ${target_python}" >&2
+          exit 1
+        fi
+
+        target_python_version=$("${target_python}" --version 2>&1 \
+          | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+        if [ -z "${target_python_version}" ]; then
+          echo "Unable to determine the selected system Python version: ${target_python}" >&2
+          exit 1
+        fi
+
+        if [ "${target_python_version}" = "3.15" ]; then
+          controller_core_major="${controller_ansible_core%%.*}"
+          controller_core_remainder="${controller_ansible_core#*.}"
+          controller_core_minor="${controller_core_remainder%%.*}"
+          case "${controller_core_major}:${controller_core_minor}" in
+            ''|*[!0-9:]*|*:)
+              echo "Invalid controller ansible-core version: ${controller_ansible_core}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "${controller_core_major}" -lt 2 ] \
+            || { [ "${controller_core_major}" -eq 2 ] \
+              && [ "${controller_core_minor}" -lt 22 ]; }; then
+            echo "Python 3.15 targets require stable ansible-core 2.22.0 or newer" >&2
+            echo "Current controller ansible-core is ${controller_ansible_core}" >&2
+            echo "Refusing to create or switch to the Python 3.15 managed runtime" >&2
+            exit 1
+          fi
+
+          if printf '%s\n' "${controller_ansible_core}" \
+            | grep -Eq '([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)$'; then
+            if [ "${python_315_preview_enabled}" != "true" ] \
+              || ! printf '%s\n' "${controller_ansible_core}" \
+                | grep -Eq '^2[.]22[.][0-9]+([.]dev[0-9]+|[.]?(a|b|rc)[0-9]+)$'; then
+              echo "Python 3.15 targets require stable ansible-core 2.22.0 or newer" >&2
+              echo "Pre-release 2.22 builds require librenms_python_315_preview_enabled=true" >&2
+              echo "Current controller ansible-core is ${controller_ansible_core}" >&2
+              echo "Refusing to create or switch to the Python 3.15 managed runtime" >&2
+              exit 1
+            fi
+          fi
+        fi
+
+        if ! "${target_python}" -c 'import ensurepip, venv' >/dev/null 2>&1; then
+          case "${os_id}:${os_like}" in
+            ubuntu:*|debian:*)
+              export DEBIAN_FRONTEND=noninteractive
+              run_apt_with_lock_retry apt-get update -q
+              if [ -n "${requested_target_python}" ]; then
+                target_python_venv_package="python${target_python_version}-venv"
+              else
+                target_python_venv_package="python3-venv"
+              fi
+              run_apt_with_lock_retry apt-get install -y --no-install-recommends \
+                "${target_python_venv_package}"
+              ;;
+            rhel:*|rocky:*|almalinux:*|centos:*|*:*rhel*|*:*fedora*)
+              if [ "${target_python_version}" = "3.11" ]; then
+                dnf -y install python3.11-pip
+              else
+                dnf -y install python3-pip
+              fi
+              ;;
+            *)
+              echo "Selected Python ${target_python_version} has no supported venv prerequisite path on ${PRETTY_NAME:-${os_id}}" >&2
+              exit 1
+              ;;
+          esac
+        fi
+
+        if ! "${target_python}" -c 'import ensurepip, venv' >/dev/null 2>&1; then
+          echo "Selected Python interpreter ${target_python} (Python ${target_python_version}) lacks venv/ensurepip support; install its venv package before bootstrapping" >&2
+          exit 1
+        fi
+
+        if [ "${create_managed_python}" -eq 1 ]; then
           install -d -m 0755 "$(dirname "${root}")"
           "${target_python}" -m venv --system-site-packages "${root}"
           changed=1
+        fi
+
+        if [ ! -x "${ansible_python}" ]; then
+          echo "Ansible target Python is missing: ${ansible_python}" >&2
+          exit 1
+        fi
+
+        managed_python_version=$("${python_bin}" --version 2>&1 \
+          | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+        if [ -z "${managed_python_version}" ]; then
+          echo "Unable to determine the managed Python version" >&2
+          exit 1
+        fi
+        if [ "${managed_python_version}" != "${target_python_version}" ]; then
+          echo "Managed Python ${python_bin} uses ${managed_python_version}," >&2
+          echo "but selected system interpreter ${target_python} is ${target_python_version}" >&2
+          echo "Recreate ${root} during planned maintenance before changing the managed Python series" >&2
+          exit 1
         fi
 
         current_pymysql=$("${python_bin}" -c \
@@ -166,31 +268,6 @@
             "psutil=={{ librenms_platform_psutil_version }}" \
             "command_runner=={{ librenms_platform_command_runner_version }}"
           changed=1
-        fi
-
-        if [ ! -x "${ansible_python}" ]; then
-          echo "Ansible target Python is missing: ${ansible_python}" >&2
-          exit 1
-        fi
-
-        managed_python_version=$("${python_bin}" --version 2>&1 \
-          | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-        if [ -z "${managed_python_version}" ]; then
-          echo "Unable to determine the managed Python version" >&2
-          exit 1
-        fi
-
-        target_python_version=$("${target_python}" --version 2>&1 \
-          | sed -n 's/^Python \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-        if [ -z "${target_python_version}" ]; then
-          echo "Unable to determine the selected system Python version: ${target_python}" >&2
-          exit 1
-        fi
-        if [ "${managed_python_version}" != "${target_python_version}" ]; then
-          echo "Managed Python ${python_bin} uses ${managed_python_version}," >&2
-          echo "but selected system interpreter ${target_python} is ${target_python_version}" >&2
-          echo "Recreate ${root} during planned maintenance before changing the managed Python series" >&2
-          exit 1
         fi
 
         echo "LIBRENMS_MANAGED_PYTHON_SERIES=${managed_python_version}"

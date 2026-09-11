@@ -70,6 +70,18 @@
   roles:
     - role: librenms_app
 
+- name: Configure optional LibreNMS AI assistant
+  hosts: librenms_nodes:!maintenance_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: librenms_ai_assistant
+      when:
+        - librenms_ai_assistant_enabled | bool
+        - librenms_install_profile in ['full', 'web']
+
 - name: Configure load balancer and VIP hosts
   hosts: lb_nodes:!maintenance_nodes
   become: true

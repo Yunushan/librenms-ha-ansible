@@ -78,11 +78,12 @@ def main() -> int:
             ],
         ),
         (
-            "Compile Python helper scripts",
+            "Compile Python helper scripts and verifier",
             [
                 python,
                 "-m",
                 "py_compile",
+                "scripts/ci_ansible_version.py",
                 "scripts/ci-ansible-syntax-check.py",
                 "scripts/ci-check-ci-lock.py",
                 "scripts/ci-check-markdown-links.py",
@@ -91,6 +92,7 @@ def main() -> int:
                 "scripts/ci-python-smoke.py",
                 "scripts/ci-secret-scan.py",
                 "scripts/validate-inventory.py",
+                "roles/production_readiness/files/librenms-production-readiness-evidence-verify.py",
             ],
         ),
     ]

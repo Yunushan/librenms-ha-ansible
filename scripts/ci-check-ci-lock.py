@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+from ci_ansible_version import parse_ansible_core_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUT_FILE = ROOT / "requirements-ci.in"
@@ -59,12 +61,11 @@ def lock_generator_python_version(requirements: dict[str, str]) -> str | None:
     if ansible_core_version is None:
         return None
 
-    match = re.fullmatch(r"(\d+)\.(\d+)\.\d+", ansible_core_version)
-    if match is None:
+    parsed = parse_ansible_core_version(ansible_core_version)
+    if parsed is None:
         return None
 
-    core_release = (int(match.group(1)), int(match.group(2)))
-    return "3.13" if core_release >= (2, 22) else "3.12"
+    return "3.13" if parsed.release >= (2, 22) else "3.12"
 
 
 def main() -> int:
@@ -81,7 +82,8 @@ def main() -> int:
     if ci_python_version is None:
         return fail(
             "requirements-ci.in must contain a valid exact ansible-core version "
-            "to determine the lock generator Python"
+            "(including a supported prerelease suffix) to determine the lock "
+            "generator Python"
         )
 
     lock_text = LOCK_FILE.read_text(encoding="utf-8")
