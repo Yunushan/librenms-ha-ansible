@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 DEFAULTS_FILE="$ROOT_DIR/roles/librenms_defaults/defaults/main.yml"
 BOOTSTRAP_FILE="$ROOT_DIR/playbooks/platform-bootstrap.yml"
 REDHAT_VARS_FILE="$ROOT_DIR/roles/common/vars/RedHat.yml"
@@ -61,6 +62,49 @@ require_text() {
     fi
 }
 
+validate_play_fatal_guards() {
+    local playbook="$1"
+
+    "$PYTHON_BIN" - "$playbook" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import yaml
+
+
+playbook = Path(sys.argv[1])
+try:
+    plays = yaml.safe_load(playbook.read_text(encoding="utf-8"))
+except (OSError, yaml.YAMLError) as exc:
+    print(f"Unable to parse {playbook}: {exc}", file=sys.stderr)
+    raise SystemExit(1) from exc
+
+if not isinstance(plays, list):
+    print(f"{playbook} must contain a YAML list of plays.", file=sys.stderr)
+    raise SystemExit(1)
+
+managed_plays = [play for play in plays if isinstance(play, dict) and "hosts" in play]
+if not managed_plays:
+    print(f"{playbook} does not contain any managed-host plays.", file=sys.stderr)
+    raise SystemExit(1)
+
+invalid_plays = [
+    str(play.get("name", "<unnamed>"))
+    for play in managed_plays
+    if play.get("any_errors_fatal") is not True
+]
+if invalid_plays:
+    for play_name in invalid_plays:
+        print(
+            f"{playbook} play lacks any_errors_fatal: true: {play_name}",
+            file=sys.stderr,
+        )
+    raise SystemExit(1)
+PY
+}
+
 require_text "$DEFAULTS_FILE" '"26": "26.04"'
 require_text "$DEFAULTS_FILE" '"8": "8.10"'
 require_text "$DEFAULTS_FILE" '"9": "9.4"'
@@ -98,36 +142,37 @@ require_text "$BOOTSTRAP_FILE" 'run_apt_with_lock_retry()'
 require_text "$BOOTSTRAP_FILE" 'Timed out waiting for the APT package-manager lock'
 require_text "$DEFAULTS_FILE" 'librenms_managed_python_apt_lock_retries: 60'
 require_text "$SITE_FILE" 'ansible.builtin.import_playbook: platform-bootstrap.yml'
-if ! awk '
-    function verify_play() {
-        if (has_hosts) {
-            managed_plays++
-            if (! has_fatal) {
-                printf "site.yml play lacks any_errors_fatal: true: %s\n", play_name > "/dev/stderr"
-                invalid=1
-            }
-        }
-    }
-    /^- name: / {
-        verify_play()
-        play_name=$0
-        sub(/^- name: /, "", play_name)
-        has_hosts=0
-        has_fatal=0
-        next
-    }
-    /^  hosts:/ { has_hosts=1 }
-    /^  any_errors_fatal: true$/ { has_fatal=1 }
-    END {
-        verify_play()
-        if (managed_plays == 0 || invalid) {
-            exit 1
-        }
-    }
-' "$SITE_FILE"; then
+if ! validate_play_fatal_guards "$SITE_FILE"; then
     printf 'site.yml must fail the full deployment when any host cannot converge.\n' >&2
     exit 1
 fi
+
+PLAY_ORDER_FIXTURE="$(mktemp)"
+trap 'rm -f "$PLAY_ORDER_FIXTURE"' EXIT
+cat >"$PLAY_ORDER_FIXTURE" <<'EOF'
+---
+- hosts: all
+  name: Hosts may precede the play name
+  any_errors_fatal: true
+  tasks: []
+EOF
+if ! validate_play_fatal_guards "$PLAY_ORDER_FIXTURE"; then
+    printf 'Play safety validation must not depend on YAML key order.\n' >&2
+    exit 1
+fi
+
+cat >"$PLAY_ORDER_FIXTURE" <<'EOF'
+---
+- hosts: all
+  name: Missing fatal-error guard
+  tasks: []
+EOF
+if validate_play_fatal_guards "$PLAY_ORDER_FIXTURE" >/dev/null 2>&1; then
+    printf 'Play safety validation must reject missing any_errors_fatal guards.\n' >&2
+    exit 1
+fi
+rm -f "$PLAY_ORDER_FIXTURE"
+trap - EXIT
 require_text "$RUNTIME_SUPPORT_FILE" 'Validate supported target architecture'
 require_text "$RUNTIME_SUPPORT_FILE" 'Require a primary distribution for production profile'
 require_text "$RUNTIME_SUPPORT_FILE" 'Production profile'
@@ -301,6 +346,9 @@ if grep -Fq 'python3-command-runner' "$PACKAGE_SMOKE_FILE"; then
 fi
 require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.access.redhat.com/*'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.redhat.io/*'
+require_text "$MANAGED_RUNTIME_SCRIPT" 'apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -q'
+require_text "$MANAGED_RUNTIME_SCRIPT" 'dnf --setopt=retries=10 --setopt=timeout=30 -y --setopt=install_weak_deps=False install'
+require_text "$WORKFLOW_FILE" '    timeout-minutes: 90'
 require_text "$WORKFLOW_FILE" 'name: ubuntu-22.04'
 require_text "$WORKFLOW_FILE" 'name: ubuntu-24.04'
 require_text "$WORKFLOW_FILE" 'name: ubuntu-26.04'
