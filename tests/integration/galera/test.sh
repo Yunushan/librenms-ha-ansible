@@ -12,6 +12,9 @@ compose() {
     docker compose --project-name "${PROJECT_NAME}" --file "${COMPOSE_FILE}" "$@"
 }
 
+# shellcheck source=../compose-pull-retry.sh
+. "${TEST_DIR}/../compose-pull-retry.sh"
+
 cleanup() {
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
@@ -107,13 +110,14 @@ main() {
 
     # Start the bootstrap member first. Starting every container at once lets
     # joiners race the new-cluster member and exit before a primary view exists.
-    compose up --detach --quiet-pull galera-1
+    compose_pull_images_with_retry
+    compose up --detach --pull never galera-1
     if ! wait_for 'the Galera bootstrap member' node_is_synced_in_cluster galera-1 1; then
         dump_cluster_diagnostics
         return 1
     fi
 
-    compose up --detach --quiet-pull galera-2 galera-3
+    compose up --detach --pull never galera-2 galera-3
     if ! wait_for 'three synced Galera members' all_nodes_are_synced 3 "${NODES[@]}"; then
         dump_cluster_diagnostics
         return 1

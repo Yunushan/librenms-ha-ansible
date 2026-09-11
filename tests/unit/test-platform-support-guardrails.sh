@@ -46,6 +46,10 @@ CONTROLLER_BOOTSTRAP_FILE="$ROOT_DIR/scripts/bootstrap-controller.sh"
 WORKFLOW_FILE="$ROOT_DIR/.github/workflows/lint.yml"
 MANAGED_RUNTIME_PLAYBOOK="$ROOT_DIR/tests/platform/managed-runtime-smoke.yml"
 MANAGED_RUNTIME_SCRIPT="$ROOT_DIR/tests/platform/managed-runtime-smoke.sh"
+COMPOSE_PULL_RETRY_FILE="$ROOT_DIR/tests/integration/compose-pull-retry.sh"
+REDIS_SENTINEL_INTEGRATION_FILE="$ROOT_DIR/tests/integration/redis-sentinel/test.sh"
+GALERA_INTEGRATION_FILE="$ROOT_DIR/tests/integration/galera/test.sh"
+HAPROXY_WEB_INTEGRATION_FILE="$ROOT_DIR/tests/integration/haproxy-web/test.sh"
 REDIS_SENTINEL_SERVICE_FILE="$ROOT_DIR/roles/redis_sentinel/templates/librenms-redis-sentinel.service.j2"
 REDIS_SENTINEL_TASK_FILE="$ROOT_DIR/roles/redis_sentinel/tasks/main.yml"
 REDIS_SENTINEL_TASKS_FILE="$ROOT_DIR/roles/redis_sentinel/tasks/main.yml"
@@ -60,6 +64,40 @@ require_text() {
             "$file" "$expected" >&2
         exit 1
     fi
+}
+
+validate_compose_pull_retry() {
+    local helper="$1"
+
+    (
+        pull_calls=0
+        compose() {
+            [ "$1" = 'config' ] && [ "$2" = '--images' ] || return 2
+            printf '%s\n' example/image-b example/image-a example/image-a
+        }
+        docker() {
+            [ "$1" = 'pull' ] || return 2
+            pull_calls=$((pull_calls + 1))
+            [ "${pull_calls}" -ne 1 ]
+        }
+        sleep() {
+            :
+        }
+
+        # shellcheck source=../integration/compose-pull-retry.sh
+        . "$helper"
+        COMPOSE_PULL_RETRY_DELAY_SECONDS=0 \
+            compose_pull_images_with_retry >/dev/null 2>&1
+        if [ "${pull_calls}" -ne 3 ]; then
+            printf 'Compose pull retry must deduplicate images and retry transient failures.\n' >&2
+            exit 1
+        fi
+        if COMPOSE_PULL_RETRY_ATTEMPTS=0 \
+            compose_pull_images_with_retry >/dev/null 2>&1; then
+            printf 'Compose pull retry must reject an invalid retry budget.\n' >&2
+            exit 1
+        fi
+    )
 }
 
 validate_play_fatal_guards() {
@@ -387,6 +425,18 @@ require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.access.redhat.com/*'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.redhat.io/*'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -q'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'dnf --setopt=retries=10 --setopt=timeout=30 -y --setopt=install_weak_deps=False install'
+require_text "$COMPOSE_PULL_RETRY_FILE" 'compose config --images | sort -u'
+require_text "$COMPOSE_PULL_RETRY_FILE" 'COMPOSE_PULL_RETRY_ATTEMPTS:-4'
+require_text "$COMPOSE_PULL_RETRY_FILE" 'docker pull "${image}"'
+validate_compose_pull_retry "$COMPOSE_PULL_RETRY_FILE"
+for integration_file in \
+    "$REDIS_SENTINEL_INTEGRATION_FILE" \
+    "$GALERA_INTEGRATION_FILE" \
+    "$HAPROXY_WEB_INTEGRATION_FILE"; do
+    require_text "$integration_file" '. "${TEST_DIR}/../compose-pull-retry.sh"'
+    require_text "$integration_file" 'compose_pull_images_with_retry'
+    require_text "$integration_file" 'compose up --detach --pull never'
+done
 validate_workflow_timeout platform-package-matrix 90
 validate_workflow_timeout controller-image 90
 require_text "$WORKFLOW_FILE" 'name: ubuntu-22.04'

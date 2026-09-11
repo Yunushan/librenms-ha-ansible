@@ -13,6 +13,9 @@ compose() {
     docker compose --project-name "${PROJECT_NAME}" --file "${COMPOSE_FILE}" "$@"
 }
 
+# shellcheck source=../compose-pull-retry.sh
+. "${TEST_DIR}/../compose-pull-retry.sh"
+
 cleanup() {
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
@@ -96,7 +99,8 @@ main() {
     require_docker
     trap cleanup EXIT
 
-    compose up --detach --quiet-pull
+    compose_pull_images_with_retry
+    compose up --detach --pull never
     wait_for "the original Sentinel master" \
         test "$(sentinel_master sentinel-1)" = "${ORIGINAL_MASTER}"
     wait_for "all Sentinels to agree on the original master" \
