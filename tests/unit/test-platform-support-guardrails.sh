@@ -387,7 +387,7 @@ require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.access.redhat.com/*'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'registry.redhat.io/*'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -q'
 require_text "$MANAGED_RUNTIME_SCRIPT" 'dnf --setopt=retries=10 --setopt=timeout=30 -y --setopt=install_weak_deps=False install'
-validate_workflow_timeout platform-package-matrix 45
+validate_workflow_timeout platform-package-matrix 90
 validate_workflow_timeout controller-image 90
 require_text "$WORKFLOW_FILE" 'name: ubuntu-22.04'
 require_text "$WORKFLOW_FILE" 'name: ubuntu-24.04'
