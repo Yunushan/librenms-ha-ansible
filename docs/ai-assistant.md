@@ -38,6 +38,40 @@ HTTP endpoints:
 - <https://localai.io/docs/>
 - <https://lmstudio.ai/docs/developer/openai-compat>
 
+## Complete model scope
+
+The complete supported model set is endpoint-defined; the plugin has no
+built-in model-name allowlist. A model is usable when all of these conditions
+are true:
+
+1. The configured endpoint accepts one of the three request APIs above.
+2. It accepts non-streaming text input and returns text in the corresponding
+   OpenAI chat-completions, OpenAI Responses, or Anthropic Messages shape.
+3. Its exact model ID is present in the operator-managed `models` allowlist.
+4. Any configured effort, temperature, and token-limit options are accepted by
+   that endpoint and model.
+
+This includes text and chat variants in the GPT, Claude, Gemini, Llama,
+Mistral/Mixtral/Codestral, Qwen, DeepSeek, Grok, Phi, Gemma, Granite, Command,
+Nemotron, GLM, Yi, Falcon, InternLM, MiniCPM, StarCoder, Code Llama, and DBRX
+families when a configured endpoint serves them through a compatible API. It
+also includes custom or fine-tuned text models served by any compatible local
+runtime or gateway listed above.
+
+The plugin does not automatically discover models. Query the provider's model
+catalog, then copy only approved IDs into the Ansible configuration. Most
+OpenAI-compatible endpoints expose `GET /models`; for example:
+
+```bash
+curl -fsS -H "Authorization: Bearer ${API_KEY}" "${BASE_URL}/models"
+curl -fsS http://127.0.0.1:11434/v1/models
+```
+
+Image-only, embedding, moderation, transcription, speech, and realtime-only
+models are outside the plugin's text-chat contract. Streaming-only endpoints,
+tool-call-only responses, and nonstandard response bodies require a compatible
+gateway or an additional adapter.
+
 ## Security boundary
 
 - All plugin routes require an authenticated LibreNMS session. Chat is a POST

@@ -12,6 +12,9 @@ compose() {
     docker compose --project-name "${PROJECT_NAME}" --file "${COMPOSE_FILE}" "$@"
 }
 
+# shellcheck source=../compose-pull-retry.sh
+. "${TEST_DIR}/../compose-pull-retry.sh"
+
 cleanup() {
     local exit_status=$?
 
@@ -66,7 +69,8 @@ main() {
     require_docker
     trap cleanup EXIT
 
-    compose up --detach --quiet-pull
+    compose_pull_images_with_retry
+    compose up --detach --pull never
 
     local initial_backend
     local surviving_backend

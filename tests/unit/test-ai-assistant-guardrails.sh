@@ -110,6 +110,7 @@ main() {
     contains "$DOCS" 'Ollama'
     contains "$DOCS" 'vLLM'
     contains "$DOCS" 'Anthropic'
+    contains "$DOCS" 'The complete supported model set is endpoint-defined'
     contains "$DOCS" 'Remote providers must use HTTPS'
     contains "${ROOT_DIR}/Makefile" 'test-ai-assistant-guardrails:'
     contains "${ROOT_DIR}/Makefile" 'ai-assistant-ask-become-pass:'

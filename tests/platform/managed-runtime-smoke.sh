@@ -53,15 +53,15 @@ docker_cmd run --detach --name "${TARGET_CONTAINER}" \
 case "${TARGET_IMAGE}" in
     ubuntu:*)
         docker_cmd exec --env DEBIAN_FRONTEND=noninteractive "${TARGET_CONTAINER}" \
-            bash -lc 'apt-get update -q && apt-get install -y --no-install-recommends ca-certificates openssh-server'
+            bash -lc 'apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -q && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ca-certificates openssh-server'
         ;;
     python:*)
         docker_cmd exec --env DEBIAN_FRONTEND=noninteractive "${TARGET_CONTAINER}" \
-            bash -lc 'apt-get update -q && apt-get install -y --no-install-recommends ca-certificates openssh-server'
+            bash -lc 'apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -q && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ca-certificates openssh-server'
         ;;
     rockylinux/*|almalinux:*|rhel:*|registry.access.redhat.com/*|registry.redhat.io/*)
         docker_cmd exec "${TARGET_CONTAINER}" \
-            bash -lc 'dnf -y install ca-certificates openssh-server'
+            bash -lc 'dnf --setopt=retries=10 --setopt=timeout=30 -y --setopt=install_weak_deps=False install ca-certificates openssh-server'
         ;;
     *)
         printf 'Unsupported managed-runtime smoke image: %s\n' "${TARGET_IMAGE}" >&2

@@ -207,7 +207,9 @@
         fi
 
         if ! "${target_python}" -c 'import ensurepip, venv' >/dev/null 2>&1; then
-          echo "Selected Python interpreter ${target_python} (Python ${target_python_version}) lacks venv/ensurepip support; install its venv package before bootstrapping" >&2
+          printf 'Selected Python interpreter %s (Python %s) lacks venv/ensurepip support; %s\n' \
+            "${target_python}" "${target_python_version}" \
+            'install its venv package before bootstrapping' >&2
           exit 1
         fi
 
