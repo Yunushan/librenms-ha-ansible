@@ -9,6 +9,8 @@ collection_state_checker="${repo_root}/scripts/ansible-collection-state.py"
 controller_bootstrap="${repo_root}/scripts/bootstrap-controller.sh"
 controller_requirements="${repo_root}/requirements-ci.txt"
 python_bin="${PYTHON_BIN:-python3}"
+selected_python_version="$("${python_bin}" -c \
+    'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "${temporary_dir}"' EXIT
 
@@ -127,6 +129,7 @@ printf 'ansible-playbook [core ${legacy_ansible_core_version}]\n'
 EOF
 chmod +x "${repair_venv}/bin/ansible-playbook"
 
+FAKE_PYTHON_VERSION="${selected_python_version}" \
 PYTHON_BIN="${python_bin}" \
 LIBRENMS_ANSIBLE_CONTROLLER_VENV="${repair_venv}" \
 LIBRENMS_ANSIBLE_CONTROLLER_REQUIREMENTS="${empty_requirements}" \

@@ -79,6 +79,9 @@ require_text "$PACKAGE_SMOKE_FILE" 'dnf_retry() {'
 require_text "$PACKAGE_SMOKE_FILE" 'dnf --setopt=retries=10 --setopt=timeout=30 "$@"'
 require_text "$PACKAGE_SMOKE_FILE" 'dnf clean expire-cache'
 require_text "$PACKAGE_SMOKE_FILE" 'dnf_retry -y --setopt=install_weak_deps=False install'
+require_text "$PACKAGE_SMOKE_FILE" 'apt_update_retry() {'
+require_text "$PACKAGE_SMOKE_FILE" 'apt-get -o Acquire::Retries=3 update -q'
+require_text "$PACKAGE_SMOKE_FILE" 'rm -rf /var/lib/apt/lists/*'
 require_text "$DEFAULTS_FILE" 'RedHat: primary'
 require_text "$DEFAULTS_FILE" '"Red Hat Enterprise Linux": primary'
 require_text "$DEFAULTS_FILE" 'AlmaLinux: primary'
@@ -95,7 +98,33 @@ require_text "$BOOTSTRAP_FILE" 'run_apt_with_lock_retry()'
 require_text "$BOOTSTRAP_FILE" 'Timed out waiting for the APT package-manager lock'
 require_text "$DEFAULTS_FILE" 'librenms_managed_python_apt_lock_retries: 60'
 require_text "$SITE_FILE" 'ansible.builtin.import_playbook: platform-bootstrap.yml'
-if [ "$(grep -c '^  any_errors_fatal: true$' "$SITE_FILE")" -ne 9 ]; then
+if ! awk '
+    function verify_play() {
+        if (has_hosts) {
+            managed_plays++
+            if (! has_fatal) {
+                printf "site.yml play lacks any_errors_fatal: true: %s\n", play_name > "/dev/stderr"
+                invalid=1
+            }
+        }
+    }
+    /^- name: / {
+        verify_play()
+        play_name=$0
+        sub(/^- name: /, "", play_name)
+        has_hosts=0
+        has_fatal=0
+        next
+    }
+    /^  hosts:/ { has_hosts=1 }
+    /^  any_errors_fatal: true$/ { has_fatal=1 }
+    END {
+        verify_play()
+        if (managed_plays == 0 || invalid) {
+            exit 1
+        }
+    }
+' "$SITE_FILE"; then
     printf 'site.yml must fail the full deployment when any host cannot converge.\n' >&2
     exit 1
 fi

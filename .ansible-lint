@@ -2,6 +2,7 @@
 profile: basic
 exclude_paths:
   - .ansible/
+  - .tmp/
   - .github/
   - docs/
   - charts/librenms-ha/templates/

@@ -83,6 +83,30 @@ get_mariadb_series() {
         head -n 1
 }
 
+apt_update_retry() {
+    local max_attempts="${APT_UPDATE_RETRY_ATTEMPTS:-4}"
+    local retry_delay="${APT_UPDATE_RETRY_DELAY_SECONDS:-5}"
+    local attempt
+
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        if apt-get -o Acquire::Retries=3 update -q; then
+            return 0
+        fi
+
+        if ((attempt == max_attempts)); then
+            printf 'APT metadata refresh failed after %s attempts.\n' \
+                "${max_attempts}" >&2
+            return 1
+        fi
+
+        printf 'APT metadata refresh failed (attempt %s/%s); clearing stale lists and retrying in %ss.\n' \
+            "${attempt}" "${max_attempts}" "${retry_delay}" >&2
+        rm -rf /var/lib/apt/lists/*
+        mkdir -p /var/lib/apt/lists/partial
+        sleep "${retry_delay}"
+    done
+}
+
 dnf_retry() {
     local max_attempts="${DNF_RETRY_ATTEMPTS:-4}"
     local retry_delay="${DNF_RETRY_DELAY_SECONDS:-5}"
@@ -132,7 +156,7 @@ Suites: ${VERSION_CODENAME}
 Components: main
 Signed-By: ${keyring}
 EOF
-    apt-get update -q
+    apt_update_retry
 }
 
 validate_php_stream() {
@@ -157,7 +181,7 @@ case "${ID}" in
         esac
 
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -q
+        apt_update_retry
         php_stream="${LIBRENMS_PHP_STREAM:-}"
         if [ -n "${php_stream}" ]; then
             validate_php_stream "${php_stream}"
